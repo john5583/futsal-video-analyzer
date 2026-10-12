@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src fsvideo: blob:; connect-src 'self' fsvideo:; frame-src 'self' about:; object-src 'none'">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Futsal Analyzer</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">⚽ Futsal Analyzer</div>
+  <nav class="tabs" id="tabs">
+    <button data-tab="analyse" class="active">Analyse vidéo</button>
+    <button data-tab="rapport">Rapport &amp; solutions</button>
+    <button data-tab="kb">Base de connaissances</button>
+    <button data-tab="aide">Guide</button>
+  </nav>
+  <div class="actions">
+    <button id="btn-new" title="Nouveau projet">Nouveau</button>
+    <button id="btn-open" title="Ouvrir un projet">Ouvrir</button>
+    <button id="btn-save" class="primary" title="Enregistrer le projet">Enregistrer</button>
+    <span id="save-state" class="muted"></span>
+  </div>
+</header>
+
+<main>
+  <!-- ANALYSE -->
+  <section id="tab-analyse" class="tab active">
+    <div class="analyse-grid">
+      <div class="col-left">
+        <div class="meta-row">
+          <label>Projet <input id="p-name" type="text" placeholder="Ex. Match J5 — Vendredi" maxlength="80"></label>
+          <label>Mon équipe <input id="p-team" type="text" maxlength="60"></label>
+          <label>Adversaire <input id="p-opp" type="text" maxlength="60"></label>
+          <label>Système <select id="p-system"></select></label>
+        </div>
+        <div class="video-box" id="video-box">
+          <div id="video-empty" class="video-empty">
+            <p>Aucune vidéo chargée</p>
+            <button id="btn-video" class="primary">Choisir une vidéo…</button>
+            <p class="muted">Formats : MP4 (H.264), M4V, MOV, WEBM, MKV, OGV</p>
+          </div>
+          <video id="video" crossorigin="anonymous" preload="metadata" hidden></video>
+        </div>
+        <div class="controls" id="controls">
+          <button id="c-prev" title="Retour 5 s (←)">⏪ 5 s</button>
+          <button id="c-frame-b" title="Image précédente (,)">◀ 1 img</button>
+          <button id="c-play" class="primary" title="Lecture / pause (Espace)">▶ Lecture</button>
+          <button id="c-frame-f" title="Image suivante (.)">1 img ▶</button>
+          <button id="c-next" title="Avance 5 s (→)">5 s ⏩</button>
+          <select id="c-rate" title="Vitesse">
+            <option value="0.25">×0,25</option><option value="0.5">×0,5</option>
+            <option value="1" selected>×1</option><option value="1.5">×1,5</option><option value="2">×2</option>
+          </select>
+          <span id="c-time" class="time">00:00 / 00:00</span>
+          <button id="c-half" title="Marquer ici le début de la 2e période">⏱ Début 2e période</button>
+          <button id="c-change" class="ghost" title="Changer de vidéo">Changer la vidéo</button>
+        </div>
+        <input id="seek" type="range" min="0" max="0" step="0.1" value="0" aria-label="Position dans la vidéo" disabled>
+        <div id="timeline" class="timeline" aria-label="Chronologie des événements"></div>
+        <p id="video-error" class="error" hidden></p>
+
+        <div class="ctx">
+          <span class="ctx-title">Contexte de l'événement</span>
+          <label>Zone <select id="x-zone"></select></label>
+          <label>Côté <select id="x-side"></select></label>
+          <label>Conséquence <select id="x-outcome"></select></label>
+          <label class="grow">Note <input id="x-note" type="text" maxlength="200" placeholder="Remarque libre (facultatif)"></label>
+        </div>
+      </div>
+
+      <div class="col-right">
+        <div class="palette-head">
+          <h2>Marquer à l'instant <span id="p-now" class="time">00:00</span></h2>
+          <input id="palette-search" type="search" placeholder="Rechercher une situation…">
+        </div>
+        <div class="goal-buttons">
+          <button id="g-against" class="danger">⚽ But encaissé</button>
+          <button id="g-for" class="ok">⚽ But marqué</button>
+        </div>
+        <div id="palette" class="palette"></div>
+        <h2 class="ev-title">Événements <span id="ev-count" class="muted"></span></h2>
+        <div id="events" class="events"></div>
+        <div class="analyse-cta"><button id="btn-analyse" class="primary big">Voir le diagnostic ▸</button></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- RAPPORT -->
+  <section id="tab-rapport" class="tab">
+    <div class="rapport-bar">
+      <button id="r-pdf" class="primary">Exporter en PDF</button>
+      <button id="r-html">Exporter en HTML</button>
+      <span id="r-msg" class="muted"></span>
+    </div>
+    <iframe id="report-frame" sandbox="" title="Rapport d'analyse"></iframe>
+  </section>
+
+  <!-- KB -->
+  <section id="tab-kb" class="tab">
+    <div class="kb-layout">
+      <aside class="kb-nav">
+        <input id="kb-search" type="search" placeholder="Rechercher dans la base…">
+        <div id="kb-menu"></div>
+      </aside>
+      <article id="kb-content" class="kb-content"></article>
+    </div>
+  </section>
+
+  <!-- AIDE -->
+  <section id="tab-aide" class="tab">
+    <article class="help">
+      <h1>Guide d'utilisation</h1>
+      <ol>
+        <li><strong>Charger la vidéo</strong> du match (bouton « Choisir une vidéo »). Le fichier reste sur votre ordinateur, rien n'est envoyé sur Internet.</li>
+        <li><strong>Visionner</strong> avec les touches : <kbd>Espace</kbd> lecture/pause, <kbd>←</kbd>/<kbd>→</kbd> ±5 s, <kbd>,</kbd>/<kbd>.</kbd> image par image.</li>
+        <li><strong>Marquer les situations</strong> observées : cliquez sur la situation (ex. « Repli défensif tardif »). Le contexte (zone, côté, conséquence) réglé sous la vidéo est enregistré avec l'événement, ainsi qu'une capture d'image.</li>
+        <li>Marquez aussi les <strong>buts</strong> (bouton rouge/vert) : l'application remonte alors les 12 secondes précédentes pour identifier la cause probable de chaque but encaissé.</li>
+        <li>Cliquez sur <strong>« Début 2e période »</strong> au bon moment pour séparer les statistiques des deux périodes.</li>
+        <li>Ouvrez <strong>Rapport &amp; solutions</strong> : erreurs classées par gravité, schémas récurrents, solutions, consignes, exercices et plan d'entraînement. Exportez en PDF pour vos joueurs ou votre staff.</li>
+        <li>La <strong>Base de connaissances</strong> regroupe les lois du jeu, les systèmes tactiques, les rôles, le vocabulaire, le catalogue des erreurs et la bibliothèque d'exercices.</li>
+      </ol>
+      <h2>Comment fonctionne le diagnostic ?</h2>
+      <p>Chaque situation marquée est pondérée selon sa nature, la conséquence (but encaissé &gt; occasion adverse &gt; perte de balle), la zone du terrain et sa récurrence. Les erreurs sont ensuite rapprochées pour détecter des schémas (ex. pertes de balle suivies de contre-attaques, pressing battu, cumul de fautes, baisse en 2e période, côté faible…).</p>
+      <p class="note">Le programme n'analyse pas les images de façon automatique : c'est le coach qui désigne les situations, l'application apporte l'organisation, le diagnostic chiffré et les solutions issues de la base de connaissances.</p>
+      <p>Sauvegarde automatique : votre travail est enregistré en continu et restauré à la prochaine ouverture. Utilisez « Enregistrer » pour créer un fichier de projet <code>.fsal</code> partageable.</p>
+    </article>
+  </section>
+</main>
+
+<dialog id="edit-dialog">
+  <form method="dialog" id="edit-form">
+    <h3 id="edit-title">Modifier l'événement</h3>
+    <label>Minutage (mm:ss) <input id="e-time" type="text" pattern="[0-9]{1,3}:[0-5][0-9]" required></label>
+    <label>Zone <select id="e-zone"></select></label>
+    <label>Côté <select id="e-side"></select></label>
+    <label>Conséquence <select id="e-outcome"></select></label>
+    <label>Note <input id="e-note" type="text" maxlength="200"></label>
+    <div class="dlg-actions">
+      <button type="button" id="e-cancel">Annuler</button>
+      <button type="submit" class="primary" id="e-ok" value="ok">Enregistrer</button>
+    </div>
+  </form>
+</dialog>
+
+<div id="toast" class="toast" hidden></div>
+
+<script src="knowledge/rules.js"></script>
+<script src="knowledge/systems.js"></script>
+<script src="knowledge/roles.js"></script>
+<script src="knowledge/glossary.js"></script>
+<script src="knowledge/drills.js"></script>
+<script src="knowledge/errors.js"></script>
+<script src="engine/analyzer.js"></script>
+<script src="report.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

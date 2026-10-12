@@ -1,0 +1,35 @@
+{
+  "name": "futsal-analyzer",
+  "productName": "Futsal Analyzer",
+  "version": "1.0.0",
+  "description": "Analyse vidéo tactique de futsal : détection des erreurs et propositions de solutions, avec base de connaissances intégrée.",
+  "main": "main.js",
+  "author": "CoachConvoc",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test \"tests/*.test.js\"",
+    "dist": "electron-builder --win nsis --x64 --publish never"
+  },
+  "devDependencies": {
+    "electron": "33.2.1",
+    "electron-builder": "25.1.8"
+  },
+  "build": {
+    "appId": "com.coachconvoc.futsalanalyzer",
+    "productName": "Futsal Analyzer",
+    "directories": { "output": "dist" },
+    "files": ["main.js", "preload.js", "src/**/*", "build/icon.png", "package.json"],
+    "win": { "target": [{ "target": "nsis", "arch": ["x64"] }], "icon": "build/icon.png" },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Futsal Analyzer",
+      "language": "1036"
+    }
+  }
+}

@@ -1,0 +1,41 @@
+name: Futsal Analyzer — installeur Windows
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["main"]
+    paths-ignore: ["**.md"]
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: npm run dist
+      - name: Vérifier l'installeur
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem dist -Filter "*Setup*.exe" | Select-Object -First 1
+          if (-not $exe -or $exe.Length -lt 50MB) { throw "Installeur introuvable ou trop petit" }
+          Write-Host "Installeur : $($exe.Name) ($([math]::Round($exe.Length/1MB)) Mo)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Futsal-Analyzer-Setup
+          path: dist/*Setup*.exe
+          if-no-files-found: error
+      - name: Publier la release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*Setup*.exe
