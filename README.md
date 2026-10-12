@@ -26,6 +26,8 @@ L'installeur est construit par GitHub Actions (workflow *Futsal Analyzer — ins
 - onglet **Actions** → dernier run → artefact **Futsal-Analyzer-Setup** (≈ 150 Mo), ou
 - tag `v1.0.0` → l'installeur est joint à une release.
 
+**Sans installation** : l'artefact **Futsal-Analyzer-Portable** est un dossier à décompresser ; lancer `Futsal Analyzer.exe` à l'intérieur (utile si un antivirus bloque l'installeur).
+
 Double-clic sur `Futsal Analyzer Setup 1.0.0.exe` (assistant en français, dossier au choix, raccourcis). L'installeur n'est pas signé : SmartScreen peut afficher un avertissement (« Informations complémentaires » → « Exécuter quand même »). Si le détecteur ne démarre pas, installer « Microsoft Visual C++ Redistributable 2015-2022 ».
 
 ## Développer

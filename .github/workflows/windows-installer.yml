@@ -36,13 +36,23 @@ jobs:
             if (-not (Test-Path "$res/$f")) { throw "Fichier manquant dans l'application : $f" }
           }
           if (Test-Path "$res/app.asar.unpacked/node_modules/onnxruntime-node/bin/napi-v3/linux") { throw "Binaires Linux inclus par erreur" }
+      - name: Version portable (sans installation)
+        shell: pwsh
+        run: Compress-Archive -Path "dist/win-unpacked/*" -DestinationPath "dist/Futsal-Analyzer-Portable.zip" -CompressionLevel Optimal
       - uses: actions/upload-artifact@v4
         with:
           name: Futsal-Analyzer-Setup
           path: dist/*Setup*.exe
           if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Futsal-Analyzer-Portable
+          path: dist/Futsal-Analyzer-Portable.zip
+          if-no-files-found: error
       - name: Publier la release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/*Setup*.exe
+          files: |
+            dist/*Setup*.exe
+            dist/Futsal-Analyzer-Portable.zip
