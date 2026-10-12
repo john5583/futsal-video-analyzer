@@ -132,7 +132,7 @@
     const s = mk("def_5v4", "Défense contre gardien-joueur");
     s.gka(2, 10).a(5, 10, 6).a(2, 10, 14).a(3, 6, 10).a(4, 14, 10).b(6, 20, 4).b(7, 20, 16).b(8, 26, 10).b(9, 16, 10).b(1, 20, 10);
     s.zone("target", [4, 6, 12, 8], 0.5, 12, "Fermer l'axe").go("A5", [1, 10, 6], [3, 12, 7]).go("A2", [1, 10, 14], [3, 12, 13]).go("A4", [1, 14, 10], [3, 16, 9.5]).arrow("press", "A4", "B9", 1.2, 3).ball(0.3, 16.6, 10).pass("bad", "B9", "B6", 3.4, 4.2).go("A5", [4.2, 12, 7], [5.4, 14, 5]).arrow("press", "A5", [14, 5], 4.2, 5.4, "Oriente vers le côté");
-    s.ball(6.2, 20.5, 4).pass("good", "A5", [0.5, 10], 7.4, 8.6, "Dès la récupération : tir dans le but vide").mark("check", 14, 5, 6.2, 12);
+    s.ball(6.2, 20.5, 4).pass("good", "A5", [39.5, 10], 7.4, 9.4, "Dès la récupération : tir dans le but vide").mark("check", 14, 5, 6.2, 12);
     return steps(s, "Quatre défenseurs contre cinq attaquants, le but adverse est vide.", "Fermer l'axe, orienter vers les côtés, communiquer sur les croisements.", "Récupération puis tir immédiat ; fermer les lignes de passe centrales.").done();
   };
 

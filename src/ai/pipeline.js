@@ -197,6 +197,27 @@
     return finalizeFrames(frames);
   }
 
+  /* Vignettes JPEG de la vidéo à des instants donnés (illustrations des erreurs acceptées). */
+  async function captureFrames(url, times, width) {
+    const video = document.createElement("video");
+    video.muted = true; video.preload = "auto"; video.crossOrigin = "anonymous"; video.src = url;
+    await new Promise((res, rej) => { video.onloadedmetadata = res; video.onerror = () => rej(new Error("Vidéo illisible")); });
+    const w = width || 320, h = Math.max(2, Math.round((w * video.videoHeight) / video.videoWidth));
+    const canvas = document.createElement("canvas");
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    const out = [];
+    for (const t of times) {
+      try {
+        await seekTo(video, Math.max(0, Math.min(video.duration - 0.05, t)));
+        ctx.drawImage(video, 0, 0, w, h);
+        out.push(canvas.toDataURL("image/jpeg", 0.6));
+      } catch (_e) { out.push(null); }
+    }
+    video.removeAttribute("src"); video.load();
+    return out;
+  }
+
   /* Détection ponctuelle sur l'image affichée (choix des tenues). Renvoie les personnes en pixels vidéo. */
   async function detectAt(video, api, tilesMode) {
     const vw = video.videoWidth, vh = video.videoHeight;
@@ -210,5 +231,5 @@
     return { dets, scale, img: ctx.getImageData(0, 0, cw, ch), width: cw, height: ch };
   }
 
-  return { tileRects, tileToFrame, mergeTiles, calibrationAt, processDetections, finalizeFrames, compactFrames, expandFrames, frameNear, sampleTimes, analyseVideo, detectAt, detectCanvas, TEAM_CODE };
+  return { tileRects, tileToFrame, mergeTiles, calibrationAt, processDetections, finalizeFrames, compactFrames, expandFrames, frameNear, sampleTimes, analyseVideo, detectAt, detectCanvas, captureFrames, TEAM_CODE };
 });

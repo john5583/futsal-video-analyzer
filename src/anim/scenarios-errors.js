@@ -271,10 +271,10 @@
   S.regle_4s = () => {
     const s = std("regle_4s", "Violation de la règle des 4 secondes");
     s.set("A2", 14, 0.3).set("A5", 10, 8).set("A3", 18, 6).set("A4", 24, 8).set("B9", 14, 4).set("B7", 20, 2).set("B8", 22, 12).set("B6", 26, 10);
-    s.ball(0, 14.4, 0.4).label(14, 2.8, "1 s", 0.5, 1.5, "#ffb020", 1.1).label(14, 2.8, "2 s", 1.5, 2.5, "#ffb020", 1.1).label(14, 2.8, "3 s", 2.5, 3.5, "#ff8a3d", 1.1).label(14, 2.8, "4 s", 3.5, 4.5, "#ff5a5f", 1.1);
+    s.ball(0, 14.4, 0.4).label(8, 3.2, "1 s", 0.5, 1.5, "#ffb020", 1.3).label(8, 3.2, "2 s", 1.5, 2.5, "#ffb020", 1.3).label(8, 3.2, "3 s", 2.5, 3.5, "#ff8a3d", 1.3).label(8, 3.2, "4 s", 3.5, 4.5, "#ff5a5f", 1.3);
     s.mark("x", 14.4, 0.4, 4.5, 6.4).label(22, 16, "Touche perdue : remise pour l'adversaire", 4.5, 6.4, "#ff5a5f", 0.9);
     s.jumpAll(JT, { A2: [14, 0.3], A5: [10, 8], A3: [18, 6], A4: [24, 8], B9: [14, 4], B7: [20, 2], B8: [22, 12], B6: [26, 10] }).ballJump(JT, 14.4, 0.4);
-    s.label(14, 2.8, "1 s", 7.2, 8, "#3ddc84", 1.1).go("A5", [7.2, 10, 8], [8, 11, 5]).arrow("goodrun", "A5", [11, 5], 7.2, 8, "Appel").pass("good", "A2", "A5", 8.4, 9.2, "Remise avant 4 s").label(14, 2.8, "2 s", 8.2, 9.2, "#3ddc84", 1.1);
+    s.label(8, 3.2, "1 s", 7.2, 8, "#3ddc84", 1.3).go("A5", [7.2, 10, 8], [8, 11, 5]).arrow("goodrun", "A5", [11, 5], 7.2, 8, "Appel").pass("good", "A2", "A5", 8.4, 9.2, "Remise avant 4 s").label(8, 3.2, "2 s", 8.2, 9.2, "#3ddc84", 1.3);
     return steps(s, "Le joueur hésite sur la touche : 4 secondes passent, la balle est perdue.", "Décider avant d'avoir le ballon, appel du partenaire, remise en 2 secondes.", "4 secondes = vite : prévois la solution avant la remise.").done();
   };
 

@@ -10,7 +10,8 @@
 
   function Scene(id, title, duration) {
     const o = { id, title, duration: duration || END, actors: [], moves: {}, ball: [], arrows: [], zones: [], lines: [], labels: [], marks: [], steps: [] };
-    const dt2 = (t0, t2) => (t2 != null ? t2 : (o.split != null && t0 < o.split ? o.split : null));
+    /* Phases erreur/correction : la flèche d'erreur disparaît à la correction. Exercices : une flèche s'estompe 3 s après son tracé. */
+    const dt2 = (t0, t2, t1) => (t2 != null ? t2 : (o.split != null ? (t0 < o.split ? o.split : null) : Math.min(o.duration, (t1 != null ? t1 : t0) + 3)));
     const api = {
       scene: o,
       phased() { o.split = JT + 0.05; return api; },
@@ -45,10 +46,10 @@
         const p0 = typeof from === "string" ? E.actorPos(o, from, t0) : from;
         const p1 = typeof to === "string" ? E.actorPos(o, to, t1) : to;
         o.ball.push([t0, p0[0], p0[1]], [t1, p1[0], p1[1]]);
-        o.arrows.push({ kind, from, to, t0, t1, label: label || null, t2: dt2(t0, null) });
+        o.arrows.push({ kind, from, to, t0, t1, label: label || null, t2: dt2(t0, null, t1) });
         return api;
       },
-      arrow(kind, from, to, t0, t1, label, t2) { o.arrows.push({ kind, from, to, t0, t1, label: label || null, t2: dt2(t0, t2) }); return api; },
+      arrow(kind, from, to, t0, t1, label, t2) { o.arrows.push({ kind, from, to, t0, t1, label: label || null, t2: dt2(t0, t2, t1) }); return api; },
       zone(kind, shape, t0, t1, label) {
         const z = { kind, t0, t1, label: label || null };
         if (shape.length === 4) z.rect = shape; else z.circle = shape;

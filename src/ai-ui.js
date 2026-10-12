@@ -254,17 +254,24 @@
     });
   }
 
-  function acceptSuggestion(e, silent) {
+  /* Ajoute des suggestions aux événements du projet, avec une vignette de la vidéo à l'instant de l'erreur. */
+  async function acceptSuggestions(list) {
     const p = state.project, a = p.ai;
-    const dup = p.events.some((x) => x.type === e.type && Math.abs(x.t - e.t) < 2);
-    if (!dup) {
-      p.events.push({ id: App.uid(), t: Math.round(e.t * 10) / 10, type: e.type, zone: e.zone, side: e.side, outcome: e.outcome || "AUCUN", system: p.defaultSystem, note: e.note || "", auto: true, thumb: null });
-      p.events.sort((x, y) => x.t - y.t);
+    const todo = list.filter((e) => !p.events.some((x) => x.type === e.type && Math.abs(x.t - e.t) < 2));
+    let thumbs = [];
+    if (todo.length && App.getVideoUrl() && App.isVideoReady()) {
+      try { thumbs = await P.captureFrames(App.getVideoUrl(), todo.map((e) => e.t), 320); } catch (_e) { thumbs = []; }
     }
-    a.suggestedEvents = a.suggestedEvents.filter((x) => x.sid !== e.sid);
+    todo.forEach((e, i) => {
+      p.events.push({ id: App.uid(), t: Math.round(e.t * 10) / 10, type: e.type, zone: e.zone, side: e.side, outcome: e.outcome || "AUCUN", system: p.defaultSystem, note: e.note || "", auto: true, thumb: thumbs[i] || null });
+    });
+    p.events.sort((x, y) => x.t - y.t);
+    const sids = new Set(list.map((e) => e.sid));
+    a.suggestedEvents = a.suggestedEvents.filter((x) => !sids.has(x.sid));
     a.suggested = a.suggestedEvents.length;
-    if (!silent) { App.renderEvents(); App.renderTimeline(); App.renderPalette(); renderSuggestions(); App.changed(); }
+    App.renderEvents(); App.renderTimeline(); App.renderPalette(); renderSuggestions(); App.changed();
   }
+  const acceptSuggestion = (e) => acceptSuggestions([e]);
 
   /* ---------- calibrage ---------- */
   function startPlacing() {
@@ -438,9 +445,8 @@
     $("ai-run").addEventListener("click", runAnalysis);
     $("ai-cancel").addEventListener("click", () => { if (abort) abort.abort(); });
     $("ai-accept-all").addEventListener("click", () => {
-      const a = state.project.ai; if (!a) return;
-      a.suggestedEvents.slice().forEach((e) => acceptSuggestion(e, true));
-      App.renderEvents(); App.renderTimeline(); App.renderPalette(); renderSuggestions(); App.changed();
+      const a = state.project.ai; if (!a || !a.suggestedEvents.length) return;
+      acceptSuggestions(a.suggestedEvents.slice());
     });
     $("ai-clear-sugg").addEventListener("click", () => { const a = state.project.ai; if (!a) return; a.suggestedEvents = []; a.suggested = 0; renderSuggestions(); App.changed(); });
     $("overlay").addEventListener("click", (e) => {
