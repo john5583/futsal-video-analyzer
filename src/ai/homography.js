@@ -29,6 +29,10 @@
       ["r_front_bottom", "Surface droite : fin de la ligne droite (bas)", L - r, cy + post],
       ["r_penalty", "Point de penalty droit (6 m)", L - r, cy],
       ["r_second", "Second point droit (10 m)", L - 10, cy],
+      ["circle_top", "Cercle central : croisement avec la ligne médiane (haut)", L / 2, cy - 3],
+      ["circle_bottom", "Cercle central : croisement avec la ligne médiane (bas)", L / 2, cy + 3],
+      ["circle_left", "Cercle central : point à gauche du centre", L / 2 - 3, cy],
+      ["circle_right", "Cercle central : point à droite du centre", L / 2 + 3, cy],
       ["l_goal_top", "Poteau gauche haut (pied)", 0, cy - post],
       ["l_goal_bottom", "Poteau gauche bas (pied)", 0, cy + post],
       ["r_goal_top", "Poteau droit haut (pied)", L, cy - post],
@@ -135,5 +139,5 @@
     return (Math.max(...xs) - Math.min(...xs)) * (Math.max(...ys) - Math.min(...ys));
   }
 
-  return { landmarks, solve, apply, invert, reprojectionError, spread, solveLinear };
+  return { landmarks, solve, apply, invert, reprojectionError, spread, solveLinear, mul3 };
 });

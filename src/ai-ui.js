@@ -7,7 +7,9 @@
   const esc = App.esc;
   const video = App.video, api = App.api, state = App.state;
 
-  const ROLES = [["A", "Mon équipe", "#2f6fed"], ["B", "Adversaire", "#e5484d"], ["GKA", "Mon gardien", "#f2b705"], ["GKB", "Gardien adverse", "#ff8a3d"], ["REF", "Arbitre", "#9aa5a0"]];
+  const ROLES = [["A", "Mon équipe", "#2f6fed"], ["B", "Adversaire", "#e5484d"], ["GKA", "Mon gardien", "#f2b705"], ["GKB", "Gardien adverse", "#ff8a3d"], ["REF", "Arbitre", "#a78bfa"]];
+  const TEAM_COLOR = { A: "#3b82f6", B: "#ef4444", GKA: "#f2b705", GKB: "#ff8a3d", REF: "#a78bfa", UNK: "#9aa5a0" };
+  const PARTS = { shirt: "le MAILLOT", shorts: "le SHORT", socks: "les CHAUSSETTES" };
   let pts = [];              // repères en cours de placement : { id, label, ix, iy }
   let placing = null;        // identifiant du repère à placer
   let pickRole = null;       // rôle de tenue à choisir
@@ -15,12 +17,15 @@
   let abort = null;
   let running = false;
   let live = null;           // image affichée pendant l'analyse
+  let pip = null;            // pipette en cours : { role, parts: { shirt, shorts, socks }, part, points }
+  let preview = null;        // aperçu de la reconnaissance sur l'image en pause
+  let lastTest = null;       // dernière détection (pour re-classer quand la tolérance change)
   let raf = 0;
 
   /* ---------- données du projet ---------- */
   function ai() {
     const p = state.project;
-    if (!p.ai) p.ai = { L: 40, W: 20, dir: 1, flip: true, calibrations: [], kits: {}, frames: null, stats: null, suggestedEvents: [], settings: { fps: 3, tiles: 1, t0: 0, t1: 0 } };
+    if (!p.ai) p.ai = { L: 40, W: 20, dir: 1, flip: true, camera: "mobile", calibrations: [], kits: {}, frames: null, stats: null, suggestedEvents: [], settings: { fps: 3, tiles: 1, t0: 0, t1: 0, tol: 42 } };
     return p.ai;
   }
   const hasAi = () => !!state.project.ai;
@@ -87,13 +92,13 @@
       }
     }
     // joueurs détectés
-    const f = live || (frames.length ? P.frameNear(frames, t, 0.8) : null);
+    const f = preview || live || (frames.length ? P.frameNear(frames, t, 0.8) : null);
     if (f && ($("ov-boxes").checked || $("ov-sil").checked)) {
       f.players.forEach((p) => {
         if (!p.b || p.b.length < 4) return;
         const x1 = (p.b[0] / 1000) * r.vw, y1 = (p.b[1] / 1000) * r.vh, x2 = (p.b[2] / 1000) * r.vw, y2 = (p.b[3] / 1000) * r.vh;
         const a1 = toView(x1, y1), a2 = toView(x2, y2);
-        const col = p.team === "A" ? "#3b82f6" : p.team === "B" ? "#ef4444" : p.team === "GKA" ? "#f2b705" : p.team === "GKB" ? "#ff8a3d" : "#9aa5a0";
+        const col = TEAM_COLOR[p.team] || TEAM_COLOR.UNK;
         const w = a2[0] - a1[0], h = a2[1] - a1[1];
         if ($("ov-sil").checked) {
           ctx.fillStyle = col + "66"; ctx.strokeStyle = col; ctx.lineWidth = 1.5;
@@ -104,7 +109,7 @@
           ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.strokeRect(a1[0], a1[1], w, h);
         }
         if ($("ov-ids").checked) {
-          const label = (p.team === "A" ? "" : p.team === "B" ? "Adv. " : p.team === "GKA" ? "GB " : "GB adv. ") + "#" + p.id;
+          const label = p.team === "UNK" ? "non reconnu" : p.team === "REF" ? "arbitre" : (p.team === "A" ? "" : p.team === "B" ? "Adv. " : p.team === "GKA" ? "GB " : "GB adv. ") + (p.id != null ? "#" + p.id : (p.team === "A" ? "Mon équipe" : ""));
           ctx.font = "600 12px 'Segoe UI',Arial,sans-serif";
           const tw = ctx.measureText(label).width + 8;
           ctx.fillStyle = col; ctx.fillRect(a1[0], a1[1] - 16, tw, 16);
@@ -120,17 +125,27 @@
       ctx.beginPath(); ctx.moveTo(v[0] - 10, v[1]); ctx.lineTo(v[0] + 10, v[1]); ctx.moveTo(v[0], v[1] - 10); ctx.lineTo(v[0], v[1] + 10); ctx.stroke();
       ctx.font = "600 12px 'Segoe UI',Arial,sans-serif"; ctx.fillText(p.label.slice(0, 28), v[0] + 10, v[1] - 8);
     });
-    if (placing || pickRole) {
-      ctx.fillStyle = "rgba(11,18,32,.85)"; ctx.fillRect(8, 8, Math.min(520, boxSize().w - 16), 26);
+    if (pip) {
+      (pip.points || []).forEach((q) => {
+        const v = toView(q.ix, q.iy);
+        ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(v[0], v[1], 8, 0, Math.PI * 2); ctx.stroke();
+        ctx.strokeStyle = "#000"; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(v[0], v[1], 9.5, 0, Math.PI * 2); ctx.stroke();
+      });
+    }
+    if (placing || pickRole || pip) {
+      ctx.fillStyle = "rgba(11,18,32,.85)"; ctx.fillRect(8, 8, Math.min(560, boxSize().w - 16), 26);
       ctx.fillStyle = "#fff"; ctx.font = "600 13px 'Segoe UI',Arial,sans-serif";
-      ctx.fillText(placing ? "Cliquez sur : " + (HG.landmarks(L(), W()).find((l) => l.id === placing) || {}).label : "Cliquez sur un joueur : " + (ROLES.find((q) => q[0] === pickRole) || [])[1], 16, 26);
+      const label = placing ? "Cliquez sur : " + (HG.landmarks(L(), W()).find((l) => l.id === placing) || {}).label
+        : pip ? "Pipette (" + (ROLES.find((q) => q[0] === pip.role) || [])[1] + ") : cliquez sur " + PARTS[pip.part] + " d'un joueur (Échap : annuler)"
+        : "Cliquez sur un joueur : " + (ROLES.find((q) => q[0] === pickRole) || [])[1];
+      ctx.fillText(label, 16, 26);
     }
   }
 
   function updateOverlayMode() {
     const c = $("overlay");
     c.hidden = !video.videoWidth || video.hidden;
-    c.classList.toggle("pick", !!(placing || pickRole));
+    c.classList.toggle("pick", !!(placing || pickRole || pip));
     drawOverlay();
   }
 
@@ -211,8 +226,9 @@
       const row = document.createElement("div"); row.className = "kit-row";
       row.innerHTML = "<span><span class=\"sw\" style=\"background:" + color + ";width:10px;height:10px;border-radius:50%;display:inline-block;margin-right:6px\"></span>" + esc(label) + (n ? " <span class=\"muted\">(" + n + " échantillon" + (n > 1 ? "s" : "") + ")</span>" : "") + "</span>" +
         "<span class=\"kit-sw\">" + (sw ? "<i class=\"sw\" style=\"background:" + sw.shirt + "\" title=\"Maillot\"></i><i class=\"sw\" style=\"background:" + sw.shorts + "\" title=\"Short\"></i><i class=\"sw\" style=\"background:" + sw.socks + "\" title=\"Chaussettes\"></i>" : "") + "</span>" +
-        "<span><button data-a=\"pick\">" + (n ? "Ajouter" : "Choisir") + "</button>" + (n ? " <button data-a=\"clear\" class=\"ghost\" title=\"Effacer\">×</button>" : "") + "</span>";
+        "<span class=\"btns\"><button data-a=\"pip\" title=\"Cliquer vous-même le maillot, le short, les chaussettes\">Pipette</button><button data-a=\"pick\" title=\"Cliquer un joueur : couleurs lues automatiquement\">Auto</button>" + (n ? "<button data-a=\"clear\" class=\"ghost\" title=\"Effacer\">×</button>" : "") + "</span>";
       row.querySelector("[data-a=pick]").addEventListener("click", () => startPick(key));
+      row.querySelector("[data-a=pip]").addEventListener("click", () => startPipette(key));
       const c = row.querySelector("[data-a=clear]");
       if (c) c.addEventListener("click", () => { delete a.kits[key]; renderKits(); App.changed(); });
       box.appendChild(row);
@@ -277,7 +293,7 @@
   function startPlacing() {
     if (!App.isVideoReady()) { App.toast("Chargez d'abord une vidéo.", true); return; }
     video.pause();
-    pickRole = null;
+    pickRole = null; pip = null; renderPipette();
     placing = $("ai-landmark").value;
     updateOverlayMode();
   }
@@ -307,7 +323,7 @@
     if (!App.isVideoReady()) { App.toast("Chargez d'abord une vidéo.", true); return; }
     if (!api) { App.toast("Fonction disponible dans l'application uniquement.", true); return; }
     video.pause();
-    placing = null; pickRole = role;
+    placing = null; pickRole = role; pip = null; preview = null; renderPipette();
     updateOverlayMode();
   }
 
@@ -337,6 +353,98 @@
       renderKits(); App.changed();
       App.toast("Tenue enregistrée.");
     } catch (e) { App.toast("Détection impossible : " + e.message, true); }
+  }
+
+  /* ---------- pipette ---------- */
+  function grabFrame() {
+    const vw = video.videoWidth, vh = video.videoHeight;
+    const scale = Math.min(1, 1280 / Math.max(vw, vh * (16 / 9)));
+    const w = Math.max(2, Math.round(vw * scale)), h = Math.max(2, Math.round(vh * scale));
+    const c = document.createElement("canvas");
+    c.width = w; c.height = h;
+    const ctx = c.getContext("2d", { willReadFrequently: true });
+    ctx.drawImage(video, 0, 0, w, h);
+    return { img: ctx.getImageData(0, 0, w, h), scale };
+  }
+
+  function startPipette(role) {
+    if (!App.isVideoReady()) { App.toast("Chargez d'abord une vidéo.", true); return; }
+    video.pause();
+    placing = null; pickRole = null; preview = null;
+    pip = { role, parts: { shirt: null, shorts: null, socks: null }, part: "shirt", points: [] };
+    renderPipette(); updateOverlayMode();
+  }
+
+  function renderPipette() {
+    const box = $("ai-pipette");
+    box.hidden = !pip;
+    if (!pip) return;
+    $("pp-title").textContent = "Pipette — " + (ROLES.find((q) => q[0] === pip.role) || [])[1];
+    box.querySelectorAll("button[data-part]").forEach((b) => {
+      const part = b.dataset.part, lab = pip.parts[part];
+      b.classList.toggle("cur", part === pip.part);
+      b.innerHTML = esc(b.textContent.replace(/\s*$/, "")) + (lab ? "<i class=\"sw\" style=\"background:" + K.toHex(lab) + "\"></i>" : "");
+    });
+    $("pp-hint").textContent = "Cliquez sur " + PARTS[pip.part] + " d'un joueur de l'image. Short et chaussettes sont facultatifs : « Passer » ou « Terminer ». Plusieurs joueurs possibles : relancez la pipette.";
+  }
+
+  function nextPart() {
+    const order = ["shirt", "shorts", "socks"], i = order.indexOf(pip.part);
+    if (i >= order.length - 1) finishPipette(); else { pip.part = order[i + 1]; renderPipette(); drawOverlay(); }
+  }
+
+  function pipetteClick(ix, iy) {
+    const g = grabFrame();
+    const lab = K.pipette(g.img, ix * g.scale, iy * g.scale, 3);
+    if (!lab) { App.toast("Impossible de lire la couleur ici.", true); return; }
+    pip.parts[pip.part] = lab;
+    pip.points.push({ ix, iy });
+    nextPart();
+  }
+
+  function finishPipette() {
+    if (!pip) return;
+    if (!pip.parts.shirt) { App.toast("Cliquez d'abord sur le maillot (partie obligatoire).", true); return; }
+    const a = ai(), f = K.fromParts(pip.parts.shirt, pip.parts.shorts, pip.parts.socks);
+    (a.kits[pip.role] = a.kits[pip.role] || []).push(f);
+    pip = null; renderPipette(); renderKits(); updateOverlayMode(); App.changed();
+    App.toast("Tenue enregistrée.");
+    if (lastTest) renderPreview();
+  }
+
+  function cancelPipette() { pip = null; renderPipette(); updateOverlayMode(); }
+
+  /* ---------- test de la reconnaissance sur l'image en pause ---------- */
+  function tol() { return Number($("ai-tol").value) || 42; }
+
+  function renderPreview() {
+    if (!lastTest) return;
+    const r = refs(), res = lastTest;
+    const counts = {};
+    const players = res.dets.filter((d) => d.cls === 0).map((d) => {
+      const feat = K.sample(res.img, [d.x1, d.y1, d.x2, d.y2]);
+      const cls = K.classify(feat, r, { reject: tol() });
+      counts[cls.team] = (counts[cls.team] || 0) + 1;
+      return { id: null, team: cls.team, b: [Math.round((d.x1 / res.width) * 1000), Math.round((d.y1 / res.height) * 1000), Math.round((d.x2 / res.width) * 1000), Math.round((d.y2 / res.height) * 1000)] };
+    });
+    preview = { t: video.currentTime, players, ball: null };
+    const names = { A: "Mon équipe", B: "Adversaire", GKA: "Mon gardien", GKB: "Gardien adverse", REF: "Arbitre", UNK: "Non reconnus" };
+    $("ai-test-msg").textContent = players.length ? Object.keys(counts).map((k) => names[k] + " : " + counts[k]).join(" · ") + " — ajustez la tolérance si besoin." : "Aucun joueur détecté sur cette image.";
+    $("ov-boxes").checked = true;
+    drawOverlay();
+  }
+
+  async function testRecognition() {
+    if (!App.isVideoReady()) { App.toast("Chargez d'abord une vidéo.", true); return; }
+    if (!api) { App.toast("Fonction disponible dans l'application uniquement.", true); return; }
+    const r = refs();
+    if (!r.A && !r.B) { $("ai-test-msg").textContent = "Choisissez d'abord au moins « Mon équipe » (pipette ou auto)."; return; }
+    video.pause();
+    $("ai-test-msg").textContent = "Détection en cours…";
+    try {
+      lastTest = await P.detectAt(video, api, Number($("ai-tiles").value));
+      renderPreview();
+    } catch (e) { $("ai-test-msg").textContent = "Détection impossible : " + e.message; }
   }
 
   /* ---------- analyse ---------- */
@@ -373,23 +481,27 @@
     $("ai-run").disabled = true; $("ai-cancel").hidden = false; $("ai-progress").hidden = false; $("ai-bar").style.width = "0%";
     msg.textContent = "Chargement du modèle de détection…";
     try {
-      const out = await P.analyseVideo({
-        url: App.getVideoUrl(), t0: range[0], t1: range[1], fps, tiles, L: L(), W: W(), calibrations: a.calibrations, refs: r, signal: abort.signal, api,
+      const camera = $("ai-camera").value;
+      const result = await P.analyseVideo({
+        url: App.getVideoUrl(), t0: range[0], t1: range[1], fps, tiles, camera, tol: tol(), L: L(), W: W(), calibrations: a.calibrations, refs: r, signal: abort.signal, api,
         onProgress: (p) => {
           $("ai-bar").style.width = Math.round((p.done / p.total) * 100) + "%";
-          msg.textContent = "Image " + p.done + " / " + p.total + " — reste environ " + fmtEta(p.eta);
-          if (p.done % 3 === 0) { live = p.frame; drawMinimap(); }
+          msg.textContent = "Image " + p.done + " / " + p.total + " — reste environ " + fmtEta(p.eta) + (p.lost ? " (caméra perdue sur cette image)" : "");
+          if (p.frame && p.done % 3 === 0) { live = p.frame; drawMinimap(); }
         }
       });
-      live = null;
+      live = null; preview = null;
+      const out = result.frames;
       frames = out;
+      a.camera = camera; a.lost = result.lost; a.notes = result.notes;
       a.frames = P.compactFrames(frames);
       const res = M.analyze(frames, { L: L(), W: W(), dirAt });
       a.stats = Object.assign({}, res.stats);
       a.suggestedEvents = res.events.map((e, i) => Object.assign({ sid: "s" + Date.now().toString(36) + i }, e));
       a.suggested = a.suggestedEvents.length;
-      a.settings = { fps, tiles, t0: range[0], t1: range[1] };
-      msg.textContent = out.length ? "Analyse terminée : " + out.length + " images, " + a.suggestedEvents.length + " erreur(s) suggérée(s)." : "Analyse terminée, mais aucun joueur n'a été retenu : vérifiez le calibrage et les tenues.";
+      a.settings = { fps, tiles, t0: range[0], t1: range[1], tol: tol() };
+      const lostTxt = result.lost.length ? " Caméra perdue : " + result.lost.map((l) => App.fmt(l[0]) + "–" + App.fmt(l[1])).join(", ") + "." : "";
+      msg.textContent = (out.length ? "Analyse terminée : " + out.length + " images, " + a.suggestedEvents.length + " erreur(s) suggérée(s)." : "Analyse terminée, mais aucun joueur n'a été retenu : vérifiez le calibrage et les tenues.") + (result.notes.length ? " " + result.notes.join(" ") : "") + lostTxt;
       try { localStorage.setItem(SEC_KEY, String(((Date.now() - startedAt) / 1000) / Math.max(1, out.length ? Math.ceil((range[1] - range[0]) * fps) * tiles : 1))); } catch (_e) { /* stockage indisponible */ }
       renderStats(); renderSuggestions(); refreshLive(); updateEstimate(); App.changed(true);
     } catch (e) {
@@ -411,6 +523,8 @@
     const d = a || { L: 40, W: 20, dir: 1, flip: true, settings: { fps: 3, tiles: 1, t0: 0, t1: 0 } };
     $("ai-L").value = d.L; $("ai-W").value = d.W; $("ai-dir").value = String(d.dir || 1); $("ai-flip").checked = d.flip !== false;
     $("ai-fps").value = String((d.settings && d.settings.fps) || 3); $("ai-tiles").value = String((d.settings && d.settings.tiles) || 1);
+    $("ai-camera").value = d.camera || "mobile"; $("ai-tol").value = String((d.settings && d.settings.tol) || 42); $("ai-tol-v").textContent = "(" + $("ai-tol").value + ")";
+    pip = null; preview = null; lastTest = null; renderPipette(); $("ai-test-msg").textContent = "";
     $("ai-t0").value = App.fmt((d.settings && d.settings.t0) || 0);
     $("ai-t1").value = App.fmt((d.settings && d.settings.t1) || state.project.duration || 0);
     fillLandmarks(); renderPoints(); renderCalibs(); renderKits(); renderStats(); renderSuggestions(); updateEstimate();
@@ -424,11 +538,18 @@
       const l = Number($("ai-L").value), w = Number($("ai-W").value);
       if (l >= 25 && l <= 42) a.L = l;
       if (w >= 15 && w <= 25) a.W = w;
-      a.dir = Number($("ai-dir").value); a.flip = $("ai-flip").checked;
-      a.settings = Object.assign({}, a.settings, { fps: Number($("ai-fps").value), tiles: Number($("ai-tiles").value) });
+      a.dir = Number($("ai-dir").value); a.flip = $("ai-flip").checked; a.camera = $("ai-camera").value;
+      a.settings = Object.assign({}, a.settings, { fps: Number($("ai-fps").value), tiles: Number($("ai-tiles").value), tol: tol() });
       fillLandmarks(); App.changed();
     };
-    ["ai-L", "ai-W", "ai-dir", "ai-flip", "ai-fps", "ai-tiles"].forEach((id) => $(id).addEventListener("change", upd));
+    ["ai-L", "ai-W", "ai-dir", "ai-flip", "ai-fps", "ai-tiles", "ai-camera"].forEach((id) => $(id).addEventListener("change", upd));
+    $("ai-tol").addEventListener("input", () => { $("ai-tol-v").textContent = "(" + tol() + ")"; if (lastTest) renderPreview(); });
+    $("ai-tol").addEventListener("change", upd);
+    $("ai-test").addEventListener("click", testRecognition);
+    $("pp-cancel").addEventListener("click", cancelPipette);
+    $("pp-skip").addEventListener("click", () => { if (pip) nextPart(); });
+    $("pp-done").addEventListener("click", finishPipette);
+    $("ai-pipette").querySelectorAll("button[data-part]").forEach((b) => b.addEventListener("click", () => { if (pip) { pip.part = b.dataset.part; renderPipette(); drawOverlay(); } }));
     ["ai-t0", "ai-t1", "ai-fps", "ai-tiles"].forEach((id) => $(id).addEventListener("input", updateEstimate));
     $("ai-t0").addEventListener("change", updateEstimate); $("ai-t1").addEventListener("change", updateEstimate);
     ["ov-boxes", "ov-sil", "ov-ids", "ov-trails", "ov-heat", "ov-court"].forEach((id) => $(id).addEventListener("change", refreshLive));
@@ -460,17 +581,29 @@
         placing = null; renderPoints();
         if (next) $("ai-landmark").value = next;
         updateOverlayMode();
-      } else if (pickRole) handlePick(ix, iy);
+      } else if (pip) pipetteClick(ix, iy);
+      else if (pickRole) handlePick(ix, iy);
     });
-    document.addEventListener("keydown", (e) => { if (e.key === "Escape" && (placing || pickRole)) { placing = null; pickRole = null; updateOverlayMode(); } });
-    ["loadedmetadata", "seeked", "pause", "timeupdate", "emptied"].forEach((ev) => video.addEventListener(ev, () => { if (ev === "loadedmetadata" || ev === "emptied") updateOverlayMode(); else refreshLive(); }));
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape" && (placing || pickRole || pip)) { placing = null; pickRole = null; if (pip) cancelPipette(); else updateOverlayMode(); } });
+    ["loadedmetadata", "seeked", "pause", "timeupdate", "emptied"].forEach((ev) => video.addEventListener(ev, () => {
+      if (preview && ev === "seeked" && lastTest && Math.abs(video.currentTime - preview.t) > 0.2) { preview = null; lastTest = null; $("ai-test-msg").textContent = ""; }
+      if (ev === "loadedmetadata" || ev === "emptied") updateOverlayMode(); else refreshLive();
+    }));
+    video.addEventListener("play", () => { preview = null; lastTest = null; $("ai-test-msg").textContent = ""; });
     video.addEventListener("play", () => { if (!raf) raf = requestAnimationFrame(loop); });
     window.addEventListener("resize", refreshLive);
     if (window.ResizeObserver) new ResizeObserver(refreshLive).observe($("video-box"));
     App.hooks.onLoad = syncFromProject;
     bindSettings();
     fillLandmarks(); renderCalibs(); renderKits(); renderStats(); renderSuggestions();
-    video.addEventListener("loadedmetadata", () => { const a = state.project.ai; if (!a || !a.settings || !a.settings.t1) $("ai-t1").value = App.fmt(video.duration); updateEstimate(); });
+    video.addEventListener("loadedmetadata", () => {
+      const a = state.project.ai;
+      if (!a || !a.settings || !a.settings.t1) {
+        $("ai-t1").value = App.fmt(video.duration);
+        if (video.videoHeight > video.videoWidth) { $("ai-tiles").value = "2"; $("ai-run-msg").textContent = "Vidéo verticale : précision « Renforcée » sélectionnée pour mieux voir les joueurs lointains."; }
+      }
+      updateEstimate();
+    });
     if (api && api.aiStatus) {
       api.aiStatus().then((s) => {
         const e = $("ai-status");

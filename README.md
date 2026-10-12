@@ -5,8 +5,8 @@ Programme **Windows** (installeur `.exe`) d'analyse vidéo tactique de futsal, *
 ## Fonctionnement
 
 1. **Vidéo** : MP4/H.264, MOV, WEBM, MKV (smartphone). Le fichier reste sur l'ordinateur.
-2. **Calibrage du terrain** : vous cliquez 4 repères ou plus (coins, point central, points de penalty, angles des surfaces…). Le programme en déduit la vue de dessus. Plusieurs calibrages possibles si la caméra bouge.
-3. **Tenues** : vous cliquez un joueur de chaque type (mon équipe, adversaire, gardiens, arbitre). Le programme apprend maillot / short / chaussettes.
+2. **Calibrage du terrain** : vous cliquez 4 repères ou plus (coins, cercle central, points de penalty, angles des surfaces…), même si le terrain n'est que partiellement visible. Le programme en déduit la vue de dessus. **Caméra mobile** (smartphone à la main) : le mouvement de la caméra est suivi automatiquement entre deux calibrages ; ajoutez un calibrage après un gros mouvement ou toutes les 20 à 30 s.
+3. **Tenues** : **pipette** (vous cliquez vous-même le maillot, le short, les chaussettes sur l'image en pause) ou **auto** (clic sur un joueur). Mon équipe, adversaire, gardiens, arbitre. Le maillot compte le plus ; short et chaussettes sont facultatifs. Bouton « Tester la reconnaissance » et réglage de tolérance.
 4. **Analyse** : détection (YOLOX) + suivi des joueurs + ballon. Résultat : cadres ou silhouettes sur la vidéo, **mini-carte de dessus** synchronisée (trajectoires, carte de chaleur), possession, profondeur et largeur de l'équipe, distances.
 5. **Erreurs suggérées** : pertes de balle en zone défensive, contre-attaques et replis tardifs, équipe étirée, espace dans le dos du fixo, joueur adverse libre, largeur mal occupée, attaque statique, porteur isolé. **Chaque suggestion est validée ou écartée par le coach.** Le marquage manuel (30 situations) reste disponible.
 6. **Diagnostic** : gravité (critique / majeur / mineur), analyse des buts encaissés, schémas récurrents, solutions, consignes, exercices, plan d'action pour les prochains matchs.
@@ -15,7 +15,7 @@ Programme **Windows** (installeur `.exe`) d'analyse vidéo tactique de futsal, *
 9. **Base de connaissances** (recherche plein texte) : lois du jeu, tactique détaillée, systèmes, rôles, vocabulaire, catalogue d'erreurs/solutions, exercices — avec bouton « voir l'animation ».
 
 ### Limites à connaître
-- **Caméra** : le mieux est un smartphone **fixe** (trépied) placé en hauteur voyant tout le terrain. Si la caméra bouge ou zoome, recalibrez à chaque changement de cadrage.
+- **Caméra** : le mieux est un smartphone placé en hauteur voyant tout le terrain. À la main, le suivi automatique fonctionne tant que le sol et les murs offrent assez de détails et que le mouvement n'est pas trop brusque ; sinon les images concernées sont ignorées et signalées. Les joueurs partiellement hors cadre sont moins précis.
 - La détection n'est pas parfaite (joueurs masqués, tenues proches, ballon petit et rapide, joueurs très lointains). Le ballon est détecté de façon moins fiable que les joueurs : sans ballon, la possession et les pertes de balle ne sont pas calculées. D'où la validation par le coach.
 - **Durée d'analyse** : environ 0,2 à 0,5 s par image analysée sur un PC courant (affichée avant lancement). Analysez un extrait ou choisissez la précision « Rapide » pour un match entier.
 - Les lois du jeu sont une synthèse pédagogique : se référer au règlement de la compétition.

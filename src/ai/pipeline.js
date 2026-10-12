@@ -2,11 +2,11 @@
    reconnaissance des équipes, suivi, et lecture de la vidéo image par image (navigateur). */
 (function (root, factory) {
   if (typeof module === "object" && module.exports) {
-    module.exports = factory(require("./yolox"), require("./homography"), require("./kit"), require("./tracker"));
+    module.exports = factory(require("./yolox"), require("./homography"), require("./kit"), require("./tracker"), require("./camera"));
   } else {
-    root.FutsalPipeline = factory(root.FutsalYolox, root.FutsalHomography, root.FutsalKit, root.FutsalTracker);
+    root.FutsalPipeline = factory(root.FutsalYolox, root.FutsalHomography, root.FutsalKit, root.FutsalTracker, root.FutsalCamera);
   }
-})(typeof self !== "undefined" ? self : this, function (Y, HG, K, T) {
+})(typeof self !== "undefined" ? self : this, function (Y, HG, K, T, Cam) {
   "use strict";
 
   const TEAM_CODE = { A: "A", B: "B", GKA: "a", GKB: "b" };
@@ -23,16 +23,34 @@
     return [{ x: 0, y: 0, w, h: th }, { x: 0, y: h - th, w, h: th }];
   }
 
-  /* Boîtes d'une vignette (espace 640x640 « letterbox ») -> espace de l'image. */
-  function tileToFrame(dets, rect) {
-    const r = Y.letterboxRatio(rect.w, rect.h, Y.SIZE);
-    return dets.map((d) => ({ cls: d.cls, score: d.score, x1: d.x1 / r + rect.x, y1: d.y1 / r + rect.y, x2: d.x2 / r + rect.x, y2: d.y2 / r + rect.y }));
+  /* Boîtes d'une vignette (espace 640x640 « letterbox ») -> espace de l'image.
+     Une boîte collée à une limite intérieure de la vignette (pas au bord de l'image) est marquée « coupée » :
+     le joueur y est partiel, il est ignoré s'il est déjà vu en entier ailleurs. */
+  function tileToFrame(dets, rect, frameW, frameH) {
+    const r = Y.letterboxRatio(rect.w, rect.h, Y.SIZE), eps = 6 / r;
+    return dets.map((d) => {
+      const o = { cls: d.cls, score: d.score, x1: d.x1 / r + rect.x, y1: d.y1 / r + rect.y, x2: d.x2 / r + rect.x, y2: d.y2 / r + rect.y };
+      if (frameW != null) {
+        o.cut = (rect.x > 0 && o.x1 <= rect.x + eps) || (rect.x + rect.w < frameW && o.x2 >= rect.x + rect.w - eps) ||
+          (rect.y > 0 && o.y1 <= rect.y + eps) || (rect.y + rect.h < frameH && o.y2 >= rect.y + rect.h - eps);
+      }
+      return o;
+    });
   }
 
-  function mergeTiles(perTile) {
+  function overlapShare(a, b) {
+    const w = Math.min(a.x2, b.x2) - Math.max(a.x1, b.x1), h = Math.min(a.y2, b.y2) - Math.max(a.y1, b.y1);
+    if (w <= 0 || h <= 0) return 0;
+    return (w * h) / Math.max(1, (a.x2 - a.x1) * (a.y2 - a.y1));
+  }
+
+  function mergeTiles(perTile, frameW, frameH) {
     const all = [];
-    perTile.forEach((t) => tileToFrame(t.dets, t.rect).forEach((d) => all.push(d)));
-    return Y.nms(all, 0.5);
+    perTile.forEach((t) => tileToFrame(t.dets, t.rect, frameW, frameH).forEach((d) => all.push(d)));
+    // 1) un joueur partiel (coupé par une limite de vignette) disparaît s'il est contenu dans une autre boîte
+    const whole = all.filter((d) => !(d.cut && d.cls === Y.CLASS_PERSON && all.some((e) => e !== d && e.cls === Y.CLASS_PERSON && e.score >= 0.3 && overlapShare(d, e) >= 0.6 && (e.x2 - e.x1) * (e.y2 - e.y1) >= (d.x2 - d.x1) * (d.y2 - d.y1))));
+    // 2) suppression des doublons classiques
+    return Y.nms(whole, 0.5).map((d) => { const o = Object.assign({}, d); delete o.cut; return o; });
   }
 
   /* Étalonnage en vigueur à l'instant t (le plus récent déjà posé, sinon le premier). */
@@ -55,7 +73,11 @@
         const ar = h / Math.max(1, w);
         if (ar < 0.8 || ar > 6) return;
         persons.push(d);
-      } else if (d.cls === Y.CLASS_BALL) balls.push(d);
+      } else if (d.cls === Y.CLASS_BALL) {
+        // un vrai ballon est à peu près carré, petit, et détecté avec une confiance suffisante (évite les marquages au sol)
+        const ar = w / Math.max(1, h);
+        if (d.score >= 0.2 && ar >= 0.5 && ar <= 2 && h >= ctx.frameH * 0.004 && h <= ctx.frameH * 0.06) balls.push(d);
+      }
     });
     const margin = 1.5;
     const list = [];
@@ -65,7 +87,7 @@
       if (!isFinite(p[0]) || !isFinite(p[1])) return;
       if (p[0] < -margin || p[0] > ctx.L + margin || p[1] < -margin || p[1] > ctx.W + margin) return;
       const feat = ctx.img ? K.sample(ctx.img, [d.x1, d.y1, d.x2, d.y2]) : null;
-      const cls = ctx.refs ? K.classify(feat, ctx.refs) : { team: "UNK" };
+      const cls = ctx.refs ? K.classify(feat, ctx.refs, { reject: ctx.reject }) : { team: "UNK" };
       list.push({ x: Math.round(p[0] * 100) / 100, y: Math.round(p[1] * 100) / 100, team: cls.team, box: [d.x1, d.y1, d.x2, d.y2], conf: d.score });
     });
     ctx.tracker.update(ctx.t, list);
@@ -158,10 +180,15 @@
       if (res.error) throw new Error(res.error);
       perTile.push({ rect, dets: res.dets });
     }
-    return mergeTiles(perTile);
+    return mergeTiles(perTile, w, h);
   }
 
-  /* Analyse complète d'une plage de la vidéo. opts : { url, t0, t1, fps, tiles, L, W, calibrations, refs, signal, onProgress, api } */
+  const IDENTITY = [1, 0, 0, 0, 1, 0, 0, 0, 1];
+
+  /* Analyse complète d'une plage de la vidéo.
+     opts : { url, t0, t1, fps, tiles, camera ("fixed" | "mobile"), tol, L, W, calibrations, refs, signal, onProgress, api }
+     Caméra mobile : à chaque calibrage, le terrain est recalé ; entre deux calibrages, le mouvement de la caméra est suivi.
+     Renvoie { frames, lost: [[t0, t1], ...], notes: [texte, ...] }. */
   async function analyseVideo(opts) {
     const video = document.createElement("video");
     video.muted = true; video.preload = "auto"; video.crossOrigin = "anonymous";
@@ -174,9 +201,27 @@
     const canvas = document.createElement("canvas");
     canvas.width = cw; canvas.height = ch;
     const ctx = canvas.getContext("2d", { willReadFrequently: true });
-    const times = sampleTimes(opts.t0, Math.min(opts.t1, video.duration - 0.05), opts.fps);
+    const mobile = opts.camera === "mobile";
+    const notes = [];
+    const calibs = (opts.calibrations || []).slice().sort((a, b) => a.t - b.t);
+    if (!calibs.length) throw new Error("Aucun calibrage du terrain");
+    let t0 = opts.t0;
+    if (mobile) {
+      if (t0 < calibs[0].t - 0.01) { t0 = calibs[0].t; notes.push("L'analyse commence au premier calibrage (le terrain n'est pas connu avant)."); }
+      else {
+        const prior = calibs.filter((c) => c.t <= t0 + 0.01).pop();
+        if (prior && t0 - prior.t > 1.5) { t0 = prior.t; notes.push("L'analyse commence au dernier calibrage avant la plage choisie, pour suivre la caméra sans interruption."); }
+      }
+    }
+    const times = sampleTimes(t0, Math.min(opts.t1, video.duration - 0.05), opts.fps);
+    // images réduites pour le suivi de la caméra
+    const gw = Math.min(480, cw), gh = Math.max(2, Math.round((ch * gw) / cw)), gs = gw / vw;
+    const gcanvas = document.createElement("canvas");
+    gcanvas.width = gw; gcanvas.height = gh;
+    const gctx = gcanvas.getContext("2d", { willReadFrequently: true });
     const tracker = new T.Tracker();
-    const frames = [];
+    const frames = [], lost = [];
+    let anchor = null, M = IDENTITY, prev = null, lostStart = null;
     const started = Date.now();
     for (let i = 0; i < times.length; i++) {
       if (opts.signal && opts.signal.aborted) throw new Error("Analyse interrompue");
@@ -184,17 +229,40 @@
       await seekTo(video, t);
       ctx.drawImage(video, 0, 0, cw, ch);
       const dets = await detectCanvas(canvas, opts.tiles, opts.api, { minPerson: 0.35, minBall: 0.12 });
-      const calib = calibrationAt(opts.calibrations, t);
-      if (!calib) throw new Error("Aucun calibrage du terrain");
+      const calib = calibrationAt(calibs, t);
+      let H = calib.H, reliable = true;
+      if (mobile) {
+        const boxes = dets.filter((d) => d.cls === Y.CLASS_PERSON).map((d) => [d.x1 * (gw / cw), d.y1 * (gh / ch), d.x2 * (gw / cw), d.y2 * (gh / ch)]);
+        gctx.drawImage(video, 0, 0, gw, gh);
+        const cur = Cam.prepare(gctx.getImageData(0, 0, gw, gh).data, gw, gh, boxes, 4);
+        if (calib !== anchor) {
+          anchor = calib; M = IDENTITY; prev = cur;
+        } else {
+          const r = Cam.estimateMotion(prev, cur, prev.mask, cur.mask, { maxCorners: 320 });
+          if (r.ok) {
+            M = HG.mul3(M, HG.invert(Cam.toNative(r.H, gs)));
+            prev = cur;
+          } else reliable = false;
+        }
+        H = HG.mul3(anchor.H, M);
+      }
+      if (!reliable) {
+        if (lostStart == null) lostStart = t;
+        if (opts.onProgress) opts.onProgress({ done: i + 1, total: times.length, eta: ((Date.now() - started) / 1000 / (i + 1)) * (times.length - i - 1), frame: null, lost: true });
+        continue;
+      }
+      if (lostStart != null) { lost.push([lostStart, t]); lostStart = null; }
       const img = ctx.getImageData(0, 0, cw, ch);
-      frames.push(processDetections(dets, { frameW: cw, frameH: ch, scale, img, H: calib.H, L: opts.L, W: opts.W, refs: opts.refs, tracker, t }));
+      frames.push(processDetections(dets, { frameW: cw, frameH: ch, scale, img, H, L: opts.L, W: opts.W, refs: opts.refs, reject: opts.tol, tracker, t }));
       if (opts.onProgress) {
         const elapsed = (Date.now() - started) / 1000;
         opts.onProgress({ done: i + 1, total: times.length, eta: (elapsed / (i + 1)) * (times.length - i - 1), frame: frames[frames.length - 1] });
       }
     }
+    if (lostStart != null) lost.push([lostStart, times[times.length - 1]]);
     video.removeAttribute("src"); video.load();
-    return finalizeFrames(frames);
+    if (lost.length) notes.push("Suivi de la caméra perdu sur " + lost.length + " passage(s) : ces images sont ignorées. Ajoutez un calibrage dans ces passages (flou, caméra trop rapide ou sol sans détails).");
+    return { frames: finalizeFrames(frames), lost, notes };
   }
 
   /* Vignettes JPEG de la vidéo à des instants donnés (illustrations des erreurs acceptées). */

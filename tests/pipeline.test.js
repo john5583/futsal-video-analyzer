@@ -59,6 +59,8 @@ test("détections -> joueurs sur le terrain : projection, filtres, équipes, bal
     { cls: 0, score: 0.9, x1: 500, y1: 210, x2: 506, y2: 222 },     // trop petit : ignoré
     { cls: 0, score: 0.9, x1: 300, y1: 480, x2: 360, y2: 700 },     // pieds hors terrain : ignoré
     { cls: 0, score: 0.9, x1: 600, y1: 300, x2: 760, y2: 340 },     // trop large (couché/artefact) : ignoré
+    { cls: 32, score: 0.9, x1: 100, y1: 300, x2: 160, y2: 306 },    // « ballon » très allongé (marquage au sol) : ignoré
+    { cls: 32, score: 0.15, x1: 700, y1: 300, x2: 710, y2: 310 },   // confiance trop faible : ignoré
     { cls: 32, score: 0.5, x1: 495, y1: 245, x2: 505, y2: 255 },    // ballon en (500, 250) -> (20, 10)
     { cls: 32, score: 0.2, x1: 10000, y1: 10000, x2: 10010, y2: 10010 } // ballon hors champ
   ];
@@ -101,4 +103,25 @@ test("image la plus proche d'un instant et échantillonnage", () => {
   assert.equal(P.frameNear([], 1), null);
   assert.deepEqual(P.sampleTimes(0, 1, 2), [0, 0.5, 1]);
   assert.equal(P.sampleTimes(10, 70, 5).length, 301);
+});
+
+test("fusion des vignettes : un joueur coupé par la limite d'une vignette est ignoré s'il est vu en entier", () => {
+  const rects = P.tileRects(1000, 1600, 2); // vignettes verticales qui se recouvrent
+  const ratio = (rc) => Math.min(640 / rc.w, 640 / rc.h);
+  const r1 = ratio(rects[0]), r2 = ratio(rects[1]);
+  const rect0 = rects[0], rect1 = rects[1];
+  // joueur entier : y 700..1000 (visible dans la vignette 0 sans toucher sa limite basse 960 ? -> on le place à 760..940)
+  const full = { x1: 400, y1: 760, x2: 460, y2: 940 };
+  const inTile = (rect, r, b, clipY2) => ({ rect, dets: [{ cls: 0, score: 0.8, x1: (b.x1 - rect.x) * r, y1: (b.y1 - rect.y) * r, x2: (b.x2 - rect.x) * r, y2: ((clipY2 != null ? clipY2 : b.y2) - rect.y) * r }] });
+  // un autre joueur coupé en bas de la vignette 0 (limite à y = 960) et entier dans la vignette 1
+  const cutBottom = { x1: 600, y1: 800, x2: 660, y2: 1000 };
+  const tile0 = { rect: rect0, dets: inTile(rect0, r1, full).dets.concat(inTile(rect0, r1, cutBottom, rect0.y + rect0.h).dets) };
+  const tile1 = { rect: rect1, dets: inTile(rect1, r2, cutBottom).dets };
+  const merged = P.mergeTiles([tile0, tile1], 1000, 1600).filter((d) => d.cls === 0);
+  const nearCut = merged.filter((d) => Math.abs((d.x1 + d.x2) / 2 - 630) < 20);
+  assert.equal(nearCut.length, 1, "un seul exemplaire du joueur coupé");
+  assert.ok(nearCut[0].y2 >= 990, "on garde la boîte complète");
+  assert.equal(merged.filter((d) => Math.abs((d.x1 + d.x2) / 2 - 430) < 20).length, 1);
+  // sans dimensions de l'image : comportement précédent (aucun marquage)
+  assert.ok(P.mergeTiles([tile0, tile1]).length >= 2);
 });

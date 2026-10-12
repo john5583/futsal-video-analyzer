@@ -107,6 +107,9 @@
               <label>Sens du jeu
                 <select id="ai-dir"><option value="1">Mon équipe attaque vers la droite</option><option value="-1">Mon équipe attaque vers la gauche</option></select>
               </label>
+              <label>Caméra
+                <select id="ai-camera"><option value="mobile">Mobile (smartphone à la main)</option><option value="fixed">Fixe (trépied)</option></select>
+              </label>
               <label class="row"><input id="ai-flip" type="checkbox" checked> Inverser à la 2e période</label>
             </div>
             <p class="hint">Mettez la vidéo sur une image où des lignes du terrain sont visibles, choisissez un repère, cliquez-le sur l'image. Au moins 4 repères bien répartis.</p>
@@ -122,8 +125,23 @@
 
           <details class="ai-step" open id="ai-d2">
             <summary><b>2. Tenues</b> <span id="ai-s2-state" class="chip"></span></summary>
-            <p class="hint">Mettez la vidéo en pause sur une image où le joueur est bien visible, puis cliquez « Choisir » et cliquez le joueur.</p>
+            <p class="hint">Mettez la vidéo en pause sur une image où le joueur est bien visible. <b>Pipette</b> : vous cliquez vous-même le maillot, le short, les chaussettes. <b>Auto</b> : vous cliquez le joueur et le programme lit ses couleurs. Le maillot compte le plus ; short et chaussettes sont facultatifs.</p>
             <div id="ai-kits"></div>
+            <div id="ai-pipette" class="ai-pipette" hidden>
+              <b id="pp-title"></b>
+              <div class="ai-run">
+                <button data-part="shirt">Maillot</button><button data-part="shorts">Short</button><button data-part="socks">Chaussettes</button>
+              </div>
+              <div class="ai-run"><button id="pp-skip">Passer cette partie</button><button id="pp-done" class="primary">Terminer</button><button id="pp-cancel" class="ghost">Annuler</button></div>
+              <p class="hint" id="pp-hint"></p>
+            </div>
+            <div class="ai-grid">
+              <label class="wide">Tolérance de reconnaissance <span id="ai-tol-v" class="muted"></span>
+                <input id="ai-tol" type="range" min="20" max="80" value="42">
+              </label>
+              <button id="ai-test" class="wide">Tester la reconnaissance sur cette image</button>
+            </div>
+            <p id="ai-test-msg" class="hint"></p>
           </details>
 
           <details class="ai-step" open id="ai-d3">
@@ -226,7 +244,14 @@
         <li><strong>Marquer les situations</strong> observées : cliquez sur la situation (ex. « Repli défensif tardif »). Le contexte (zone, côté, conséquence) réglé sous la vidéo est enregistré avec l'événement, ainsi qu'une capture d'image.</li>
         <li>Marquez aussi les <strong>buts</strong> (bouton rouge/vert) : l'application remonte alors les 12 secondes précédentes pour identifier la cause probable de chaque but encaissé.</li>
         <li>Cliquez sur <strong>« Début 2e période »</strong> au bon moment pour séparer les statistiques des deux périodes.</li>
-        <li><strong>Analyse IA</strong> (panneau de droite) : calibrez le terrain en cliquant 4 repères ou plus, choisissez les tenues en cliquant un joueur de chaque type, puis lancez l'analyse. Les joueurs sont suivis, projetés sur une <strong>vue de dessus</strong> et les erreurs détectées sont <em>suggérées</em> : vous validez ou écartez chacune.</li>
+        <li><strong>Analyse IA</strong> (panneau de droite) :
+          <ol>
+            <li><em>Terrain</em> : dimensions, sens du jeu, type de caméra (<strong>fixe</strong> ou <strong>mobile</strong> à la main). Mettez la vidéo en pause sur une image, choisissez un repère dans la liste, cliquez-le sur l'image ; 4 repères minimum, bien répartis. Le terrain peut n'être que partiellement visible : prenez les repères visibles (coins, cercle central, angles des surfaces, points de penalty). Attention : ne cliquez que les lignes du futsal, pas celles d'un autre sport tracées sur le même sol.</li>
+            <li><em>Caméra mobile</em> : le programme suit le mouvement de la caméra entre deux calibrages. Calibrez au début de la séquence ; ajoutez un calibrage après un gros mouvement ou toutes les 20 à 30 secondes pour garder la précision. Si le suivi est perdu (flou, mouvement trop rapide), les images concernées sont ignorées et indiquées.</li>
+            <li><em>Tenues</em> : <strong>Pipette</strong> (vous cliquez vous-même le maillot, le short, les chaussettes sur l'image en pause) ou <strong>Auto</strong> (clic sur un joueur). Définissez « Mon équipe », « Adversaire », les gardiens et l'arbitre. Le maillot compte le plus. Bouton <strong>Tester la reconnaissance</strong> pour vérifier avant l'analyse, et réglage de tolérance.</li>
+            <li><em>Analyse</em> : choisissez la plage et la précision ; la durée estimée est affichée. Résultat : cadres/silhouettes, vue de dessus, statistiques et erreurs suggérées à valider.</li>
+          </ol>
+        </li>
         <li>Ouvrez <strong>Rapport &amp; solutions</strong> : erreurs classées par gravité, schémas récurrents, solutions, consignes, exercices et plan d'entraînement. Exportez en PDF pour vos joueurs ou votre staff.</li>
         <li><strong>Corrections animées</strong> : pour chaque erreur, une animation en vue de dessus montre l'erreur puis la correction et la consigne ; les exercices sont animés aussi. Exportez une vidéo (MP4) à envoyer à vos joueurs, ou la vidéo complète des corrections du match.</li>
         <li>La <strong>Base de connaissances</strong> regroupe les lois du jeu, les systèmes tactiques, les rôles, le vocabulaire, le catalogue des erreurs et la bibliothèque d'exercices.</li>
@@ -276,6 +301,7 @@
 <script src="ai/homography.js"></script>
 <script src="ai/kit.js"></script>
 <script src="ai/tracker.js"></script>
+<script src="ai/camera.js"></script>
 <script src="ai/match.js"></script>
 <script src="ai/pipeline.js"></script>
 <script src="report.js"></script>

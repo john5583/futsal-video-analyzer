@@ -116,3 +116,35 @@ test("suivi : équipe finale par vote majoritaire", () => {
   assert.equal(teams[1], "A");
   assert.equal(teams[2], undefined);
 });
+
+/* ---- pipette et parties facultatives ---- */
+test("pipette : couleur médiane d'un petit carré, insensible à un pixel parasite", () => {
+  const im = img(60, 120, kitA);
+  im.data[(30 * 60 + 30) * 4] = 255; im.data[(30 * 60 + 30) * 4 + 1] = 0; im.data[(30 * 60 + 30) * 4 + 2] = 0; // un pixel rouge parasite dans la zone du maillot
+  const lab = K.pipette(im, 30, 30, 3);
+  const hex = K.toHex(lab);
+  assert.ok(Math.abs(parseInt(hex.slice(1, 3), 16) - 30) < 8 && Math.abs(parseInt(hex.slice(5, 7), 16) - 220) < 8, hex);
+  assert.equal(K.pipette({ data: new Uint8ClampedArray(0), width: 0, height: 0 }, 5, 5, 2), null);
+  assert.equal(K.fromParts(null, lab, lab), null);
+  assert.deepEqual(K.fromParts(lab, null, undefined), { shirt: lab, shorts: null, socks: null });
+});
+
+test("classification avec maillot seul : short et chaussettes ignorés, tolérance réglable", () => {
+  const box = [10, 10, 50, 110];
+  const shirtOnly = (kit) => { const f = K.sample(img(60, 120, kit), box); return K.fromParts(f.shirt, null, null); };
+  const refs = { A: shirtOnly(kitA), B: shirtOnly(kitB) };
+  // même maillot que A mais short et chaussettes de l'adversaire : reconnu comme A grâce au maillot
+  const mixed = [[0.15, 0.5, [30, 90, 220]], [0.5, 0.68, [30, 30, 30]], [0.68, 0.98, [30, 30, 30]]];
+  assert.equal(K.classify(K.sample(img(60, 120, mixed), box), refs).team, "A");
+  // maillot légèrement différent : refusé avec une tolérance serrée, accepté avec une tolérance large
+  const close = [[0.15, 0.5, [70, 120, 200]], [0.5, 0.98, [245, 245, 245]]];
+  const f = K.sample(img(60, 120, close), box);
+  assert.equal(K.classify(f, refs, { reject: 3 }).team, "UNK");
+  assert.equal(K.classify(f, refs, { reject: 60 }).team, "A");
+  // empreinte sans partie commune : distance infinie
+  assert.equal(K.dist({ shirt: null, shorts: [1, 1, 1], socks: null }, { shirt: [1, 1, 1], shorts: null, socks: null }), Infinity);
+  const avg = K.average([{ shirt: [10, 0, 0], shorts: null, socks: null }, { shirt: [20, 0, 0], shorts: [5, 5, 5], socks: null }]);
+  assert.deepEqual(avg.shirt, [15, 0, 0]); assert.deepEqual(avg.shorts, [5, 5, 5]); assert.equal(avg.socks, null);
+  const sw = K.swatches(avg);
+  assert.match(sw.shirt, /^#[0-9a-f]{6}$/); assert.equal(sw.socks, null);
+});

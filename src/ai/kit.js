@@ -73,40 +73,67 @@
     return out;
   }
 
+  /* Distance entre deux empreintes : seules les parties présentes des deux côtés comptent (le maillot pèse le plus). */
   function dist(a, b) {
     let s = 0, w = 0;
     for (const k of Object.keys(BANDS)) {
+      if (!a[k] || !b[k]) continue;
       const d = Math.hypot(a[k][0] - b[k][0], a[k][1] - b[k][1], a[k][2] - b[k][2]);
       s += d * BANDS[k].w; w += BANDS[k].w;
     }
-    return s / w;
+    return w ? s / w : Infinity;
   }
 
-  /* Moyenne de plusieurs empreintes. */
+  /* Moyenne de plusieurs empreintes (chaque partie est moyennée sur les empreintes qui la contiennent). */
   function average(samples) {
     const out = {};
     for (const k of Object.keys(BANDS)) {
-      out[k] = [0, 1, 2].map((c) => samples.reduce((s, x) => s + x[k][c], 0) / samples.length);
+      const have = samples.filter((x) => x && x[k]);
+      out[k] = have.length ? [0, 1, 2].map((c) => have.reduce((s, x) => s + x[k][c], 0) / have.length) : null;
     }
     return out;
   }
 
+  /* Pipette : couleur médiane (Lab) d'un petit carré de (2r+1) pixels de côté centré sur (cx, cy). */
+  function pipette(img, cx, cy, r) {
+    r = Math.max(1, Math.round(r || 2));
+    const x0 = Math.max(0, Math.round(cx) - r), x1 = Math.min(img.width - 1, Math.round(cx) + r);
+    const y0 = Math.max(0, Math.round(cy) - r), y1 = Math.min(img.height - 1, Math.round(cy) + r);
+    const L = [], A = [], B = [];
+    for (let y = y0; y <= y1; y++) {
+      for (let x = x0; x <= x1; x++) {
+        const i = (y * img.width + x) * 4;
+        const lab = rgbToLab(img.data[i], img.data[i + 1], img.data[i + 2]);
+        L.push(lab[0]); A.push(lab[1]); B.push(lab[2]);
+      }
+    }
+    return L.length ? [median(L), median(A), median(B)] : null;
+  }
+
+  /* Empreinte construite à la pipette : le maillot est obligatoire, short et chaussettes facultatifs. */
+  function fromParts(shirt, shorts, socks) {
+    if (!shirt) return null;
+    return { shirt, shorts: shorts || null, socks: socks || null };
+  }
+
   /* refs : { A: empreinte, B: ..., GKA: ..., GKB: ..., REF: ... } (au moins A et B). */
-  function classify(feat, refs) {
+  /* opts.reject : distance maximale acceptée (tolérance, 42 par défaut). */
+  function classify(feat, refs, opts) {
     if (!feat) return { team: "UNK", distance: Infinity };
+    const reject = (opts && opts.reject) || REJECT_DISTANCE;
     let best = "UNK", bd = Infinity;
     for (const k of Object.keys(refs)) {
       if (!refs[k]) continue;
       const d = dist(feat, refs[k]);
       if (d < bd) { bd = d; best = k; }
     }
-    if (bd > REJECT_DISTANCE) return { team: "UNK", distance: bd };
+    if (bd > reject) return { team: "UNK", distance: bd };
     return { team: best, distance: bd };
   }
 
   function swatches(ref) {
-    return ref ? { shirt: toHex(ref.shirt), shorts: toHex(ref.shorts), socks: toHex(ref.socks) } : null;
+    return ref ? { shirt: ref.shirt ? toHex(ref.shirt) : null, shorts: ref.shorts ? toHex(ref.shorts) : null, socks: ref.socks ? toHex(ref.socks) : null } : null;
   }
 
-  return { BANDS, REJECT_DISTANCE, rgbToLab, labToRgb, sample, average, classify, dist, swatches, toHex };
+  return { BANDS, REJECT_DISTANCE, rgbToLab, labToRgb, sample, average, classify, dist, swatches, toHex, pipette, fromParts };
 });
