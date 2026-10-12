@@ -48,3 +48,18 @@ test("la base contient toutes les rubriques demandées", () => {
   const r = JSON.stringify(KB.RULES);
   for (const w of ["4 secondes", "hors-jeu", "fautes cumulées", "gardien-joueur"]) assert.ok(r.toLowerCase().includes(w.toLowerCase()), w);
 });
+
+test("la base couvre les thèmes tactiques et les règles essentielles", () => {
+  assert.ok(KB.TACTICS.length >= 8);
+  assert.ok(KB.RULES.length >= 12);
+  const all = JSON.stringify(KB.RULES).toLowerCase() + JSON.stringify(KB.TACTICS).toLowerCase() + JSON.stringify(KB.GLOSSARY).toLowerCase();
+  for (const w of ["4 secondes", "hors-jeu", "fautes cumulées", "gardien-joueur", "second point", "penalty", "temps mort", "corner", "touche", "remise en jeu du gardien", "carton rouge", "avantage", "pressing", "transition", "contre-pressing", "rotation", "pivot", "fixo", "ala", "power play", "tirs au but", "coup franc"]) {
+    assert.ok(all.includes(w), "terme absent de la base : " + w);
+  }
+  for (const s of KB.SYSTEMS) assert.ok(s.tips && Object.keys(s.tips).length >= 2, s.id);
+  const ids = KB.TACTICS.map((t) => t.id);
+  assert.equal(new Set(ids).size, ids.length);
+  KB.TACTICS.concat(KB.RULES).forEach((c) => c.items.forEach((i) => assert.ok(i.title && i.text.length > 30, c.id + "/" + i.title)));
+  const terms = KB.GLOSSARY.map((g) => g.term);
+  assert.equal(new Set(terms).size, terms.length, "terme de vocabulaire en double");
+});

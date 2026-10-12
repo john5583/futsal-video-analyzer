@@ -91,3 +91,63 @@ dialog form{display:flex;flex-direction:column;gap:10px}
 .dlg-actions{display:flex;justify-content:flex-end;gap:8px}
 [hidden]{display:none!important}
 @media (max-width:1250px){.analyse-grid{grid-template-columns:1fr}.col-right{min-height:520px}}
+
+/* ---- Analyse IA ---- */
+.video-box{position:relative}
+.overlay{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+.overlay.pick{pointer-events:auto;cursor:crosshair}
+.seg{display:flex;gap:4px;background:#0b1220;border-radius:8px;padding:3px;margin-bottom:10px}
+.seg button{flex:1;border:0;background:transparent;border-radius:6px;color:var(--muted)}
+.seg button.active{background:var(--panel2);color:#fff}
+.pane{display:none;min-height:0;overflow:auto;flex:1;flex-direction:column}
+.pane.active{display:flex}
+.ai-status{font-size:13px;margin-bottom:8px}
+.ai-status.bad{color:#fca5a5}
+.ai-step{border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-bottom:8px;background:#0f1a2b}
+.ai-step summary{cursor:pointer;display:flex;gap:8px;align-items:center}
+.chip{font-size:11px;padding:1px 8px;border-radius:99px;background:#0b1220;color:var(--muted)}
+.chip.ok{background:#14532d;color:#bbf7d0}
+.chip.warn{background:#78350f;color:#fde68a}
+.hint{color:var(--muted);font-size:12px;margin:6px 0}
+.ai-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:8px 0;align-items:end}
+.ai-grid .wide{grid-column:1/-1}
+.ai-grid label.row{flex-direction:row;align-items:center;gap:6px;grid-column:1/-1}
+.ai-list{display:flex;flex-direction:column;gap:4px;margin:6px 0}
+.ai-item{display:flex;gap:8px;align-items:center;background:#0b1220;border-radius:6px;padding:4px 8px;font-size:12px}
+.ai-item .grow{flex:1}
+.ai-item button{padding:0 8px}
+.kit-row{display:grid;grid-template-columns:1fr auto auto;gap:8px;align-items:center;margin:6px 0}
+.kit-row .sw{width:22px;height:22px;display:inline-block}
+.kit-sw{display:flex;gap:3px}
+.ai-run{display:flex;gap:8px;margin:8px 0}
+.progress{height:8px;border-radius:99px;background:#0b1220;overflow:hidden;margin:6px 0}
+.progress i{display:block;height:100%;width:0;background:var(--blue);transition:width .2s}
+.ai-toggles{display:flex;flex-wrap:wrap;gap:6px 14px;margin:6px 0;font-size:13px}
+.ai-toggles label{flex-direction:row;gap:5px;align-items:center;color:var(--text)}
+.ai-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin:6px 0}
+.ai-stats .st{background:#0b1220;border-radius:6px;padding:6px 8px;font-size:12px;color:var(--muted)}
+.ai-stats .st b{display:block;color:#fff;font-size:16px}
+.ai-h{font-size:13px;margin:10px 0 0}
+.minimap{background:var(--panel);border:1px solid var(--line);border-radius:10px;margin-top:10px;overflow:hidden}
+.minimap h2{padding:8px 12px;display:flex;justify-content:space-between;border-bottom:1px solid var(--line)}
+.minimap canvas{display:block;width:100%;height:auto}
+/* ---- Corrections animées ---- */
+.corr-layout{display:grid;grid-template-columns:320px 1fr;height:100%}
+.corr-list{border-right:1px solid var(--line);background:#0b1220;padding:10px;overflow:auto}
+.corr-list h3{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:10px 0 4px}
+.corr-list button.item{display:block;width:100%;text-align:left;background:transparent;border:0;border-radius:6px;padding:6px 8px;color:var(--text);font-size:13px}
+.corr-list button.item:hover{background:var(--panel2)}
+.corr-list button.item.active{background:var(--blue);color:#fff}
+.corr-list button.item small{display:block;color:var(--muted)}
+.corr-list button.item.active small{color:#dbeafe}
+.corr-list summary{cursor:pointer;margin:10px 0 4px}
+.corr-main{padding:14px;overflow:auto;min-width:0}
+.corr-stage{background:#000;border-radius:10px;overflow:hidden;max-width:1100px}
+.corr-stage canvas{display:block;width:100%;height:auto}
+.corr-controls{display:flex;gap:8px;align-items:center;margin:10px 0;max-width:1100px}
+.corr-controls input[type=range]{flex:1}
+.corr-export{display:flex;flex-wrap:wrap;gap:8px;align-items:center;max-width:1100px}
+.corr-export .progress{flex-basis:100%}
+.corr-desc{max-width:1100px;color:var(--muted)}
+.kb-content button.anim{margin-top:6px;background:var(--blue);border-color:var(--blue);color:#fff}
+@media (max-width:1000px){.corr-layout{grid-template-columns:1fr}.corr-list{max-height:260px}}

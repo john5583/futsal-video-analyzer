@@ -2,26 +2,74 @@
   "name": "futsal-analyzer",
   "productName": "Futsal Analyzer",
   "version": "1.0.0",
-  "description": "Analyse vidéo tactique de futsal : détection des erreurs et propositions de solutions, avec base de connaissances intégrée.",
+  "description": "Analyse vidéo tactique de futsal par IA : détection des joueurs, vue de dessus, erreurs, corrections animées et base de connaissances.",
   "main": "main.js",
   "author": "CoachConvoc",
   "license": "UNLICENSED",
   "private": true,
   "scripts": {
     "start": "electron .",
-    "test": "node --test \"tests/*.test.js\"",
-    "dist": "electron-builder --win nsis --x64 --publish never"
+    "assets": "node scripts/get-assets.js",
+    "test": "node scripts/get-assets.js && node --test \"tests/*.test.js\"",
+    "dist": "node scripts/get-assets.js --model-only && electron-builder --win nsis --x64 --publish never",
+    "pack:linux": "node scripts/get-assets.js --model-only && electron-builder --linux dir --x64 --publish never"
   },
   "devDependencies": {
     "electron": "33.2.1",
-    "electron-builder": "25.1.8"
+    "electron-builder": "25.1.8",
+    "jpeg-js": "^0.4.4"
   },
   "build": {
     "appId": "com.coachconvoc.futsalanalyzer",
     "productName": "Futsal Analyzer",
-    "directories": { "output": "dist" },
-    "files": ["main.js", "preload.js", "src/**/*", "build/icon.png", "package.json"],
-    "win": { "target": [{ "target": "nsis", "arch": ["x64"] }], "icon": "build/icon.png" },
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "src/**/*",
+      "build/icon.png",
+      "package.json",
+      "!**/*.md",
+      "!**/*.map",
+      "!node_modules/onnxruntime-node/{script,test}/**",
+      "!node_modules/onnxruntime-node/bin/napi-v3/darwin/**"
+    ],
+    "asarUnpack": [
+      "src/ai/**",
+      "src/vendor/**",
+      "node_modules/onnxruntime-node/**",
+      "node_modules/onnxruntime-common/**"
+    ],
+    "extraResources": [
+      {
+        "from": "models/yolox_s.onnx",
+        "to": "models/yolox_s.onnx"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png",
+      "files": [
+        "!node_modules/onnxruntime-node/bin/napi-v3/linux/**",
+        "!node_modules/onnxruntime-node/bin/napi-v3/win32/arm64/**"
+      ]
+    },
+    "linux": {
+      "target": "dir",
+      "files": [
+        "!node_modules/onnxruntime-node/bin/napi-v3/win32/**",
+        "!node_modules/onnxruntime-node/bin/napi-v3/linux/arm64/**"
+      ]
+    },
     "nsis": {
       "oneClick": false,
       "perMachine": false,
@@ -31,5 +79,8 @@
       "shortcutName": "Futsal Analyzer",
       "language": "1036"
     }
+  },
+  "dependencies": {
+    "onnxruntime-node": "^1.20.1"
   }
 }

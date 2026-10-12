@@ -126,3 +126,17 @@ test("fmtTime", () => {
   assert.equal(A.fmtTime(NaN), "00:00");
   assert.equal(A.fmtTime(3725), "62:05");
 });
+
+test("le rapport inclut le plan d'action, les corrections animées en images et la section IA", () => {
+  const p = {
+    name: "Match test", defaultSystem: "1-2-1",
+    events: [{ id: 1, t: 10, type: "repli_tardif", zone: "DEF", outcome: "BUT_CONTRE" }, { id: 2, t: 90, type: "marquage_perdu" }],
+    ai: { suggested: 2, stats: { possession: { A: 55, B: 45, known: true }, shape: { width: 9.5, depth: 13.2 }, heat: [[0.1, 0.2], [0.3, 0.4]], players: [{ id: 3, team: "A", gk: false, distance: 812, avgX: 14.2, avgY: 9.8, presence: 0.9 }] } }
+  };
+  const html = R.build(p, A.analyze(p), { date: "01/01/2026" });
+  for (const s of ["Plan d'action pour les prochains matchs", "La correction en vue de dessus", "Analyse vidéo par IA", "Zones occupées par mon équipe", "Erreur observée", "Correction", "Consigne", "Possession (mon équipe)"]) assert.ok(html.includes(s), s);
+  assert.ok((html.match(/<svg/g) || []).length >= 7);
+  assert.ok(!html.includes("NaN"));
+  const noAi = R.build({ events: [] }, A.analyze({ events: [] }));
+  assert.ok(!noAi.includes("Analyse vidéo par IA"));
+});

@@ -21,14 +21,21 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
       - run: npm ci
-      - run: npm test
-      - run: npm run dist
-      - name: Vérifier l'installeur
+      - name: Tests (téléchargent le modèle et une photo d'essai)
+        run: npm test
+      - name: Construire l'installeur
+        run: npm run dist
+      - name: Vérifier le contenu de l'application
         shell: pwsh
         run: |
           $exe = Get-ChildItem dist -Filter "*Setup*.exe" | Select-Object -First 1
-          if (-not $exe -or $exe.Length -lt 50MB) { throw "Installeur introuvable ou trop petit" }
+          if (-not $exe -or $exe.Length -lt 100MB) { throw "Installeur introuvable ou trop petit" }
           Write-Host "Installeur : $($exe.Name) ($([math]::Round($exe.Length/1MB)) Mo)"
+          $res = "dist/win-unpacked/resources"
+          foreach ($f in @("models/yolox_s.onnx", "app.asar", "app.asar.unpacked/src/ai/worker.js", "app.asar.unpacked/node_modules/onnxruntime-node/bin/napi-v3/win32/x64/onnxruntime_binding.node", "app.asar.unpacked/node_modules/onnxruntime-node/bin/napi-v3/win32/x64/onnxruntime.dll")) {
+            if (-not (Test-Path "$res/$f")) { throw "Fichier manquant dans l'application : $f" }
+          }
+          if (Test-Path "$res/app.asar.unpacked/node_modules/onnxruntime-node/bin/napi-v3/linux") { throw "Binaires Linux inclus par erreur" }
       - uses: actions/upload-artifact@v4
         with:
           name: Futsal-Analyzer-Setup

@@ -2,3 +2,5 @@ node_modules/
 dist/
 *.fsal
 !build/
+models/*.onnx
+tests/fixtures/

@@ -13,6 +13,7 @@
   <nav class="tabs" id="tabs">
     <button data-tab="analyse" class="active">Analyse vidéo</button>
     <button data-tab="rapport">Rapport &amp; solutions</button>
+    <button data-tab="corrections">Corrections animées</button>
     <button data-tab="kb">Base de connaissances</button>
     <button data-tab="aide">Guide</button>
   </nav>
@@ -42,6 +43,7 @@
             <p class="muted">Formats : MP4 (H.264), M4V, MOV, WEBM, MKV, OGV</p>
           </div>
           <video id="video" crossorigin="anonymous" preload="metadata" hidden></video>
+          <canvas id="overlay" class="overlay" hidden></canvas>
         </div>
         <div class="controls" id="controls">
           <button id="c-prev" title="Retour 5 s (←)">⏪ 5 s</button>
@@ -60,6 +62,10 @@
         <input id="seek" type="range" min="0" max="0" step="0.1" value="0" aria-label="Position dans la vidéo" disabled>
         <div id="timeline" class="timeline" aria-label="Chronologie des événements"></div>
         <p id="video-error" class="error" hidden></p>
+        <section class="minimap" id="minimap-box" hidden>
+          <h2>Vue de dessus <span id="mm-time" class="time">00:00</span></h2>
+          <canvas id="minimap" width="840" height="440"></canvas>
+        </section>
 
         <div class="ctx">
           <span class="ctx-title">Contexte de l'événement</span>
@@ -71,6 +77,11 @@
       </div>
 
       <div class="col-right">
+        <div class="seg" id="seg">
+          <button data-pane="manual" class="active">Marquage manuel</button>
+          <button data-pane="ai">Analyse IA</button>
+        </div>
+        <div id="pane-manual" class="pane active">
         <div class="palette-head">
           <h2>Marquer à l'instant <span id="p-now" class="time">00:00</span></h2>
           <input id="palette-search" type="search" placeholder="Rechercher une situation…">
@@ -83,6 +94,75 @@
         <h2 class="ev-title">Événements <span id="ev-count" class="muted"></span></h2>
         <div id="events" class="events"></div>
         <div class="analyse-cta"><button id="btn-analyse" class="primary big">Voir le diagnostic ▸</button></div>
+        </div>
+
+        <div id="pane-ai" class="pane">
+          <div id="ai-status" class="ai-status"></div>
+
+          <details class="ai-step" open id="ai-d1">
+            <summary><b>1. Terrain</b> <span id="ai-s1-state" class="chip"></span></summary>
+            <div class="ai-grid">
+              <label>Longueur (m) <input id="ai-L" type="number" min="25" max="42" step="0.5" value="40"></label>
+              <label>Largeur (m) <input id="ai-W" type="number" min="15" max="25" step="0.5" value="20"></label>
+              <label>Sens du jeu
+                <select id="ai-dir"><option value="1">Mon équipe attaque vers la droite</option><option value="-1">Mon équipe attaque vers la gauche</option></select>
+              </label>
+              <label class="row"><input id="ai-flip" type="checkbox" checked> Inverser à la 2e période</label>
+            </div>
+            <p class="hint">Mettez la vidéo sur une image où des lignes du terrain sont visibles, choisissez un repère, cliquez-le sur l'image. Au moins 4 repères bien répartis.</p>
+            <div class="ai-grid">
+              <label class="wide">Repère à placer <select id="ai-landmark"></select></label>
+              <button id="ai-place">Placer sur l'image</button>
+              <button id="ai-validate" class="primary">Valider le calibrage</button>
+            </div>
+            <div id="ai-points" class="ai-list"></div>
+            <div id="ai-calibs" class="ai-list"></div>
+            <p id="ai-calib-msg" class="hint"></p>
+          </details>
+
+          <details class="ai-step" open id="ai-d2">
+            <summary><b>2. Tenues</b> <span id="ai-s2-state" class="chip"></span></summary>
+            <p class="hint">Mettez la vidéo en pause sur une image où le joueur est bien visible, puis cliquez « Choisir » et cliquez le joueur.</p>
+            <div id="ai-kits"></div>
+          </details>
+
+          <details class="ai-step" open id="ai-d3">
+            <summary><b>3. Analyse</b> <span id="ai-s3-state" class="chip"></span></summary>
+            <div class="ai-grid">
+              <label>De (mm:ss) <input id="ai-t0" type="text" value="00:00" pattern="[0-9]{1,3}:[0-5][0-9]"></label>
+              <label>À (mm:ss) <input id="ai-t1" type="text" value="00:00" pattern="[0-9]{1,3}:[0-5][0-9]"></label>
+              <label>Précision
+                <select id="ai-fps"><option value="2">Rapide (2 images/s)</option><option value="3" selected>Équilibrée (3 images/s)</option><option value="5">Fine (5 images/s)</option></select>
+              </label>
+              <label>Joueurs lointains
+                <select id="ai-tiles"><option value="1">Standard</option><option value="2">Renforcé (plus lent)</option></select>
+              </label>
+            </div>
+            <div class="ai-run">
+              <button id="ai-run" class="primary">Lancer l'analyse</button>
+              <button id="ai-cancel" hidden>Annuler</button>
+            </div>
+            <div class="progress" id="ai-progress" hidden><i id="ai-bar"></i></div>
+            <p id="ai-est" class="hint"></p>
+            <p id="ai-run-msg" class="hint"></p>
+          </details>
+
+          <details class="ai-step" open id="ai-d4">
+            <summary><b>4. Résultats</b> <span id="ai-s4-state" class="chip"></span></summary>
+            <div class="ai-toggles">
+              <label><input type="checkbox" id="ov-boxes" checked> Cadres</label>
+              <label><input type="checkbox" id="ov-sil"> Silhouettes</label>
+              <label><input type="checkbox" id="ov-ids" checked> Numéros</label>
+              <label><input type="checkbox" id="ov-trails" checked> Trajectoires</label>
+              <label><input type="checkbox" id="ov-heat"> Chaleur</label>
+              <label><input type="checkbox" id="ov-court"> Terrain</label>
+            </div>
+            <div id="ai-stats" class="ai-stats"></div>
+            <h3 class="ai-h">Erreurs suggérées <span id="ai-sugg-count" class="muted"></span></h3>
+            <div class="ai-run"><button id="ai-accept-all">Tout accepter</button><button id="ai-clear-sugg" class="ghost">Tout écarter</button></div>
+            <div id="ai-sugg" class="events"></div>
+          </details>
+        </div>
       </div>
     </div>
   </section>
@@ -95,6 +175,34 @@
       <span id="r-msg" class="muted"></span>
     </div>
     <iframe id="report-frame" sandbox="" title="Rapport d'analyse"></iframe>
+  </section>
+
+  <!-- CORRECTIONS ANIMÉES -->
+  <section id="tab-corrections" class="tab">
+    <div class="corr-layout">
+      <aside class="corr-list">
+        <div id="corr-mine"></div>
+        <details open><summary><b>Toutes les corrections</b></summary><div id="corr-errors"></div></details>
+        <details><summary><b>Exercices</b></summary><div id="corr-drills"></div></details>
+      </aside>
+      <div class="corr-main">
+        <div class="corr-stage"><canvas id="corr-canvas"></canvas></div>
+        <div class="corr-controls">
+          <button id="cp-play" class="primary">▶ Lecture</button>
+          <button id="cp-restart">⏮ Début</button>
+          <select id="cp-rate" title="Vitesse"><option value="0.5">×0,5</option><option value="1" selected>×1</option><option value="1.5">×1,5</option><option value="2">×2</option></select>
+          <input id="cp-seek" type="range" min="0" max="1000" value="0" aria-label="Position de l'animation">
+          <span id="cp-time" class="time">00:00 / 00:00</span>
+        </div>
+        <div class="corr-export">
+          <button id="cp-export-one">Enregistrer cette vidéo</button>
+          <button id="cp-export-all" class="primary">Vidéo complète des corrections du match</button>
+          <span id="cp-msg" class="muted"></span>
+          <div class="progress" id="cp-progress" hidden><i id="cp-bar"></i></div>
+        </div>
+        <p id="cp-desc" class="corr-desc"></p>
+      </div>
+    </div>
   </section>
 
   <!-- KB -->
@@ -118,12 +226,14 @@
         <li><strong>Marquer les situations</strong> observées : cliquez sur la situation (ex. « Repli défensif tardif »). Le contexte (zone, côté, conséquence) réglé sous la vidéo est enregistré avec l'événement, ainsi qu'une capture d'image.</li>
         <li>Marquez aussi les <strong>buts</strong> (bouton rouge/vert) : l'application remonte alors les 12 secondes précédentes pour identifier la cause probable de chaque but encaissé.</li>
         <li>Cliquez sur <strong>« Début 2e période »</strong> au bon moment pour séparer les statistiques des deux périodes.</li>
+        <li><strong>Analyse IA</strong> (panneau de droite) : calibrez le terrain en cliquant 4 repères ou plus, choisissez les tenues en cliquant un joueur de chaque type, puis lancez l'analyse. Les joueurs sont suivis, projetés sur une <strong>vue de dessus</strong> et les erreurs détectées sont <em>suggérées</em> : vous validez ou écartez chacune.</li>
         <li>Ouvrez <strong>Rapport &amp; solutions</strong> : erreurs classées par gravité, schémas récurrents, solutions, consignes, exercices et plan d'entraînement. Exportez en PDF pour vos joueurs ou votre staff.</li>
+        <li><strong>Corrections animées</strong> : pour chaque erreur, une animation en vue de dessus montre l'erreur puis la correction et la consigne ; les exercices sont animés aussi. Exportez une vidéo (MP4) à envoyer à vos joueurs, ou la vidéo complète des corrections du match.</li>
         <li>La <strong>Base de connaissances</strong> regroupe les lois du jeu, les systèmes tactiques, les rôles, le vocabulaire, le catalogue des erreurs et la bibliothèque d'exercices.</li>
       </ol>
       <h2>Comment fonctionne le diagnostic ?</h2>
       <p>Chaque situation marquée est pondérée selon sa nature, la conséquence (but encaissé &gt; occasion adverse &gt; perte de balle), la zone du terrain et sa récurrence. Les erreurs sont ensuite rapprochées pour détecter des schémas (ex. pertes de balle suivies de contre-attaques, pressing battu, cumul de fautes, baisse en 2e période, côté faible…).</p>
-      <p class="note">Le programme n'analyse pas les images de façon automatique : c'est le coach qui désigne les situations, l'application apporte l'organisation, le diagnostic chiffré et les solutions issues de la base de connaissances.</p>
+      <p class="note">Limites : la détection par IA dépend de la qualité de la vidéo. Le mieux : un smartphone <strong>fixe (trépied)</strong> placé en hauteur voyant tout le terrain. Si la caméra bouge, recalibrez à chaque changement de cadrage. Joueurs masqués, tenues proches ou ballon trop petit peuvent causer des erreurs : validez toujours les suggestions, et marquez à la main ce que l'IA a manqué.</p>
       <p>Sauvegarde automatique : votre travail est enregistré en continu et restauré à la prochaine ouverture. Utilisez « Enregistrer » pour créer un fichier de projet <code>.fsal</code> partageable.</p>
     </article>
   </section>
@@ -147,13 +257,30 @@
 <div id="toast" class="toast" hidden></div>
 
 <script src="knowledge/rules.js"></script>
+<script src="knowledge/tactics.js"></script>
 <script src="knowledge/systems.js"></script>
 <script src="knowledge/roles.js"></script>
 <script src="knowledge/glossary.js"></script>
 <script src="knowledge/drills.js"></script>
 <script src="knowledge/errors.js"></script>
 <script src="engine/analyzer.js"></script>
+<script src="anim/engine.js"></script>
+<script src="anim/builder.js"></script>
+<script src="anim/scenarios-errors.js"></script>
+<script src="anim/scenarios-drills.js"></script>
+<script src="anim/registry.js"></script>
+<script src="vendor/mp4-muxer.js"></script>
+<script src="vendor/webm-muxer.js"></script>
+<script src="anim/player.js"></script>
+<script src="ai/yolox.js"></script>
+<script src="ai/homography.js"></script>
+<script src="ai/kit.js"></script>
+<script src="ai/tracker.js"></script>
+<script src="ai/match.js"></script>
+<script src="ai/pipeline.js"></script>
 <script src="report.js"></script>
 <script src="app.js"></script>
+<script src="ai-ui.js"></script>
+<script src="corrections-ui.js"></script>
 </body>
 </html>

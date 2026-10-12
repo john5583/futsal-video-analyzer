@@ -1,5 +1,6 @@
 "use strict";
-const { app, BrowserWindow, Menu, dialog, ipcMain, protocol } = require("electron");
+const { app, BrowserWindow, Menu, dialog, ipcMain, protocol, shell } = require("electron");
+const { Worker } = require("worker_threads");
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
@@ -69,6 +70,60 @@ function serveVideo(request) {
   } catch (_err) {
     return new Response("Introuvable", { status: 404 });
   }
+}
+
+
+/* ---------- Détection par IA (fil d'exécution dédié) ---------- */
+function modelPath() {
+  return app.isPackaged ? path.join(process.resourcesPath, "models", "yolox_s.onnx") : path.join(__dirname, "models", "yolox_s.onnx");
+}
+
+const ai = { worker: null, ready: null, pending: new Map(), nextId: 1, error: null };
+
+function aiStop() {
+  if (ai.worker) { try { ai.worker.terminate(); } catch (_e) { /* déjà arrêté */ } }
+  ai.pending.forEach((p) => p.reject(new Error("Détecteur arrêté")));
+  ai.pending.clear();
+  ai.worker = null; ai.ready = null;
+}
+
+function aiStart() {
+  if (ai.ready) return ai.ready;
+  const file = modelPath();
+  if (!fs.existsSync(file)) {
+    ai.ready = Promise.reject(new Error("Modèle de détection introuvable : " + file));
+    ai.ready.catch(() => { ai.ready = null; });
+    return ai.ready;
+  }
+  ai.ready = new Promise((resolve, reject) => {
+    const workerFile = path.join(__dirname, "src", "ai", "worker.js").replace("app.asar" + path.sep, "app.asar.unpacked" + path.sep);
+    const w = new Worker(workerFile, { workerData: { modelPath: file, threads: Math.max(1, os.cpus().length - 1) } });
+    ai.worker = w;
+    w.on("message", (m) => {
+      if (m.type === "ready") resolve(true);
+      else if (m.type === "fatal") { reject(new Error(m.error)); aiStop(); }
+      else if (m.type === "result") {
+        const p = ai.pending.get(m.id);
+        if (!p) return;
+        ai.pending.delete(m.id);
+        if (m.error) p.reject(new Error(m.error)); else p.resolve(m.dets);
+      }
+    });
+    w.on("error", (e) => { reject(e); aiStop(); });
+    w.on("exit", () => { if (ai.worker === w) aiStop(); });
+  });
+  ai.ready.catch(() => { ai.ready = null; });
+  return ai.ready;
+}
+
+async function aiDetect(buffer, opts) {
+  await aiStart();
+  return new Promise((resolve, reject) => {
+    const id = ai.nextId++;
+    ai.pending.set(id, { resolve, reject });
+    const ab = buffer instanceof ArrayBuffer ? buffer : (buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength));
+    ai.worker.postMessage({ type: "detect", id, buffer: ab, minPerson: opts && opts.minPerson, minBall: opts && opts.minBall }, [ab]);
+  });
 }
 
 function atomicWrite(file, data) {
@@ -184,15 +239,48 @@ function registerIpc() {
     }
   });
 
-  ipcMain.handle("autosave:save", (_e, project) => {
+
+  ipcMain.handle("ai:status", async () => {
+    const st = { modelPresent: fs.existsSync(modelPath()), cpus: os.cpus().length, engineError: null };
+    if (!st.modelPresent) return st;
+    try { await aiStart(); } catch (err) { st.engineError = String(err && err.message || err); }
+    return st;
+  });
+  ipcMain.handle("ai:detect", async (_e, buffer, opts) => {
+    try { return { dets: await aiDetect(buffer, opts || {}) }; }
+    catch (err) { return { error: String(err && err.message || err) }; }
+  });
+  ipcMain.handle("ai:stop", () => { aiStop(); return true; });
+
+  ipcMain.handle("animation:save", async (_e, buffer, defaultName, ext) => {
+    const e = ext === "mp4" ? "mp4" : "webm";
+    const r = await dialog.showSaveDialog(mainWindow, {
+      title: "Enregistrer la vidéo de correction",
+      defaultPath: (defaultName || "correction-futsal").replace(/[\\/:*?"<>|]+/g, "-").slice(0, 80) + "." + e,
+      filters: [{ name: e === "mp4" ? "Vidéo MP4" : "Vidéo WebM", extensions: [e] }]
+    });
+    if (r.canceled || !r.filePath) return { canceled: true };
+    try { fs.writeFileSync(r.filePath, Buffer.from(buffer)); return { path: r.filePath }; }
+    catch (err) { return { error: "Écriture impossible : " + err.message }; }
+  });
+  ipcMain.handle("shell:showItem", (_e, p) => { if (typeof p === "string" && fs.existsSync(p)) shell.showItemInFolder(p); return true; });
+
+  /* La sauvegarde automatique garde les trajectoires IA (volumineuses) dans un fichier séparé, réécrit seulement quand elles changent. */
+  ipcMain.handle("autosave:save", (_e, project, aiFrames) => {
     if (!validProject(project)) return { error: "Projet invalide." };
-    try { atomicWrite(autosavePath(), JSON.stringify(project)); return { ok: true }; }
-    catch (err) { return { error: err.message }; }
+    try {
+      if (aiFrames) atomicWrite(path.join(app.getPath("userData"), "autosave-ai.json"), JSON.stringify(aiFrames));
+      atomicWrite(autosavePath(), JSON.stringify(project));
+      return { ok: true };
+    } catch (err) { return { error: err.message }; }
   });
   ipcMain.handle("autosave:load", () => {
     try {
       const project = JSON.parse(fs.readFileSync(autosavePath(), "utf8"));
-      return validProject(project) ? { project } : { none: true };
+      if (!validProject(project)) return { none: true };
+      let frames = null;
+      try { frames = JSON.parse(fs.readFileSync(path.join(app.getPath("userData"), "autosave-ai.json"), "utf8")); } catch (_e) { frames = null; }
+      return { project, aiFrames: Array.isArray(frames) ? frames : null };
     } catch (_err) {
       return { none: true };
     }
@@ -248,4 +336,5 @@ app.on("second-instance", () => {
     mainWindow.focus();
   }
 });
+app.on("before-quit", () => aiStop());
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });

@@ -15,12 +15,13 @@
   };
   const errById = Object.fromEntries(KB.ERRORS.map((e) => [e.id, e]));
 
-  let state = { project: newProject(), projectPath: null, videoOk: false };
+  let state = { project: newProject(), projectPath: null, videoOk: false, aiDirty: false };
+  const hooks = { onLoad() {}, onCorrections() {}, onTime() {} };
   let saveTimer = null;
   let editingId = null;
 
   function newProject() {
-    return { version: 1, name: "", teamName: "", opponentName: "", defaultSystem: "3-1", videoPath: null, videoName: null, secondHalfStart: null, duration: 0, events: [] };
+    return { version: 1, name: "", teamName: "", opponentName: "", defaultSystem: "3-1", videoPath: null, videoName: null, secondHalfStart: null, duration: 0, events: [], ai: null };
   }
 
   /* ---------- utilitaires ---------- */
@@ -56,12 +57,19 @@
   }
 
   /* ---------- sauvegarde ---------- */
-  function changed() {
+  /* ai = true : les trajectoires de l'analyse IA ont changé (réécrites dans leur fichier séparé). */
+  function changed(ai) {
+    if (ai) state.aiDirty = true;
     $("save-state").textContent = "Modifications…";
     clearTimeout(saveTimer);
     saveTimer = setTimeout(async () => {
       if (!api) return;
-      const r = await api.autosave(state.project);
+      const full = state.project;
+      const light = Object.assign({}, full);
+      if (light.ai && light.ai.frames) light.ai = Object.assign({}, light.ai, { frames: null, framesCount: light.ai.frames.length });
+      const sendFrames = state.aiDirty ? ((full.ai && full.ai.frames) || []) : null;
+      const r = await api.autosave(light, sendFrames);
+      if (r && r.ok && sendFrames) state.aiDirty = false;
       $("save-state").textContent = r && r.ok ? "Sauvegarde auto ✓" : "⚠ Sauvegarde auto impossible";
     }, 500);
   }
@@ -83,12 +91,13 @@
     await loadProject(r.project, r.path);
   }
 
-  async function loadProject(project, projectPath) {
+  async function loadProject(project, projectPath, aiFrames) {
     const base = newProject();
     state.project = Object.assign(base, project, {
       events: Array.isArray(project.events) ? project.events.filter((e) => e && typeof e.type === "string" && isFinite(Number(e.t))).map((e) => Object.assign({}, e, { t: Number(e.t), id: e.id || uid() })) : []
     });
     state.projectPath = projectPath || null;
+    if (state.project.ai && !state.project.ai.frames && Array.isArray(aiFrames)) state.project.ai.frames = aiFrames;
     syncMeta();
     clearVideo();
     if (state.project.videoPath && api) {
@@ -97,7 +106,8 @@
       else attachVideo(v);
     }
     renderAll();
-    changed();
+    hooks.onLoad();
+    changed(true);
   }
 
   function newProjectAction() {
@@ -107,7 +117,8 @@
     clearVideo();
     syncMeta();
     renderAll();
-    changed();
+    hooks.onLoad();
+    changed(true);
   }
 
   /* ---------- vidéo ---------- */
@@ -177,6 +188,7 @@
     $("p-now").textContent = A.fmtTime(cur);
     if (document.activeElement !== $("seek")) $("seek").value = cur;
     positionHead();
+    hooks.onTime();
   }
   function seek(t) {
     if (!state.videoOk) return;
@@ -302,6 +314,7 @@
     if (ev.side && KB.SIDES[ev.side]) parts.push(KB.SIDES[ev.side]);
     if (ev.outcome && ev.outcome !== "AUCUN" && KB.OUTCOMES[ev.outcome]) parts.push(KB.OUTCOMES[ev.outcome].label);
     if (A.periodOf(state.project, ev.t) === 2 && typeof state.project.secondHalfStart === "number") parts.push("2e période");
+    if (ev.auto) parts.push("détecté par l'IA");
     if (ev.note) parts.push("« " + ev.note + " »");
     return parts.join(" · ");
   }
@@ -388,6 +401,7 @@
     { id: "rules", title: "Lois du jeu", render: renderRules },
     { id: "systems", title: "Systèmes tactiques", render: renderSystems },
     { id: "roles", title: "Rôles et postes", render: renderRoles },
+    { id: "tactics", title: "Tactique détaillée", render: renderTactics },
     { id: "errors", title: "Erreurs & solutions", render: renderErrors },
     { id: "drills", title: "Exercices", render: renderDrills },
     { id: "glossary", title: "Vocabulaire", render: renderGlossary }
@@ -409,14 +423,18 @@
     return "<h1>Rôles et postes</h1>" + KB.ROLES.map((r) =>
       "<div class=\"card\"><h3>" + esc(r.name) + " <span class=\"muted\">· " + esc(r.aka) + "</span></h3><p>" + esc(r.summary) + "</p><div class=\"two\"><div><strong>En attaque</strong>" + ul(r.attack) + "</div><div><strong>En défense</strong>" + ul(r.defense) + "</div></div><p><strong>Qualités :</strong> " + esc(r.qualities.join(", ")) + "</p><p><strong>Erreurs fréquentes :</strong> " + esc(r.commonErrors.map((id) => (errById[id] ? errById[id].label : id)).join(" · ")) + "</p></div>").join("");
   }
+  function renderTactics() {
+    return "<h1>Tactique détaillée</h1>" + KB.TACTICS.map((c) => "<h2>" + esc(c.title) + "</h2>" + c.items.map((i) => "<div class=\"card\"><h3>" + esc(i.title) + "</h3><p>" + esc(i.text) + "</p></div>").join("")).join("");
+  }
+  const animBtn = (kind, id) => "<button class=\"anim\" data-kind=\"" + kind + "\" data-id=\"" + esc(id) + "\">▶ Voir l'animation en vue de dessus</button>";
   function renderErrors() {
     return "<h1>Catalogue des erreurs tactiques et solutions</h1>" + Object.keys(KB.PHASES).map((ph) =>
       "<h2 style=\"color:" + KB.PHASES[ph].color + "\">" + esc(KB.PHASES[ph].label) + "</h2>" + KB.ERRORS.filter((e) => e.phase === ph).map((e) =>
-        "<div class=\"card\"><h3>" + esc(e.label) + "</h3><p>" + esc(e.description) + "</p><div class=\"two\"><div><strong>Ce que l'on observe</strong>" + ul(e.signs) + "<strong>Causes probables</strong>" + ul(e.causes) + "</div><div><strong>Solutions</strong>" + ul(e.solutions) + "<strong>Consignes</strong>" + ul(e.cues) + "</div></div><p><strong>Exercices :</strong> " + esc(e.drills.map((id) => { const d = KB.DRILLS.find((x) => x.id === id); return d ? d.name : id; }).join(" · ")) + "</p></div>").join("")).join("");
+        "<div class=\"card\"><h3>" + esc(e.label) + "</h3><p>" + esc(e.description) + "</p><div class=\"two\"><div><strong>Ce que l'on observe</strong>" + ul(e.signs) + "<strong>Causes probables</strong>" + ul(e.causes) + "</div><div><strong>Solutions</strong>" + ul(e.solutions) + "<strong>Consignes</strong>" + ul(e.cues) + "</div></div><p><strong>Exercices :</strong> " + esc(e.drills.map((id) => { const d = KB.DRILLS.find((x) => x.id === id); return d ? d.name : id; }).join(" · ")) + "</p>" + animBtn("error", e.id) + "</div>").join("")).join("");
   }
   function renderDrills() {
     return "<h1>Bibliothèque d'exercices</h1>" + KB.DRILLS.map((d) =>
-      "<div class=\"card\"><h3>" + esc(d.name) + " <span class=\"muted\">· " + d.duration + " min · " + esc(d.players) + "</span></h3><p><strong>Objectif :</strong> " + esc(d.goal) + "</p><p>" + esc(d.description) + "</p><strong>Critères de réussite</strong>" + ul(d.criteria) + "</div>").join("");
+      "<div class=\"card\"><h3>" + esc(d.name) + " <span class=\"muted\">· " + d.duration + " min · " + esc(d.players) + "</span></h3><p><strong>Objectif :</strong> " + esc(d.goal) + "</p><p>" + esc(d.description) + "</p><strong>Critères de réussite</strong>" + ul(d.criteria) + animBtn("drill", d.id) + "</div>").join("");
   }
   function renderGlossary() {
     return "<h1>Vocabulaire du futsal</h1><dl>" + KB.GLOSSARY.slice().sort((a, b) => a.term.localeCompare(b.term, "fr")).map((g) => "<dt>" + esc(g.term) + "</dt><dd>" + esc(g.def) + "</dd>").join("") + "</dl>";
@@ -448,6 +466,7 @@
     KB.RULES.forEach((cat) => cat.items.forEach((i) => { if (hit(i.title, i.text)) { n++; out += "<div class=\"card\"><h3>Règle · " + esc(i.title) + "</h3><p>" + esc(i.text) + "</p></div>"; } }));
     KB.SYSTEMS.forEach((s) => { if (hit(s.name, s.aka, s.description, s.structure)) { n++; out += "<div class=\"card\"><h3>Système · " + esc(s.name) + "</h3><p>" + esc(s.description) + "</p></div>"; } });
     KB.DEFENSIVE_ORGANISATIONS.concat(KB.PRINCIPLES).forEach((d) => { const t = d.name || d.title; if (hit(t, d.text)) { n++; out += "<div class=\"card\"><h3>Tactique · " + esc(t) + "</h3><p>" + esc(d.text) + "</p></div>"; } });
+    KB.TACTICS.forEach((cat) => cat.items.forEach((i) => { if (hit(i.title, i.text)) { n++; out += "<div class=\"card\"><h3>Tactique · " + esc(i.title) + "</h3><p>" + esc(i.text) + "</p></div>"; } }));
     KB.ROLES.forEach((r) => { if (hit(r.name, r.aka, r.summary, r.attack.join(" "), r.defense.join(" "))) { n++; out += "<div class=\"card\"><h3>Rôle · " + esc(r.name) + "</h3><p>" + esc(r.summary) + "</p></div>"; } });
     KB.ERRORS.forEach((e) => { if (hit(e.label, e.description, e.solutions.join(" "), e.causes.join(" "))) { n++; out += "<div class=\"card\"><h3>Erreur · " + esc(e.label) + "</h3><p>" + esc(e.description) + "</p>" + ul(e.solutions) + "</div>"; } });
     KB.DRILLS.forEach((d) => { if (hit(d.name, d.goal, d.description)) { n++; out += "<div class=\"card\"><h3>Exercice · " + esc(d.name) + "</h3><p>" + esc(d.description) + "</p></div>"; } });
@@ -462,6 +481,7 @@
     document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
     if (name === "rapport") renderReport();
     if (name === "kb") showKb();
+    if (name === "corrections") hooks.onCorrections();
   }
 
   /* ---------- initialisation ---------- */
@@ -491,6 +511,10 @@
     $("btn-analyse").addEventListener("click", () => showTab("rapport"));
     $("palette-search").addEventListener("input", renderPalette);
     $("kb-search").addEventListener("input", showKb);
+    $("kb-content").addEventListener("click", (e) => {
+      const b = e.target.closest && e.target.closest("button.anim");
+      if (b && window.FSApp && window.FSApp.openAnimation) window.FSApp.openAnimation(b.dataset.kind, b.dataset.id);
+    });
     $("r-pdf").addEventListener("click", () => exportReport("pdf"));
     $("r-html").addEventListener("click", () => exportReport("html"));
 
@@ -525,6 +549,13 @@
     }
   }
 
+  window.FSApp = {
+    state, hooks, api, video, toast, changed, renderEvents, renderTimeline, renderPalette, seek, showTab, uid,
+    fmt: A.fmtTime, parseTime, labelOf, phaseColor, errById, esc, fill,
+    isVideoReady: () => state.videoOk,
+    getVideoUrl: () => video.currentSrc || video.src
+  };
+
   async function init() {
     fill($("x-zone"), [["", "—"]].concat(Object.entries(KB.ZONES).map(([k, v]) => [k, v.label])), "");
     fill($("x-side"), [["", "—"]].concat(Object.entries(KB.SIDES)), "");
@@ -534,7 +565,7 @@
     renderAll();
     if (api) {
       const r = await api.loadAutosave();
-      if (r && r.project) await loadProject(r.project, null);
+      if (r && r.project) await loadProject(r.project, null, r.aiFrames);
     }
     $("save-state").textContent = "";
   }
