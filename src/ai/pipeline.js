@@ -87,6 +87,7 @@
       if (!isFinite(p[0]) || !isFinite(p[1])) return;
       if (p[0] < -margin || p[0] > ctx.L + margin || p[1] < -margin || p[1] > ctx.W + margin) return;
       const feat = ctx.img ? K.sample(ctx.img, [d.x1, d.y1, d.x2, d.y2]) : null;
+      if (feat && ctx.refs) K.addAccents(feat, ctx.img, [d.x1, d.y1, d.x2, d.y2], ctx.refs);
       const cls = ctx.refs ? K.classify(feat, ctx.refs, { reject: ctx.reject }) : { team: "UNK" };
       list.push({ x: Math.round(p[0] * 100) / 100, y: Math.round(p[1] * 100) / 100, team: cls.team, box: [d.x1, d.y1, d.x2, d.y2], conf: d.score });
     });

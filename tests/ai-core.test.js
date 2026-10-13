@@ -126,7 +126,7 @@ test("pipette : couleur médiane d'un petit carré, insensible à un pixel paras
   assert.ok(Math.abs(parseInt(hex.slice(1, 3), 16) - 30) < 8 && Math.abs(parseInt(hex.slice(5, 7), 16) - 220) < 8, hex);
   assert.equal(K.pipette({ data: new Uint8ClampedArray(0), width: 0, height: 0 }, 5, 5, 2), null);
   assert.equal(K.fromParts(null, lab, lab), null);
-  assert.deepEqual(K.fromParts(lab, null, undefined), { shirt: lab, shorts: null, socks: null });
+  assert.deepEqual(K.fromParts(lab, null, undefined), { shirt: lab, shorts: null, socks: null, trim: null });
 });
 
 test("classification avec maillot seul : short et chaussettes ignorés, tolérance réglable", () => {
@@ -147,4 +147,37 @@ test("classification avec maillot seul : short et chaussettes ignorés, toléran
   assert.deepEqual(avg.shirt, [15, 0, 0]); assert.deepEqual(avg.shorts, [5, 5, 5]); assert.equal(avg.socks, null);
   const sw = K.swatches(avg);
   assert.match(sw.shirt, /^#[0-9a-f]{6}$/); assert.equal(sw.socks, null);
+});
+
+/* ---- liseré / manches ---- */
+function sleeveImg(shirt, withLime) { // 60x120, buste gris ou noir, manches (bords) vert citron si demandé
+  const w = 60, h = 120, d = new Uint8ClampedArray(w * h * 4);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    let c = [40, 120, 60];
+    if (y >= h * 0.15 && y < h * 0.5) {
+      c = shirt;
+      if (withLime && (x < 20 || x >= 40)) c = [170, 220, 40];
+    } else if (y >= h * 0.5 && y < h * 0.98) c = [20, 20, 20];
+    const i = (y * w + x) * 4; d[i] = c[0]; d[i + 1] = c[1]; d[i + 2] = c[2]; d[i + 3] = 255;
+  }
+  return { data: d, width: w, height: h };
+}
+test("liseré : détecté sur des manches vert citron, absent sur un maillot noir", () => {
+  const box = [10, 10, 50, 110];
+  const withLime = K.sample(sleeveImg([120, 120, 120], true), box);
+  const black = K.sample(sleeveImg([15, 15, 15], false), box);
+  assert.ok(withLime.trim, "liseré trouvé");
+  assert.equal(black.trim, null);
+  assert.ok(K.accentFraction(sleeveImg([120, 120, 120], true), box, withLime.trim) > 0.1);
+  assert.equal(K.accentFraction(sleeveImg([15, 15, 15], false), box, withLime.trim), 0);
+});
+
+test("liseré : sépare une équipe grise à manches vertes d'une équipe noire", () => {
+  const box = [10, 10, 50, 110];
+  const imgA = sleeveImg([35, 35, 35], true), imgB = sleeveImg([22, 22, 22], false);
+  const refs = { A: K.average([K.sample(imgA, box)]), B: K.average([K.sample(imgB, box)]) };
+  const fa = K.addAccents(K.sample(imgA, box), imgA, box, refs);
+  const fb = K.addAccents(K.sample(imgB, box), imgB, box, refs);
+  assert.equal(K.classify(fa, refs).team, "A");
+  assert.equal(K.classify(fb, refs).team, "B");
 });

@@ -9,7 +9,7 @@
 
   const ROLES = [["A", "Mon équipe", "#2f6fed"], ["B", "Adversaire", "#e5484d"], ["GKA", "Mon gardien", "#f2b705"], ["GKB", "Gardien adverse", "#ff8a3d"], ["REF", "Arbitre", "#a78bfa"]];
   const TEAM_COLOR = { A: "#3b82f6", B: "#ef4444", GKA: "#f2b705", GKB: "#ff8a3d", REF: "#a78bfa", UNK: "#9aa5a0" };
-  const PARTS = { shirt: "le MAILLOT", shorts: "le SHORT", socks: "les CHAUSSETTES" };
+  const PARTS = { shirt: "le MAILLOT", shorts: "le SHORT", socks: "les CHAUSSETTES", trim: "les MANCHES / le LISERÉ" };
   let pts = [];              // repères en cours de placement : { id, label, ix, iy }
   let placing = null;        // identifiant du repère à placer
   let pickRole = null;       // rôle de tenue à choisir
@@ -17,7 +17,7 @@
   let abort = null;
   let running = false;
   let live = null;           // image affichée pendant l'analyse
-  let pip = null;            // pipette en cours : { role, parts: { shirt, shorts, socks }, part, points }
+  let pip = null;            // pipette en cours : { role, parts: { shirt, shorts, socks, trim }, part, points }
   let preview = null;        // aperçu de la reconnaissance sur l'image en pause
   let lastTest = null;       // dernière détection (pour re-classer quand la tolérance change)
   let raf = 0;
@@ -225,7 +225,7 @@
       const sw = r[key] ? K.swatches(r[key]) : null, n = (a.kits[key] || []).length;
       const row = document.createElement("div"); row.className = "kit-row";
       row.innerHTML = "<span><span class=\"sw\" style=\"background:" + color + ";width:10px;height:10px;border-radius:50%;display:inline-block;margin-right:6px\"></span>" + esc(label) + (n ? " <span class=\"muted\">(" + n + " échantillon" + (n > 1 ? "s" : "") + ")</span>" : "") + "</span>" +
-        "<span class=\"kit-sw\">" + (sw ? "<i class=\"sw\" style=\"background:" + sw.shirt + "\" title=\"Maillot\"></i><i class=\"sw\" style=\"background:" + sw.shorts + "\" title=\"Short\"></i><i class=\"sw\" style=\"background:" + sw.socks + "\" title=\"Chaussettes\"></i>" : "") + "</span>" +
+        "<span class=\"kit-sw\">" + (sw ? "<i class=\"sw\" style=\"background:" + sw.shirt + "\" title=\"Maillot\"></i><i class=\"sw\" style=\"background:" + sw.shorts + "\" title=\"Short\"></i><i class=\"sw\" style=\"background:" + sw.socks + "\" title=\"Chaussettes\"></i>" + (sw.trim ? "<i class=\"sw\" style=\"background:" + sw.trim + "\" title=\"Manches / liseré\"></i>" : "") : "") + "</span>" +
         "<span class=\"btns\"><button data-a=\"pip\" title=\"Cliquer vous-même le maillot, le short, les chaussettes\">Pipette</button><button data-a=\"pick\" title=\"Cliquer un joueur : couleurs lues automatiquement\">Auto</button>" + (n ? "<button data-a=\"clear\" class=\"ghost\" title=\"Effacer\">×</button>" : "") + "</span>";
       row.querySelector("[data-a=pick]").addEventListener("click", () => startPick(key));
       row.querySelector("[data-a=pip]").addEventListener("click", () => startPipette(key));
@@ -371,7 +371,7 @@
     if (!App.isVideoReady()) { App.toast("Chargez d'abord une vidéo.", true); return; }
     video.pause();
     placing = null; pickRole = null; preview = null;
-    pip = { role, parts: { shirt: null, shorts: null, socks: null }, part: "shirt", points: [] };
+    pip = { role, parts: { shirt: null, shorts: null, socks: null, trim: null }, part: "shirt", points: [] };
     renderPipette(); updateOverlayMode();
   }
 
@@ -385,11 +385,11 @@
       b.classList.toggle("cur", part === pip.part);
       b.innerHTML = esc(b.textContent.replace(/\s*$/, "")) + (lab ? "<i class=\"sw\" style=\"background:" + K.toHex(lab) + "\"></i>" : "");
     });
-    $("pp-hint").textContent = "Cliquez sur " + PARTS[pip.part] + " d'un joueur de l'image. Short et chaussettes sont facultatifs : « Passer » ou « Terminer ». Plusieurs joueurs possibles : relancez la pipette.";
+    $("pp-hint").textContent = "Cliquez sur " + PARTS[pip.part] + " d'un joueur de l'image. Short, chaussettes et manches/liseré sont facultatifs (les manches aident quand les deux maillots sont sombres) : « Passer » ou « Terminer ». Plusieurs joueurs possibles : relancez la pipette.";
   }
 
   function nextPart() {
-    const order = ["shirt", "shorts", "socks"], i = order.indexOf(pip.part);
+    const order = ["shirt", "shorts", "socks", "trim"], i = order.indexOf(pip.part);
     if (i >= order.length - 1) finishPipette(); else { pip.part = order[i + 1]; renderPipette(); drawOverlay(); }
   }
 
@@ -405,7 +405,7 @@
   function finishPipette() {
     if (!pip) return;
     if (!pip.parts.shirt) { App.toast("Cliquez d'abord sur le maillot (partie obligatoire).", true); return; }
-    const a = ai(), f = K.fromParts(pip.parts.shirt, pip.parts.shorts, pip.parts.socks);
+    const a = ai(), f = K.fromParts(pip.parts.shirt, pip.parts.shorts, pip.parts.socks, pip.parts.trim);
     (a.kits[pip.role] = a.kits[pip.role] || []).push(f);
     pip = null; renderPipette(); renderKits(); updateOverlayMode(); App.changed();
     App.toast("Tenue enregistrée.");
@@ -423,6 +423,7 @@
     const counts = {};
     const players = res.dets.filter((d) => d.cls === 0).map((d) => {
       const feat = K.sample(res.img, [d.x1, d.y1, d.x2, d.y2]);
+      K.addAccents(feat, res.img, [d.x1, d.y1, d.x2, d.y2], r);
       const cls = K.classify(feat, r, { reject: tol() });
       counts[cls.team] = (counts[cls.team] || 0) + 1;
       return { id: null, team: cls.team, b: [Math.round((d.x1 / res.width) * 1000), Math.round((d.y1 / res.height) * 1000), Math.round((d.x2 / res.width) * 1000), Math.round((d.y2 / res.height) * 1000)] };

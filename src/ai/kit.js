@@ -12,6 +12,9 @@
     socks: { x0: 0.25, x1: 0.75, y0: 0.82, y1: 0.96, w: 0.4 }
   };
   const REJECT_DISTANCE = 42;
+  const TORSO = { x0: 0, x1: 1, y0: 0.16, y1: 0.5 };   // buste sur toute la largeur (manches comprises)
+  const ACC_MIN = 0.045;                               // part minimale de pixels « liseré » pour considérer qu'il est présent
+  const ACC_BONUS = 14;                                // correction de distance quand le liseré est (ou n'est pas) là
 
   function srgbToLinear(c) {
     c /= 255;
@@ -62,6 +65,43 @@
     return [median(L), median(A), median(B)];
   }
 
+  function torsoPixels(img, box) {
+    const bw = box[2] - box[0], bh = box[3] - box[1];
+    const x0 = Math.max(0, Math.floor(box[0] + bw * TORSO.x0)), x1 = Math.min(img.width, Math.ceil(box[0] + bw * TORSO.x1));
+    const y0 = Math.max(0, Math.floor(box[1] + bh * TORSO.y0)), y1 = Math.min(img.height, Math.ceil(box[1] + bh * TORSO.y1));
+    const out = [];
+    for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) { const i = (y * img.width + x) * 4; out.push(rgbToLab(img.data[i], img.data[i + 1], img.data[i + 2])); }
+    return out;
+  }
+
+  /* Liseré / manches de couleur vive : couleur médiane des pixels très colorés (jaune-vert à vert) du buste, ou null. */
+  function detectTrim(img, box) {
+    const px = torsoPixels(img, box);
+    const sel = px.filter(([l, a, b]) => {
+      const c = Math.hypot(a, b), h = ((Math.atan2(b, a) * 180) / Math.PI + 360) % 360;
+      return c > 28 && l > 35 && a < -3 && h >= 95 && h <= 170;
+    });
+    if (sel.length < Math.max(6, px.length * 0.002)) return null;
+    return [median(sel.map((p) => p[0])), median(sel.map((p) => p[1])), median(sel.map((p) => p[2]))];
+  }
+
+  /* Part de pixels du buste proches de la couleur de liseré donnée (on compare surtout la teinte : a* et b*). */
+  function accentFraction(img, box, lab) {
+    const px = torsoPixels(img, box);
+    if (!px.length || !lab) return 0;
+    let n = 0;
+    for (const p of px) if (Math.hypot(p[1] - lab[1], p[2] - lab[2]) <= 22 && p[0] > 30 && Math.abs(p[0] - lab[0]) <= 40) n++;
+    return n / px.length;
+  }
+
+  /* Calcule, pour chaque référence qui a un liseré, la part de pixels de ce liseré chez ce joueur (feat.acc[clé]). */
+  function addAccents(feat, img, box, refs) {
+    if (!feat) return feat;
+    feat.acc = {};
+    Object.keys(refs || {}).forEach((k) => { if (refs[k] && refs[k].trim) feat.acc[k] = accentFraction(img, box, refs[k].trim); });
+    return feat;
+  }
+
   /* Empreinte de tenue d'un joueur : trois couleurs Lab (ou null si la boîte est trop petite). */
   function sample(img, box) {
     if (box[2] - box[0] < 6 || box[3] - box[1] < 14) return null;
@@ -70,6 +110,7 @@
       out[k] = bandColor(img, box, BANDS[k]);
       if (!out[k]) return null;
     }
+    out.trim = detectTrim(img, box);
     return out;
   }
 
@@ -91,6 +132,8 @@
       const have = samples.filter((x) => x && x[k]);
       out[k] = have.length ? [0, 1, 2].map((c) => have.reduce((s, x) => s + x[k][c], 0) / have.length) : null;
     }
+    const withTrim = samples.filter((x) => x && x.trim);
+    out.trim = withTrim.length ? [0, 1, 2].map((c) => withTrim.reduce((s, x) => s + x.trim[c], 0) / withTrim.length) : null;
     return out;
   }
 
@@ -111,29 +154,40 @@
   }
 
   /* Empreinte construite à la pipette : le maillot est obligatoire, short et chaussettes facultatifs. */
-  function fromParts(shirt, shorts, socks) {
+  function fromParts(shirt, shorts, socks, trim) {
     if (!shirt) return null;
-    return { shirt, shorts: shorts || null, socks: socks || null };
+    return { shirt, shorts: shorts || null, socks: socks || null, trim: trim || null };
   }
 
   /* refs : { A: empreinte, B: ..., GKA: ..., GKB: ..., REF: ... } (au moins A et B). */
-  /* opts.reject : distance maximale acceptée (tolérance, 42 par défaut). */
+  /* opts.reject : distance maximale acceptée (tolérance, 42 par défaut).
+     Si une référence a un liseré (manches de couleur), sa présence chez le joueur (feat.acc) rapproche de cette équipe,
+     son absence l'éloigne ; les équipes sans liseré sont éloignées quand le liseré est présent. */
   function classify(feat, refs, opts) {
     if (!feat) return { team: "UNK", distance: Infinity };
     const reject = (opts && opts.reject) || REJECT_DISTANCE;
-    let best = "UNK", bd = Infinity;
-    for (const k of Object.keys(refs)) {
-      if (!refs[k]) continue;
-      const d = dist(feat, refs[k]);
-      if (d < bd) { bd = d; best = k; }
+    const keys = Object.keys(refs).filter((k) => refs[k]);
+    const d = {};
+    keys.forEach((k) => { d[k] = dist(feat, refs[k]); });
+    const accKeys = keys.filter((k) => refs[k].trim);
+    if (accKeys.length && feat.acc) {
+      const present = accKeys.some((k) => (feat.acc[k] || 0) >= ACC_MIN);
+      keys.forEach((k) => {
+        if (!isFinite(d[k])) return;
+        if (refs[k].trim) d[k] += (feat.acc[k] || 0) >= ACC_MIN ? -ACC_BONUS : ACC_BONUS;
+        else if (present) d[k] += ACC_BONUS;
+        if (d[k] < 0) d[k] = 0;
+      });
     }
+    let best = "UNK", bd = Infinity;
+    keys.forEach((k) => { if (d[k] < bd) { bd = d[k]; best = k; } });
     if (bd > reject) return { team: "UNK", distance: bd };
     return { team: best, distance: bd };
   }
 
   function swatches(ref) {
-    return ref ? { shirt: ref.shirt ? toHex(ref.shirt) : null, shorts: ref.shorts ? toHex(ref.shorts) : null, socks: ref.socks ? toHex(ref.socks) : null } : null;
+    return ref ? { shirt: ref.shirt ? toHex(ref.shirt) : null, shorts: ref.shorts ? toHex(ref.shorts) : null, socks: ref.socks ? toHex(ref.socks) : null, trim: ref.trim ? toHex(ref.trim) : null } : null;
   }
 
-  return { BANDS, REJECT_DISTANCE, rgbToLab, labToRgb, sample, average, classify, dist, swatches, toHex, pipette, fromParts };
+  return { BANDS, REJECT_DISTANCE, rgbToLab, labToRgb, sample, average, classify, dist, swatches, toHex, pipette, fromParts, detectTrim, accentFraction, addAccents, ACC_MIN };
 });
