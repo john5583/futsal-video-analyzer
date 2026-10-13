@@ -3,8 +3,11 @@ const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("fsal", {
   pickVideo: () => ipcRenderer.invoke("video:pick"),
+  pickVideos: () => ipcRenderer.invoke("video:pickMany"),
   resolveVideo: (p) => ipcRenderer.invoke("video:resolve", p),
   saveProject: (project, existingPath, saveAs) => ipcRenderer.invoke("project:save", project, existingPath, !!saveAs),
+  autoSaveProject: (project) => ipcRenderer.invoke("project:autoSave", project),
+  readProject: (p) => ipcRenderer.invoke("project:read", p),
   openProject: () => ipcRenderer.invoke("project:open"),
   autosave: (project, aiFrames) => ipcRenderer.invoke("autosave:save", project, aiFrames || null),
   aiStatus: () => ipcRenderer.invoke("ai:status"),

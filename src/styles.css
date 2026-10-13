@@ -162,3 +162,37 @@ dialog form{display:flex;flex-direction:column;gap:10px}
 .ai-pipette button .sw{display:inline-block;width:12px;height:12px;border-radius:3px;margin-left:6px;vertical-align:-1px;border:1px solid #fff4}
 input[type=range]{accent-color:var(--blue)}
 .kit-row .btns{display:flex;gap:4px}
+
+/* ---- assistant d'analyse ---- */
+.wiz{border:1px solid #1d4ed8;background:#0c1f3d;border-radius:10px;padding:12px 14px;margin-bottom:10px;font-size:13px;line-height:1.5}
+.wiz h3{margin:6px 0 8px;font-size:15px;color:#bfdbfe}
+.wiz h4{margin:12px 0 4px;font-size:13px;color:#93c5fd}
+.wiz button.big{font-size:15px;padding:10px 16px}
+.wiz .wiz-start{width:100%;padding:14px 16px;font-size:16px}
+.wiz-btns{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0 2px}
+.wiz-btns button.active{outline:2px solid #60a5fa}
+.wiz-dots{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px}
+.wiz-dots span{font-size:11px;padding:2px 8px;border-radius:99px;background:#0b1220;color:var(--muted)}
+.wiz-dots span.cur{background:#1d4ed8;color:#fff}
+.wiz-dots span.ok{background:#14532d;color:#bbf7d0}
+.wiz-chips{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 8px}
+.wchip{font-size:12px;padding:2px 9px;border-radius:99px;border:1px solid var(--c,#666);color:#dbeafe;background:#0b1220;display:inline-flex;align-items:center;gap:4px}
+.wchip.cur{background:var(--c);color:#fff}
+.wchip.ok::before{content:"✔";color:#86efac}
+.wchip .sw{width:12px;height:12px;border-radius:3px;display:inline-block;border:1px solid #fff4}
+.wiz-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin:8px 0}
+.wiz-grid label{display:flex;flex-direction:column;gap:3px;font-size:12px;color:var(--muted)}
+.wiz-now{font-weight:600;color:#fff;margin:8px 0}
+.wiz-count{color:var(--muted);margin:4px 0}
+.wiz-hint{color:#fde68a}
+.wiz-err{color:#fca5a5;margin:6px 0}
+.wiz-busy{font-weight:600;padding:8px 0}
+.wiz-q{margin:0 0 4px;color:#93c5fd}
+.wiz-opt{display:flex;gap:8px;align-items:flex-start;margin:8px 0;cursor:pointer}
+.wiz-after{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:8px;margin:8px 0}
+.wiz-res{list-style:none;margin:0;padding:0}
+.wiz-res li{display:flex;gap:8px;align-items:center;padding:3px 0}
+.wiz-res .grow{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.linklike{background:none;border:0;color:#93c5fd;text-decoration:underline;cursor:pointer;padding:0}
+.ai-adv{border:1px dashed var(--line);border-radius:8px;padding:6px 10px;margin-bottom:10px}
+.ai-adv>summary{cursor:pointer;color:var(--muted);font-size:12px}

@@ -1,0 +1,20 @@
+name: Test de bout en bout (Linux)
+on:
+  workflow_dispatch:
+  push:
+    branches: ["main"]
+    paths-ignore: ["**.md"]
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm ci
+      - run: node scripts/get-assets.js
+      - run: npm i --no-save playwright-core@1.49.0
+      - name: Démarrage de l'application et découpe réelle
+        run: xvfb-run -a node tests/e2e/segment-ipc.js
+        env:
+          CI: "true"

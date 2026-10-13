@@ -8,6 +8,7 @@ const { Readable } = require("stream");
 
 const VIDEO_EXT = [".mp4", ".m4v", ".mov", ".webm", ".mkv", ".ogv"];
 const PROJECT_EXT = "fsal";
+const savedProjects = new Set(); // projets enregistrés automatiquement pendant cette session (seuls lisibles par project:read)
 const allowedVideos = new Set(); // chemins validés par l'utilisateur (dialogue ou projet ouvert)
 let mainWindow = null;
 
@@ -223,6 +224,15 @@ function registerIpc() {
     if (r.canceled || !r.filePaths[0]) return { canceled: true };
     return checkVideo(r.filePaths[0]);
   });
+  ipcMain.handle("video:pickMany", async () => {
+    const r = await dialog.showOpenDialog(mainWindow, {
+      title: "Choisir une ou plusieurs vidéos à analyser",
+      properties: ["openFile", "multiSelections"],
+      filters: [{ name: "Vidéos", extensions: VIDEO_EXT.map((e) => e.slice(1)) }]
+    });
+    if (r.canceled || !r.filePaths.length) return { canceled: true };
+    return { videos: r.filePaths.slice(0, 20).map(checkVideo) };
+  });
   ipcMain.handle("video:resolve", (_e, p) => checkVideo(p));
 
   ipcMain.handle("project:save", async (_e, project, existingPath, saveAs) => {
@@ -246,6 +256,32 @@ function registerIpc() {
     }
   });
 
+  /* Enregistre automatiquement l'analyse d'une vidéo (à côté de la vidéo, sinon dans le dossier de l'application). */
+  ipcMain.handle("project:autoSave", (_e, project) => {
+    if (!validProject(project)) return { error: "Projet invalide." };
+    const base = (path.basename(project.videoName || project.name || "analyse", path.extname(project.videoName || "")) || "analyse").replace(/[\\/:*?"<>|]+/g, "-").slice(0, 60);
+    const dirs = [];
+    if (project.videoPath) dirs.push(path.dirname(project.videoPath));
+    dirs.push(path.join(app.getPath("userData"), "analyses"));
+    for (const dir of dirs) {
+      try {
+        fs.mkdirSync(dir, { recursive: true });
+        const target = path.join(dir, base + "." + PROJECT_EXT);
+        atomicWrite(target, JSON.stringify(project));
+        savedProjects.add(path.resolve(target));
+        return { path: target };
+      } catch (_err) { /* dossier non inscriptible : on essaie le suivant */ }
+    }
+    return { error: "Enregistrement impossible." };
+  });
+  ipcMain.handle("project:read", (_e, p) => {
+    try {
+      if (typeof p !== "string" || !savedProjects.has(path.resolve(p))) return { error: "Projet non autorisé." };
+      const project = JSON.parse(fs.readFileSync(p, "utf8"));
+      if (!validProject(project)) return { error: "Fichier de projet invalide." };
+      return { project, path: p };
+    } catch (err) { return { error: "Lecture impossible : " + err.message }; }
+  });
   ipcMain.handle("project:open", async () => {
     const r = await dialog.showOpenDialog(mainWindow, {
       title: "Ouvrir un projet",

@@ -3,6 +3,7 @@ Composants tiers inclus dans cette application
 mp4-muxer 5.1.3  — MIT License — Copyright (c) 2023 Vanilagy — https://github.com/Vanilagy/mp4-muxer
 webm-muxer 5.0.3 — MIT License — Copyright (c) 2023 Vanilagy — https://github.com/Vanilagy/webm-muxer
 YOLOX (modèle de détection, fichier models/yolox_s.onnx) — Apache License 2.0 — Megvii Inc. — https://github.com/Megvii-BaseDetection/YOLOX
+MobileSAM (modèles de découpe, fichiers models/mobile_sam_*.onnx, export ONNX par Acly) — Apache License 2.0 — Zhang et al. — https://github.com/ChaoningZhang/MobileSAM
 onnxruntime-node 1.20.1 — MIT License — Microsoft Corporation
 
 Texte de la licence MIT :

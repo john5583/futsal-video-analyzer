@@ -78,10 +78,10 @@
 
       <div class="col-right">
         <div class="seg" id="seg">
-          <button data-pane="manual" class="active">Marquage manuel</button>
-          <button data-pane="ai">Analyse IA</button>
+          <button data-pane="ai" class="active">Analyse IA</button>
+          <button data-pane="manual">Marquage manuel</button>
         </div>
-        <div id="pane-manual" class="pane active">
+        <div id="pane-manual" class="pane">
         <div class="palette-head">
           <h2>Marquer à l'instant <span id="p-now" class="time">00:00</span></h2>
           <input id="palette-search" type="search" placeholder="Rechercher une situation…">
@@ -96,10 +96,12 @@
         <div class="analyse-cta"><button id="btn-analyse" class="primary big">Voir le diagnostic ▸</button></div>
         </div>
 
-        <div id="pane-ai" class="pane">
+        <div id="pane-ai" class="pane active">
           <div id="ai-status" class="ai-status"></div>
-          <div id="ai-next" class="ai-next" role="status"></div>
+          <div id="wiz" class="wiz" role="region" aria-label="Assistant d'analyse"></div>
 
+          <details class="ai-adv" id="ai-advanced">
+            <summary>Options avancées (réglages manuels)</summary>
           <details class="ai-step" open id="ai-d1">
             <summary><b>1. Terrain</b> <span id="ai-s1-state" class="chip"></span></summary>
             <div class="ai-grid">
@@ -164,6 +166,8 @@
             <div class="progress" id="ai-progress" hidden><i id="ai-bar"></i></div>
             <p id="ai-est" class="hint"></p>
             <p id="ai-run-msg" class="hint"></p>
+          </details>
+
           </details>
 
           <details class="ai-step" open id="ai-d4">
@@ -245,13 +249,15 @@
         <li><strong>Marquer les situations</strong> observées : cliquez sur la situation (ex. « Repli défensif tardif »). Le contexte (zone, côté, conséquence) réglé sous la vidéo est enregistré avec l'événement, ainsi qu'une capture d'image.</li>
         <li>Marquez aussi les <strong>buts</strong> (bouton rouge/vert) : l'application remonte alors les 12 secondes précédentes pour identifier la cause probable de chaque but encaissé.</li>
         <li>Cliquez sur <strong>« Début 2e période »</strong> au bon moment pour séparer les statistiques des deux périodes.</li>
-        <li><strong>Analyse IA</strong> (panneau de droite) :
+        <li><strong>Analyse IA</strong> (panneau de droite) : cliquez sur le grand bouton <strong>« ▶ Analyser une vidéo »</strong>, choisissez une ou plusieurs vidéos, puis suivez l'assistant :
           <ol>
-            <li><em>Terrain</em> : dimensions, sens du jeu, type de caméra (<strong>fixe</strong> ou <strong>mobile</strong> à la main). Mettez la vidéo en pause sur une image, choisissez un repère dans la liste, cliquez-le sur l'image ; 4 repères minimum, bien répartis. Le terrain peut n'être que partiellement visible : prenez les repères visibles (coins, cercle central, angles des surfaces, points de penalty). Attention : ne cliquez que les lignes du futsal, pas celles d'un autre sport tracées sur le même sol.</li>
-            <li><em>Caméra mobile</em> : le programme suit le mouvement de la caméra entre deux calibrages. Calibrez au début de la séquence ; ajoutez un calibrage après un gros mouvement ou toutes les 20 à 30 secondes pour garder la précision. Si le suivi est perdu (flou, mouvement trop rapide), les images concernées sont ignorées et indiquées.</li>
-            <li><em>Tenues</em> : <strong>Pipette</strong> (vous cliquez vous-même le maillot, le short, les chaussettes sur l'image en pause) ou <strong>Auto</strong> (clic sur un joueur). Définissez « Mon équipe », « Adversaire », les gardiens et l'arbitre. Le maillot compte le plus. Bouton <strong>Tester la reconnaissance</strong> pour vérifier avant l'analyse, et réglage de tolérance.</li>
-            <li><em>Analyse</em> : choisissez la plage et la précision ; la durée estimée est affichée. Résultat : cadres/silhouettes, vue de dessus, statistiques et erreurs suggérées à valider.</li>
+            <li><em>Plusieurs vidéos</em> : indiquez si elles sont du <strong>même match</strong> (les tenues sont apprises une seule fois) ou de <strong>matchs différents</strong> (tout est redemandé pour chaque vidéo).</li>
+            <li><em>Terrain</em> : placez la vidéo sur une image où l'on voit bien les lignes, indiquez le sens du jeu et le type de caméra (à la main ou fixe), puis cliquez les points demandés (4 minimum). Un point invisible : « Je ne le vois pas ». Ne cliquez que les lignes du futsal (les lignes noires), pas celles d'un autre sport. Pour une caméra à la main, le programme suit ensuite le mouvement de la caméra.</li>
+            <li><em>Silhouettes</em> : cliquez « Découper les joueurs de cette image » : l'IA dessine la silhouette de chaque personne. Cliquez la silhouette de <strong>vos joueurs</strong> (2 à 3 suffisent), puis <strong>« Valider »</strong> ; faites de même pour les <strong>adversaires</strong>, puis le <strong>gardien</strong>, le <strong>gardien adverse</strong> et l'<strong>arbitre</strong> (« Passer » s'ils ne sont pas visibles). Le programme apprend la vareuse, les manches, le short et les bas à partir de la silhouette seule (sans le décor). « ＋ Joueur non détecté » : tracez un rectangle autour d'un joueur oublié. « ↺ Autre image » : refaire la découpe sur une autre image.</li>
+            <li><em>Analyse</em> : choisissez la plage et la précision, puis lancez. Le programme détecte les joueurs, reconnaît les équipes, suit le ballon et relève les erreurs tactiques.</li>
+            <li><em>Résultats</em> : voir les joueurs sur la vidéo, la vue de dessus, le rapport, les corrections animées, corriger les équipes ou enregistrer. Chaque analyse est enregistrée automatiquement à côté de la vidéo (fichier <code>.fsal</code>).</li>
           </ol>
+          Les réglages manuels (pipette de couleur, repères libres, tolérance) restent disponibles dans <em>« Options avancées »</em>.
         </li>
         <li>Ouvrez <strong>Rapport &amp; solutions</strong> : erreurs classées par gravité, schémas récurrents, solutions, consignes, exercices et plan d'entraînement. Exportez en PDF pour vos joueurs ou votre staff.</li>
         <li><strong>Corrections animées</strong> : pour chaque erreur, une animation en vue de dessus montre l'erreur puis la correction et la consigne ; les exercices sont animés aussi. Exportez une vidéo (MP4) à envoyer à vos joueurs, ou la vidéo complète des corrections du match.</li>
@@ -308,6 +314,7 @@
 <script src="report.js"></script>
 <script src="app.js"></script>
 <script src="ai-ui.js"></script>
+<script src="wizard.js"></script>
 <script src="corrections-ui.js"></script>
 </body>
 </html>

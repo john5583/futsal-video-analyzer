@@ -550,7 +550,7 @@
   }
 
   window.FSApp = {
-    state, hooks, api, video, toast, changed, renderEvents, renderTimeline, renderPalette, seek, showTab, uid,
+    state, hooks, api, video, toast, changed, loadProject, newProject, attachVideo, saveProject, renderEvents, renderTimeline, renderPalette, seek, showTab, uid,
     fmt: A.fmtTime, parseTime, labelOf, phaseColor, errById, esc, fill,
     isVideoReady: () => state.videoOk,
     getVideoUrl: () => video.currentSrc || video.src

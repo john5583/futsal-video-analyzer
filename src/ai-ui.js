@@ -21,6 +21,8 @@
   let preview = null;        // aperçu de la reconnaissance sur l'image en pause
   let lastTest = null;       // dernière détection (pour re-classer quand la tolérance change)
   let raf = 0;
+  const layers = [];         // couches de dessin ajoutées par l'assistant : fn(ctx, { toView, rect })
+  let pointer = null;        // gestionnaires de souris de l'assistant : { click, down, move, up, cursor }
 
   /* ---------- données du projet ---------- */
   function ai() {
@@ -132,6 +134,7 @@
         ctx.strokeStyle = "#000"; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(v[0], v[1], 9.5, 0, Math.PI * 2); ctx.stroke();
       });
     }
+    layers.forEach((fn) => fn(ctx, { toView, rect: r }));
     if (placing || pickRole || pip) {
       ctx.fillStyle = "rgba(11,18,32,.85)"; ctx.fillRect(8, 8, Math.min(560, boxSize().w - 16), 26);
       ctx.fillStyle = "#fff"; ctx.font = "600 13px 'Segoe UI',Arial,sans-serif";
@@ -145,7 +148,7 @@
   function updateOverlayMode() {
     const c = $("overlay");
     c.hidden = !video.videoWidth || video.hidden;
-    c.classList.toggle("pick", !!(placing || pickRole || pip));
+    c.classList.toggle("pick", !!(placing || pickRole || pip || pointer));
     drawOverlay();
   }
 
@@ -346,22 +349,23 @@
 
   function validateCalibration() {
     const a = ai(), msg = $("ai-calib-msg");
-    if (!App.isVideoReady()) { msg.textContent = "Chargez d'abord une vidéo."; return; }
-    if (pts.length < 4) { msg.textContent = "Placez au moins 4 repères (" + pts.length + " pour l'instant)."; return; }
+    if (!App.isVideoReady()) { msg.textContent = "Chargez d'abord une vidéo."; return false; }
+    if (pts.length < 4) { msg.textContent = "Placez au moins 4 repères (" + pts.length + " pour l'instant)."; return false; }
     const lm = Object.fromEntries(HG.landmarks(L(), W()).map((l) => [l.id, l]));
     const src = pts.map((p) => [p.ix, p.iy]), dst = pts.map((p) => [lm[p.id].x, lm[p.id].y]);
     const area = HG.spread(src) / (video.videoWidth * video.videoHeight);
-    if (area < 0.04) { msg.textContent = "Les repères sont trop regroupés : répartissez-les sur tout le terrain visible."; return; }
+    if (area < 0.04) { msg.textContent = "Les repères sont trop regroupés : répartissez-les sur tout le terrain visible."; return false; }
     let H, err;
     try { H = HG.solve(src, dst); err = HG.reprojectionError(H, src, dst); }
-    catch (e) { msg.textContent = e.message; return; }
-    if (!isFinite(err) || err > 1.5) { msg.textContent = "Calibrage imprécis (erreur " + (isFinite(err) ? err.toFixed(2) : "?") + " m). Replacez les repères avec plus de précision ou ajoutez-en d'autres."; return; }
+    catch (e) { msg.textContent = e.message; return false; }
+    if (!isFinite(err) || err > 1.5) { msg.textContent = "Calibrage imprécis (erreur " + (isFinite(err) ? err.toFixed(2) : "?") + " m). Replacez les repères avec plus de précision ou ajoutez-en d'autres."; return false; }
     const t = Math.round(video.currentTime * 10) / 10;
     a.calibrations = a.calibrations.filter((c) => Math.abs(c.t - t) > 0.5).concat([{ t, points: pts.map((p) => ({ id: p.id, ix: p.ix, iy: p.iy })), H, err }]).sort((x, y) => x.t - y.t);
     pts = []; placing = null;
     msg.textContent = "Calibrage enregistré (erreur moyenne " + err.toFixed(2) + " m). Cochez « Terrain » pour vérifier le tracé sur l'image.";
     $("ov-court").checked = true;
     renderPoints(); renderCalibs(); updateOverlayMode(); App.changed();
+    return true;
   }
 
   /* ---------- choix des tenues ---------- */
@@ -512,16 +516,17 @@
 
   function fmtEta(s) { s = Math.max(0, Math.round(s)); return Math.floor(s / 60) + " min " + String(s % 60).padStart(2, "0") + " s"; }
 
-  async function runAnalysis() {
+  async function runAnalysis(opts) {
     const a = ai(), msg = $("ai-run-msg");
-    if (running) return;
-    if (!App.isVideoReady()) { msg.textContent = "Chargez d'abord une vidéo."; return; }
-    if (!a.calibrations.length) { msg.textContent = "Calibrez d'abord le terrain (étape 1)."; return; }
+    let okRun = false;
+    if (running) return false;
+    if (!App.isVideoReady()) { msg.textContent = "Chargez d'abord une vidéo."; return false; }
+    if (!a.calibrations.length) { msg.textContent = "Calibrez d'abord le terrain (étape 1)."; return false; }
     const r = refs();
-    if (!r.A || !r.B) { msg.textContent = "Choisissez au moins « Mon équipe » et « Adversaire » (étape 2)."; return; }
+    if (!r.A || !r.B) { msg.textContent = "Choisissez au moins « Mon équipe » et « Adversaire » (étape 2)."; return false; }
     const range = readRange();
-    if (!range) { msg.textContent = "Plage de temps invalide."; return; }
-    if (frames.length && !confirm("Une analyse existe déjà : la remplacer ?")) return;
+    if (!range) { msg.textContent = "Plage de temps invalide."; return false; }
+    if (frames.length && !(opts && opts.noConfirm) && !confirm("Une analyse existe déjà : la remplacer ?")) return false;
     const fps = Number($("ai-fps").value), tiles = Number($("ai-tiles").value);
     running = true; abort = new AbortController(); live = null;
     const startedAt = Date.now();
@@ -534,6 +539,7 @@
         onProgress: (p) => {
           $("ai-bar").style.width = Math.round((p.done / p.total) * 100) + "%";
           msg.textContent = "Image " + p.done + " / " + p.total + " — reste environ " + fmtEta(p.eta) + (p.lost ? " (caméra perdue sur cette image)" : "");
+          if (FSAI.hooks.progress) FSAI.hooks.progress(p.done / p.total, msg.textContent);
           if (p.frame && p.done % 3 === 0) { live = p.frame; drawMinimap(); }
         }
       });
@@ -551,6 +557,7 @@
       msg.textContent = (out.length ? "Analyse terminée : " + out.length + " images, " + a.suggestedEvents.length + " erreur(s) suggérée(s)." : "Analyse terminée, mais aucun joueur n'a été retenu : vérifiez le calibrage et les tenues.") + (result.notes.length ? " " + result.notes.join(" ") : "") + lostTxt;
       try { localStorage.setItem(SEC_KEY, String(((Date.now() - startedAt) / 1000) / Math.max(1, out.length ? Math.ceil((range[1] - range[0]) * fps) * tiles : 1))); } catch (_e) { /* stockage indisponible */ }
       renderStats(); renderSuggestions(); refreshLive(); updateEstimate(); App.changed(true);
+      okRun = out.length > 0;
     } catch (e) {
       live = null;
       msg.textContent = "Analyse arrêtée : " + e.message;
@@ -559,7 +566,9 @@
       $("ai-run").disabled = false; $("ai-cancel").hidden = true;
       setTimeout(() => { $("ai-progress").hidden = true; }, 600);
       if (api && api.aiStop) { /* le détecteur reste chargé pour la prochaine analyse */ }
+      if (FSAI.hooks.finished) FSAI.hooks.finished(okRun, msg.textContent);
     }
+    return okRun;
   }
 
   /* ---------- liaison ---------- */
@@ -617,17 +626,26 @@
       acceptSuggestions(a.suggestedEvents.slice());
     });
     $("ai-clear-sugg").addEventListener("click", () => { const a = state.project.ai; if (!a) return; a.suggestedEvents = []; a.suggested = 0; renderSuggestions(); App.changed(); });
+    const inVideo = (e) => { const [ix, iy] = toVideo(e.offsetX, e.offsetY); return { ix, iy, ok: ix >= 0 && iy >= 0 && ix <= video.videoWidth && iy <= video.videoHeight }; };
+    ["down", "move", "up"].forEach((n) => $("overlay").addEventListener("pointer" + n, (e) => {
+      if (!pointer || !pointer[n]) return;
+      const q = inVideo(e);
+      pointer[n](q.ix, q.iy, q.ok, e);
+    }));
     $("overlay").addEventListener("click", (e) => {
       const [ix, iy] = toVideo(e.offsetX, e.offsetY);
+      if (pointer && pointer.click) { pointer.click(ix, iy, ix >= 0 && iy >= 0 && ix <= video.videoWidth && iy <= video.videoHeight, e); return; }
       if (ix < 0 || iy < 0 || ix > video.videoWidth || iy > video.videoHeight) return;
       if (placing) {
         const lm = HG.landmarks(L(), W()).find((l) => l.id === placing);
         pts = pts.filter((p) => p.id !== placing).concat([{ id: placing, label: lm.label, ix, iy }]);
         const order = HG.landmarks(L(), W()).map((l) => l.id);
         const next = order.find((id) => !pts.some((p) => p.id === id));
+        const placedId = placing;
         placing = null; renderPoints();
         if (next) $("ai-landmark").value = next;
         updateOverlayMode();
+        if (FSAI.hooks.pointPlaced) FSAI.hooks.pointPlaced(placedId);
       } else if (pip) pipetteClick(ix, iy);
       else if (pickRole) handlePick(ix, iy);
     });
@@ -662,6 +680,36 @@
     } else $("ai-status").textContent = "L'analyse IA est disponible dans l'application installée.";
     syncFromProject();
   }
+
+  /* Image de la vidéo à l'instant courant, dont le plus grand côté vaut 1024 px (taille attendue par le modèle de découpe). */
+  function grabSam() {
+    const vw = video.videoWidth, vh = video.videoHeight, k = 1024 / Math.max(vw, vh);
+    const w = Math.max(2, Math.round(vw * k)), h = Math.max(2, Math.round(vh * k));
+    const c = document.createElement("canvas");
+    c.width = w; c.height = h;
+    const ctx = c.getContext("2d", { willReadFrequently: true });
+    ctx.drawImage(video, 0, 0, w, h);
+    return { canvas: c, img: ctx.getImageData(0, 0, w, h), w, h, k, t: video.currentTime, id: "f" + Date.now().toString(36) };
+  }
+
+  const FSAI = window.FSAI = {
+    hooks: {}, segmentImpl: null,
+    ai, refs, grabSam, renderKits, renderStats, renderCalibs, renderPoints, validateCalibration, runAnalysis, updateEstimate,
+    addLayer: (fn) => { layers.push(fn); }, setPointer: (p) => { pointer = p; updateOverlayMode(); }, redraw: refreshLive,
+    beginPlacing: (id) => { if (!App.isVideoReady()) return false; video.pause(); pickRole = null; pip = null; renderPipette(); placing = id; $("ai-landmark").value = id; updateOverlayMode(); return true; },
+    cancelPlacing: () => { placing = null; updateOverlayMode(); },
+    getPoints: () => pts.slice(), clearPoints: () => { pts = []; placing = null; renderPoints(); updateOverlayMode(); },
+    removePoint: (id) => { pts = pts.filter((q) => q.id !== id); renderPoints(); refreshLive(); },
+    clearAnalysis: () => { frames = []; const a = ai(); a.frames = null; a.stats = null; a.suggestedEvents = []; a.suggested = 0; renderStats(); renderSuggestions(); refreshLive(); },
+    setRange: (t0, t1) => { $("ai-t0").value = App.fmt(t0); $("ai-t1").value = App.fmt(t1); updateEstimate(); },
+    setCamera: (v) => { $("ai-camera").value = v; $("ai-camera").dispatchEvent(new Event("change")); },
+    setDirection: (v) => { $("ai-dir").value = String(v); $("ai-dir").dispatchEvent(new Event("change")); },
+    setPrecision: (fps, tiles) => { $("ai-fps").value = String(fps); $("ai-tiles").value = String(tiles); $("ai-fps").dispatchEvent(new Event("change")); },
+    hasAnalysis: () => frames.length > 0,
+    segment: (req) => (FSAI.segmentImpl ? FSAI.segmentImpl(req) : api.aiSegment(req)),
+    detectPersons: async (canvas) => (await P.detectCanvas(canvas, 2, api, { minPerson: 0.3, minBall: 0.12 })).filter((d) => d.cls === 0),
+    toggle: (id, on) => { $(id).checked = on; refreshLive(); }
+  };
 
   window.FSApp.ai = { syncFromProject, dirAt, refreshLive, getFrames: () => frames };
   init();

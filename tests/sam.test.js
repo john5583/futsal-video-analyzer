@@ -67,7 +67,7 @@ const MODELS = path.join(__dirname, "..", "models");
 const have = ["yolox_s.onnx", "mobile_sam_encoder.onnx", "mobile_sam_decoder.onnx"].every((f) => fs.existsSync(path.join(MODELS, f)));
 const fixture = path.join(__dirname, "fixtures", "bus.jpg");
 
-test("découpe réelle : chaque personne détectée donne une silhouette cohérente", { skip: !have || !fs.existsSync(fixture) ? "modèles absents (téléchargés par npm test)" : false }, async () => {
+test("découpe réelle : chaque personne détectée donne une silhouette cohérente", { skip: (!have || !fs.existsSync(fixture)) && !process.env.CI ? "modèles absents (téléchargés par npm test)" : false }, async () => {
   const ort = require("onnxruntime-node"), jpeg = require("jpeg-js"), Y = require("../src/ai/yolox");
   const img = jpeg.decode(fs.readFileSync(fixture), { useTArray: true });
   // 1) détection des personnes (comme dans yolox.test.js)
