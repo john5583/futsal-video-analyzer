@@ -44,7 +44,13 @@ function download(url, dest, redirects) {
     fs.mkdirSync(path.dirname(dest), { recursive: true });
     if (fs.existsSync(dest) && sha256(dest) === a.sha256) { console.log("OK  " + a.file); continue; }
     console.log("Téléchargement de " + a.file + " …");
-    await download(a.url, dest);
+    // le site des modèles limite parfois le débit (HTTP 429) ou coupe la connexion : on réessaie avec une pause croissante
+    let lastErr = null;
+    for (let attempt = 0; attempt < 6; attempt++) {
+      try { await download(a.url, dest); lastErr = null; break; }
+      catch (e) { lastErr = e; const wait = [4, 10, 20, 40, 60, 90][attempt] * 1000; console.log("  échec (" + e.message + "), nouvel essai dans " + wait / 1000 + " s"); await new Promise((r) => setTimeout(r, wait)); }
+    }
+    if (lastErr) throw lastErr;
     const got = sha256(dest);
     if (got !== a.sha256) { fs.rmSync(dest, { force: true }); throw new Error("Empreinte inattendue pour " + a.file + " : " + got); }
     console.log("OK  " + a.file);

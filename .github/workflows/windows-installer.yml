@@ -25,6 +25,10 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: package-lock.json
+      - uses: actions/cache@v4
+        with:
+          path: models
+          key: modeles-${{ hashFiles('scripts/get-assets.js') }}
       - run: npm ci
       - name: Numéro de version = étiquette (publication uniquement)
         if: startsWith(github.ref, 'refs/tags/v') || inputs.version != ''
