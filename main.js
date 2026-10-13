@@ -112,7 +112,7 @@ function aiStart() {
         const p = ai.pending.get(m.id);
         if (!p) return;
         ai.pending.delete(m.id);
-        if (m.error) p.reject(new Error(m.error)); else p.resolve(m.dets);
+        if (m.error) p.reject(new Error(m.error)); else p.resolve(m.masks !== undefined ? m.masks : m.dets);
       }
     });
     w.on("error", (e) => { reject(e); aiStop(); });
