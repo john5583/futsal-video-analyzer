@@ -13,6 +13,15 @@ const CF = require(APP + "/src/ai/court-fit");
 const SP = fs.mkdtempSync(path.join(os.tmpdir(), "fsal-wiz-"));
 execFileSync("node", [path.join(APP, "tests", "helpers", "make-video.js"), path.join(SP, "goalvid.mp4")]);
 const out = (...a) => console.log(...a);
+/* Attente par interrogation régulière (waitForFunction exige « unsafe-eval », interdit par la politique de sécurité de l'application). */
+async function waitFor(win, fn, arg, opts) {
+  const t0 = Date.now(), limit = (opts && opts.timeout) || 30000;
+  for (;;) {
+    if (await win.evaluate(fn, arg)) return;
+    if (Date.now() - t0 > limit) throw new Error("Délai dépassé en attendant : " + String(fn).slice(0, 120));
+    await new Promise((r) => setTimeout(r, 250));
+  }
+}
 const must = (c, m) => { if (!c) { out("FAIL", m); process.exitCode = 1; } else out("ok  ", m); };
 const FAKE = () => { FSAI.segmentImpl = async (req) => ({ masks: req.boxes.map((b) => { const x0 = Math.floor(b[0]), y0 = Math.floor(b[1]), w = Math.ceil(b[2] - b[0]), h = Math.ceil(b[3] - b[1]); const data = new Uint8Array(w * h); let area = 0; for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const dx = (x - w / 2) / (w / 2), dy = (y - h / 2) / (h / 2); if (dx * dx + dy * dy <= 1) { data[y * w + x] = 1; area++; } } return { x0, y0, w, h, area, data }; }) }); };
 (async () => {
@@ -26,7 +35,7 @@ const FAKE = () => { FSAI.segmentImpl = async (req) => ({ masks: req.boxes.map((
   await app.evaluate(({ dialog }, p) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: p }); }, [path.join(SP, "goalvid.mp4")]);
   const st = () => win.evaluate(() => FSWiz.state.step + "/" + (FSWiz.state.T ? FSWiz.state.T.phase : "-"));
   await win.click(".wiz-start");
-  await win.waitForFunction(() => FSWiz.state.step === "terrain" && FSWiz.state.T && FSWiz.state.T.phase !== "scan", null, { timeout: 90000 });
+  await waitFor(win, () => FSWiz.state.step === "terrain" && FSWiz.state.T && FSWiz.state.T.phase !== "scan", null, { timeout: 90000 });
   out("état:", await st());
   must((await st()).endsWith("clicks") || (await st()).endsWith("color"), "but repéré automatiquement");
   if ((await st()).endsWith("color")) {
@@ -51,7 +60,7 @@ const FAKE = () => { FSAI.segmentImpl = async (req) => ({ masks: req.boxes.map((
   await win.click("[data-act=skipTarget]"); await win.click("[data-act=skipTarget]");
   must(!(await win.evaluate(() => FSWiz.state.T.msg)), "pas de message d'erreur : " + (await win.evaluate(() => FSWiz.state.T.msg)));
   await win.click("[data-act=validateTerrain][data-side=def]");
-  await win.waitForFunction(() => FSWiz.state.step === "players", null, { timeout: 10000 });
+  await waitFor(win, () => FSWiz.state.step === "players", null, { timeout: 10000 });
   must(true, "terrain validé -> joueurs");
   // le calibrage enregistré redonne le bon point du terrain
   const chk = await win.evaluate((pts) => { const c = FSApp.state.project.ai.calibrations[0]; const HG = FutsalHomography; return { n: c.points.length, err: c.err, m: pts.map((p) => HG.apply(c.H, p[0], p[1])) }; }, [vid(6, 10), vid(9, 10)]);
@@ -59,7 +68,7 @@ const FAKE = () => { FSAI.segmentImpl = async (req) => ({ masks: req.boxes.map((
   must(Math.hypot(chk.m[0][0] - 6, chk.m[0][1] - 10) < 0.8 && Math.hypot(chk.m[1][0] - 9, chk.m[1][1] - 10) < 0.8, "H renvoie les points 6 m et 9 m (but défendu : x = 6 et 9)");
   if (process.env.FAKE_SEG) await win.evaluate(FAKE);
   await win.click("[data-act=detect]");
-  await win.waitForFunction(() => FSWiz.state.det && FSWiz.state.det.players.length > 0, null, { timeout: 90000 });
+  await waitFor(win, () => FSWiz.state.det && FSWiz.state.det.players.length > 0, null, { timeout: 90000 });
   const n = await win.evaluate(() => FSWiz.state.det.players.length);
   must(n >= 1, "silhouettes : " + n);
   const centre = (i) => win.evaluate((i) => { const d = FSWiz.state.det, p = d.players[i], k = d.frame.k; return [((p.box[0] + p.box[2]) / 2) / k, ((p.box[1] + p.box[3]) / 2) / k]; }, i);
@@ -74,7 +83,7 @@ const FAKE = () => { FSAI.segmentImpl = async (req) => ({ masks: req.boxes.map((
   await win.fill("[data-set=t1]", "00:04"); await win.dispatchEvent("[data-set=t1]", "change");
   await win.selectOption("[data-set=fps]", "2");
   await win.click("[data-act=run]");
-  await win.waitForFunction(() => FSWiz.state.step === "done" || /arrêtée|aucun/.test(FSWiz.state.msg), null, { timeout: 180000 });
+  await waitFor(win, () => FSWiz.state.step === "done" || /arrêtée|aucun/.test(FSWiz.state.msg), null, { timeout: 180000 });
   must(await win.evaluate(() => FSWiz.state.step) === "done", "analyse terminée : " + (await win.evaluate(() => FSWiz.state.msg)).slice(0, 110));
   out("LOGS:", JSON.stringify(logs)); if (logs.length) process.exitCode = 1;
   await app.close();
