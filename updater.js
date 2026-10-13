@@ -6,7 +6,7 @@ const fs = require("fs");
 const path = require("path");
 
 const RELEASES = "https://github.com/john5583/futsal-video-analyzer/releases/latest";
-let updater = null, manual = false, getWindow = () => null, busy = false;
+let updater = null, manual = false, applyNow = false, getWindow = () => null, busy = false;
 
 const win = () => { const w = getWindow(); return w && !w.isDestroyed() ? w : undefined; };
 const isInstalled = () => fs.existsSync(path.join(path.dirname(process.execPath), "Uninstall Futsal Analyzer.exe"));
@@ -23,6 +23,14 @@ function setup() {
       if (r.response === 0) shell.openExternal(RELEASES);
       return;
     }
+    if (manual) {
+      // demandé par l'utilisateur : on télécharge puis on installe et on relance sans autre question
+      busy = true; applyNow = true;
+      const w = win(); if (w) w.setTitle("Futsal Analyzer — téléchargement de la version " + info.version + "…");
+      dialog.showMessageBox(w, { type: "info", buttons: ["OK"], title: "Mise à jour", message: "La version " + info.version + " est disponible : téléchargement en cours.", detail: "L'application redémarrera toute seule quand ce sera prêt. Votre travail est sauvegardé automatiquement." });
+      autoUpdater.downloadUpdate().catch((e) => fail(e));
+      return;
+    }
     const r = await dialog.showMessageBox(win(), { type: "info", buttons: ["Télécharger maintenant", "Plus tard"], defaultId: 0, cancelId: 1, title: "Mise à jour disponible", message: "La version " + info.version + " est disponible (vous avez la " + app.getVersion() + ").", detail: "Le téléchargement se fait en arrière-plan ; votre travail en cours n'est pas interrompu." });
     if (r.response === 0) { busy = true; autoUpdater.downloadUpdate().catch((e) => fail(e)); }
   });
@@ -33,7 +41,8 @@ function setup() {
   autoUpdater.on("download-progress", (p) => { const w = win(); if (w) w.setProgressBar(Math.max(0, Math.min(1, p.percent / 100))); });
   autoUpdater.on("update-downloaded", async (info) => {
     busy = false;
-    const w = win(); if (w) w.setProgressBar(-1);
+    const w = win(); if (w) { w.setProgressBar(-1); w.setTitle("Futsal Analyzer"); }
+    if (applyNow) { applyNow = false; setImmediate(() => autoUpdater.quitAndInstall(true, true)); return; }
     const r = await dialog.showMessageBox(w, { type: "info", buttons: ["Redémarrer maintenant", "Plus tard"], defaultId: 0, cancelId: 1, title: "Mise à jour prête", message: "La version " + info.version + " est téléchargée.", detail: "Elle s'installera au redémarrage de l'application (votre travail est sauvegardé automatiquement)." });
     if (r.response === 0) setImmediate(() => autoUpdater.quitAndInstall());
   });
@@ -43,7 +52,7 @@ function setup() {
 }
 
 function fail(e) {
-  busy = false;
+  busy = false; applyNow = false;
   const w = win(); if (w) w.setProgressBar(-1);
   if (manual) dialog.showMessageBox(w, { type: "warning", buttons: ["OK"], title: "Mise à jour", message: "La vérification des mises à jour a échoué.", detail: "Vérifiez votre connexion Internet puis réessayez. (" + String((e && e.message) || e).slice(0, 200) + ")" });
 }
