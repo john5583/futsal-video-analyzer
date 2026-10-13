@@ -33,17 +33,21 @@ const sha = (f) => crypto.createHash("sha256").update(fs.readFileSync(f)).digest
   // image : bus.jpg, grand côté -> 1024, remplissage en bas/droite
   const img = jpeg.decode(fs.readFileSync(path.join(__dirname, "..", "tests", "fixtures", "bus.jpg")), { useTArray: true });
   const s = 1024 / Math.max(img.width, img.height), w = Math.round(img.width * s), h = Math.round(img.height * s);
-  for (const mode of ["raw255", "norm"]) {
-    const t = new Float32Array(3 * 1024 * 1024);
+  for (const mode of ["hwc-actual", "hwc-pad", "hwc-actual-norm"]) {
+    const W2 = mode === "hwc-pad" ? 1024 : w, H2 = mode === "hwc-pad" ? 1024 : h;
+    const t = new Float32Array(H2 * W2 * 3);
     const mean = [123.675, 116.28, 103.53], std = [58.395, 57.12, 57.375];
     for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
       const sx = Math.min(img.width - 1, Math.floor(x / s)), sy = Math.min(img.height - 1, Math.floor(y / s)), i = (sy * img.width + sx) * 4;
-      for (let c = 0; c < 3; c++) { const v = img.data[i + c]; t[c * 1048576 + y * 1024 + x] = mode === "raw255" ? v : (v - mean[c]) / std[c]; }
+      for (let c = 0; c < 3; c++) { const v = img.data[i + c]; t[(y * W2 + x) * 3 + c] = mode === "hwc-actual-norm" ? (v - mean[c]) / std[c] : v; }
     }
     const name = enc.inputNames[0];
     const t0 = Date.now();
-    const eo = await enc.run({ [name]: new ort.Tensor("float32", t, [1, 3, 1024, 1024]) });
-    const emb = eo[enc.outputNames[0]];
+    let emb;
+    try {
+      const eo = await enc.run({ [name]: new ort.Tensor("float32", t, [H2, W2, 3]) });
+      emb = eo[enc.outputNames[0]];
+    } catch (e) { console.log(mode, "ERREUR encodeur :", e.message); continue; }
     console.log(mode, "encodeur", Date.now() - t0, "ms, sortie", JSON.stringify(emb.dims));
     // clic au milieu de la personne de gauche du bus (~ x 0.12, y 0.62 de l'image)
     const px = 0.12 * img.width, py = 0.62 * img.height;
