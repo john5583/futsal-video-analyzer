@@ -46,6 +46,14 @@
       {
         "from": "models/yolox_s.onnx",
         "to": "models/yolox_s.onnx"
+      },
+      {
+        "from": "models/mobile_sam_encoder.onnx",
+        "to": "models/mobile_sam_encoder.onnx"
+      },
+      {
+        "from": "models/mobile_sam_decoder.onnx",
+        "to": "models/mobile_sam_decoder.onnx"
       }
     ],
     "win": {

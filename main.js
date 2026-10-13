@@ -78,6 +78,11 @@ function modelPath() {
   return app.isPackaged ? path.join(process.resourcesPath, "models", "yolox_s.onnx") : path.join(__dirname, "models", "yolox_s.onnx");
 }
 
+function samPaths() {
+  const dir = app.isPackaged ? path.join(process.resourcesPath, "models") : path.join(__dirname, "models");
+  return { enc: path.join(dir, "mobile_sam_encoder.onnx"), dec: path.join(dir, "mobile_sam_decoder.onnx") };
+}
+
 const ai = { worker: null, ready: null, pending: new Map(), nextId: 1, error: null };
 
 function aiStop() {
@@ -97,7 +102,7 @@ function aiStart() {
   }
   ai.ready = new Promise((resolve, reject) => {
     const workerFile = path.join(__dirname, "src", "ai", "worker.js").replace("app.asar" + path.sep, "app.asar.unpacked" + path.sep);
-    const w = new Worker(workerFile, { workerData: { modelPath: file, threads: Math.max(1, os.cpus().length - 1) } });
+    const w = new Worker(workerFile, { workerData: { modelPath: file, samEncPath: samPaths().enc, samDecPath: samPaths().dec, threads: Math.max(1, os.cpus().length - 1) } });
     ai.worker = w;
     w.on("message", (m) => {
       if (m.type === "ready") resolve(true);
@@ -123,6 +128,24 @@ async function aiDetect(buffer, opts) {
     ai.pending.set(id, { resolve, reject });
     const ab = buffer instanceof ArrayBuffer ? buffer : (buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength));
     ai.worker.postMessage({ type: "detect", id, buffer: ab, minPerson: opts && opts.minPerson, minBall: opts && opts.minBall }, [ab]);
+  });
+}
+
+/* Découpe des silhouettes : { imgId, buffer (RGBA, optionnel si l'image est déjà encodée), width, height, boxes } -> masques. */
+async function aiSegment(req) {
+  const sp = samPaths();
+  if (!fs.existsSync(sp.enc) || !fs.existsSync(sp.dec)) throw new Error("Modèle de découpe introuvable : réinstallez l'application.");
+  await aiStart();
+  return new Promise((resolve, reject) => {
+    const id = ai.nextId++;
+    ai.pending.set(id, { resolve, reject });
+    const msg = { type: "segment", id, imgId: String(req.imgId), width: req.width, height: req.height, boxes: req.boxes || [] };
+    const transfer = [];
+    if (req.buffer) {
+      const ab = req.buffer instanceof ArrayBuffer ? req.buffer : req.buffer.buffer.slice(req.buffer.byteOffset, req.buffer.byteOffset + req.buffer.byteLength);
+      msg.buffer = ab; transfer.push(ab);
+    }
+    ai.worker.postMessage(msg, transfer);
   });
 }
 
@@ -241,7 +264,7 @@ function registerIpc() {
 
 
   ipcMain.handle("ai:status", async () => {
-    const st = { modelPresent: fs.existsSync(modelPath()), cpus: os.cpus().length, engineError: null };
+    const st = { samPresent: fs.existsSync(samPaths().enc) && fs.existsSync(samPaths().dec), modelPresent: fs.existsSync(modelPath()), cpus: os.cpus().length, engineError: null };
     if (!st.modelPresent) return st;
     try { await aiStart(); } catch (err) { st.engineError = String(err && err.message || err); }
     return st;
@@ -249,6 +272,12 @@ function registerIpc() {
   ipcMain.handle("ai:detect", async (_e, buffer, opts) => {
     try { return { dets: await aiDetect(buffer, opts || {}) }; }
     catch (err) { return { error: String(err && err.message || err) }; }
+  });
+  ipcMain.handle("ai:segment", async (_e, req) => {
+    try {
+      if (!req || !Array.isArray(req.boxes) || !(req.width > 0) || !(req.height > 0)) throw new Error("Requête de découpe invalide");
+      return { masks: await aiSegment(req) };
+    } catch (err) { return { error: String(err && err.message || err) }; }
   });
   ipcMain.handle("ai:stop", () => { aiStop(); return true; });
 

@@ -75,8 +75,7 @@
   }
 
   /* Liseré / manches de couleur vive : couleur médiane des pixels très colorés (jaune-vert à vert) du buste, ou null. */
-  function detectTrim(img, box) {
-    const px = torsoPixels(img, box);
+  function trimFromPixels(px) {
     const sel = px.filter(([l, a, b]) => {
       const c = Math.hypot(a, b), h = ((Math.atan2(b, a) * 180) / Math.PI + 360) % 360;
       return c > 28 && l > 35 && a < -3 && h >= 95 && h <= 170;
@@ -84,6 +83,7 @@
     if (sel.length < Math.max(6, px.length * 0.002)) return null;
     return [median(sel.map((p) => p[0])), median(sel.map((p) => p[1])), median(sel.map((p) => p[2]))];
   }
+  function detectTrim(img, box) { return trimFromPixels(torsoPixels(img, box)); }
 
   /* Part de pixels du buste proches de la couleur de liseré donnée (on compare surtout la teinte : a* et b*). */
   function accentFraction(img, box, lab) {
@@ -100,6 +100,33 @@
     feat.acc = {};
     Object.keys(refs || {}).forEach((k) => { if (refs[k] && refs[k].trim) feat.acc[k] = accentFraction(img, box, refs[k].trim); });
     return feat;
+  }
+
+  /* Pixels (Lab) d'une zone relative à la boîte, limités à la silhouette. mask = { x0, y0, w, h, data (0/1) } en pixels de img. */
+  function maskPixels(img, box, band, mask) {
+    const bw = box[2] - box[0], bh = box[3] - box[1];
+    const x0 = Math.max(mask.x0, Math.floor(box[0] + bw * band.x0)), x1 = Math.min(mask.x0 + mask.w, img.width, Math.ceil(box[0] + bw * band.x1));
+    const y0 = Math.max(mask.y0, Math.floor(box[1] + bh * band.y0)), y1 = Math.min(mask.y0 + mask.h, img.height, Math.ceil(box[1] + bh * band.y1));
+    const out = [];
+    for (let y = Math.max(0, y0); y < y1; y++) for (let x = Math.max(0, x0); x < x1; x++) {
+      if (!mask.data[(y - mask.y0) * mask.w + (x - mask.x0)]) continue;
+      const i = (y * img.width + x) * 4;
+      out.push(rgbToLab(img.data[i], img.data[i + 1], img.data[i + 2]));
+    }
+    return out;
+  }
+
+  /* Empreinte de tenue lue uniquement sur les pixels de la silhouette (sans le sol ni le décor). null si trop peu de pixels. */
+  function fromMask(img, box, mask) {
+    if (!img || !mask || !mask.w || !mask.h) return null;
+    const out = {};
+    Object.keys(BANDS).forEach((k) => {
+      const px = maskPixels(img, box, BANDS[k], mask);
+      out[k] = px.length >= 12 ? [median(px.map((p) => p[0])), median(px.map((p) => p[1])), median(px.map((p) => p[2]))] : null;
+    });
+    if (!out.shirt) return null;
+    out.trim = trimFromPixels(maskPixels(img, box, TORSO, mask));
+    return out;
   }
 
   /* Empreinte de tenue d'un joueur : trois couleurs Lab (ou null si la boîte est trop petite). */
@@ -189,5 +216,5 @@
     return ref ? { shirt: ref.shirt ? toHex(ref.shirt) : null, shorts: ref.shorts ? toHex(ref.shorts) : null, socks: ref.socks ? toHex(ref.socks) : null, trim: ref.trim ? toHex(ref.trim) : null } : null;
   }
 
-  return { BANDS, REJECT_DISTANCE, rgbToLab, labToRgb, sample, average, classify, dist, swatches, toHex, pipette, fromParts, detectTrim, accentFraction, addAccents, ACC_MIN };
+  return { BANDS, REJECT_DISTANCE, rgbToLab, labToRgb, sample, average, classify, dist, swatches, toHex, pipette, fromParts, fromMask, detectTrim, accentFraction, addAccents, ACC_MIN };
 });

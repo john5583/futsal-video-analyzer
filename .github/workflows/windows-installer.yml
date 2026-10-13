@@ -32,7 +32,7 @@ jobs:
           if (-not $exe -or $exe.Length -lt 100MB) { throw "Installeur introuvable ou trop petit" }
           Write-Host "Installeur : $($exe.Name) ($([math]::Round($exe.Length/1MB)) Mo)"
           $res = "dist/win-unpacked/resources"
-          foreach ($f in @("models/yolox_s.onnx", "app.asar", "app.asar.unpacked/src/ai/worker.js", "app.asar.unpacked/node_modules/onnxruntime-node/bin/napi-v3/win32/x64/onnxruntime_binding.node", "app.asar.unpacked/node_modules/onnxruntime-node/bin/napi-v3/win32/x64/onnxruntime.dll")) {
+          foreach ($f in @("models/yolox_s.onnx", "models/mobile_sam_encoder.onnx", "models/mobile_sam_decoder.onnx", "app.asar", "app.asar.unpacked/src/ai/worker.js", "app.asar.unpacked/node_modules/onnxruntime-node/bin/napi-v3/win32/x64/onnxruntime_binding.node", "app.asar.unpacked/node_modules/onnxruntime-node/bin/napi-v3/win32/x64/onnxruntime.dll")) {
             if (-not (Test-Path "$res/$f")) { throw "Fichier manquant dans l'application : $f" }
           }
           if (Test-Path "$res/app.asar.unpacked/node_modules/onnxruntime-node/bin/napi-v3/linux") { throw "Binaires Linux inclus par erreur" }
