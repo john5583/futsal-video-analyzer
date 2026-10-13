@@ -18,3 +18,7 @@ jobs:
         run: xvfb-run -a node tests/e2e/segment-ipc.js
         env:
           CI: "true"
+      - name: Assistant complet (vidéo d'essai avec but, vrai modèle de découpe)
+        run: xvfb-run -a node tests/e2e/wizard-goal.js
+        env:
+          CI: "true"

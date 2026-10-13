@@ -2,7 +2,7 @@
    Étapes : choix des vidéos → terrain → silhouettes (mon équipe, adversaires, gardiens, arbitre) → analyse → résultats. */
 (function () {
   "use strict";
-  const App = window.FSApp, AI = window.FSAI, K = window.FutsalKit, HG = window.FutsalHomography;
+  const App = window.FSApp, AI = window.FSAI, K = window.FutsalKit, HG = window.FutsalHomography, CF = window.FutsalCourtFit, GL = window.FutsalGoal;
   const $ = (id) => document.getElementById(id);
   const esc = App.esc, api = App.api, video = App.video;
 
@@ -19,8 +19,15 @@
     step: "idle", queue: [], idx: 0, same: false, results: [], shared: null,
     lmIdx: 0, terrainT: null, msg: "",
     catIdx: 0, det: null, hover: -1, addMode: false, drag: null, busy: "",
-    progress: 0, running: false
+    progress: 0, running: false,
+    T: null                   // repérage automatique du terrain (voir startTerrain)
   };
+  const TARGETS = [
+    { key: "six", x: 6, dy: 0, required: true, label: "la ligne pleine des 6 m, juste devant le milieu du but" },
+    { key: "nine", x: 9, dy: 0, label: "la ligne pointillée des 9 m, devant le milieu du but" },
+    { key: "endL", x: 0, dy: -7.5, label: "le bout GAUCHE de la ligne des 6 m, là où elle touche la ligne de but" },
+    { key: "endR", x: 0, dy: 7.5, label: "le bout DROIT de la ligne des 6 m, là où elle touche la ligne de but" }
+  ];
   const root = $("wiz");
 
   /* ---------- utilitaires ---------- */
@@ -71,6 +78,39 @@
   function rLoading() { return "<p class=\"wiz-busy\">⏳ " + esc(W.busy || "Chargement…") + "</p>"; }
 
   function rTerrain() {
+    const T = W.T;
+    if (!T || T.phase === "manual") return rTerrainManual();
+    const head = queueHeader() + progressDots() + "<h3>1. Repérer le terrain</h3>";
+    const cancel = "<div class=\"wiz-btns\"><button class=\"ghost\" data-act=\"cancel\">Annuler l'assistant</button></div>";
+    if (T.phase === "scan") return head + "<p class=\"wiz-busy\">⏳ " + esc(T.text || "Recherche d'un but dans la vidéo…") + "</p>" + cancel;
+    if (T.phase === "nogoal") {
+      return head + "<p>Je n'ai pas repéré de but (poteaux rayés rouge et blanc) dans la vidéo. Avancez la vidéo jusqu'à une image où <b>un but est bien visible</b>, puis cliquez :</p>" +
+        "<div class=\"wiz-btns\"><button class=\"primary\" data-act=\"retryGoal\">🔍 Chercher le but sur cette image</button><button data-act=\"manualMode\">Placer les repères moi-même</button></div>" +
+        (T.msg ? "<p class=\"wiz-err\">" + esc(T.msg) + "</p>" : "") + cancel;
+    }
+    if (T.phase === "color") {
+      return head + "<p class=\"wiz-now\">Quelle est la couleur des lignes de votre terrain de futsal ?</p>" +
+        "<p class=\"muted\">Plusieurs couleurs sont tracées au sol : choisissez celle des lignes du futsal.</p>" +
+        "<div class=\"wiz-colors\">" + T.colors.map((c) => "<button data-act=\"pickColor\" data-key=\"" + c.key + "\"><i class=\"sw\" style=\"background:" + c.hex + "\"></i> " + esc(c.name) + "</button>").join("") + "</div>" + cancel;
+    }
+    // phase « clics »
+    const next = nextTarget();
+    const cname = T.colorKey ? (CF.COLORS[T.colorKey].name || "").toLowerCase() : "";
+    const placed = T.clicks.length;
+    let ask;
+    if (next) ask = "<p class=\"wiz-now\">" + (placed ? "Repère suivant (recommandé : 3 à 4 repères donnent un terrain plus précis) : " : "Le but est repéré (en vert). ") + "Cliquez sur " + esc(next.label) + (cname ? " (ligne " + esc(cname) + ")" : "") + ".</p>" +
+      (placed ? "<p class=\"muted\">Le cercle rouge indique où je pense qu'il se trouve.</p>" : "");
+    else ask = "<p class=\"wiz-now\">Tous les repères sont placés.</p>";
+    return head + ask +
+      "<p class=\"wiz-count\">Les lignes <b style=\"color:#22d3ee\">bleues</b> (6 m) et <b style=\"color:#facc15\">jaunes</b> (9 m) tracées sur la vidéo doivent recouvrir les lignes du terrain.</p>" +
+      (T.msg ? "<p class=\"wiz-err\">" + esc(T.msg) + "</p>" : "") +
+      "<div class=\"wiz-btns\">" + (next && !next.required ? "<button data-act=\"skipTarget\">Passer (non visible)</button>" : "") + (placed ? "<button data-act=\"undoClick\">↶ Annuler le dernier clic</button>" : "") + "</div>" +
+      (placed ? "<p class=\"wiz-now\">Le but visible sur la vidéo est-il…</p><div class=\"wiz-btns\"><button class=\"primary\" data-act=\"validateTerrain\" data-side=\"def\">Valider : c'est le but que je DÉFENDS</button><button class=\"primary\" data-act=\"validateTerrain\" data-side=\"att\">Valider : c'est le but que j'ATTAQUE</button></div>" : "") +
+      "<div class=\"wiz-btns\"><button data-act=\"otherGoal\">Autre image / autre but</button>" + (T.colors && T.colors.length > 1 ? "<button data-act=\"changeColor\">Changer la couleur</button>" : "") + "<button data-act=\"manualMode\">Placer les repères moi-même</button><button class=\"ghost\" data-act=\"cancel\">Annuler l'assistant</button></div>";
+  }
+
+  /* Ancienne méthode, conservée en secours : clic sur des repères choisis dans une liste. */
+  function rTerrainManual() {
     const a = AI.ai(), pts = AI.getPoints();
     const id = LANDMARK_ORDER[W.lmIdx];
     const placed = pts.length;
@@ -84,7 +124,7 @@
       "<label>Caméra<select data-set=\"camera\"><option value=\"mobile\"" + (a.camera !== "fixed" ? " selected" : "") + ">Smartphone à la main (elle bouge)</option><option value=\"fixed\"" + (a.camera === "fixed" ? " selected" : "") + ">Fixe (trépied)</option></select></label></div>" +
       now + "<p class=\"wiz-count\">Repères placés : <b>" + placed + "</b> / 4 minimum</p>" +
       (W.msg ? "<p class=\"wiz-err\">" + esc(W.msg) + "</p>" : "") +
-      "<div class=\"wiz-btns\"><button class=\"primary\" data-act=\"calOk\"" + (placed >= 4 ? "" : " disabled") + ">Valider le terrain ✓</button><button class=\"ghost\" data-act=\"cancel\">Annuler l'assistant</button></div>";
+      "<div class=\"wiz-btns\"><button class=\"primary\" data-act=\"calOk\"" + (placed >= 4 ? "" : " disabled") + ">Valider le terrain ✓</button><button data-act=\"autoMode\">↩ Repérage automatique</button><button class=\"ghost\" data-act=\"cancel\">Annuler l'assistant</button></div>";
   }
 
   function chips() {
@@ -174,6 +214,19 @@
       if (sel) W.same = sel.value === "1";
       await openVideo(0);
     },
+    async retryGoal() { await prepareFrame(); },
+    manualMode() { const T = W.T; if (T) T.cancel = true; W.T = Object.assign(T || {}, { phase: "manual" }); AI.setPointer(null); AI.clearPoints(); W.lmIdx = 0; W.terrainT = null; W.msg = ""; render(); beginLandmark(); AI.redraw(); },
+    async autoMode() { AI.cancelPlacing(); AI.clearPoints(); await startTerrain(); },
+    pickColor(btn) { const T = W.T; T.colorKey = btn.dataset.key; buildRidge(); T.phase = "clicks"; render(); AI.redraw(); },
+    changeColor() { W.T.phase = "color"; render(); AI.redraw(); },
+    skipTarget() { const n = nextTarget(); if (n) W.T.skipped.add(n.key); W.T.msg = ""; render(); AI.redraw(); },
+    undoClick() { const T = W.T; T.clicks.pop(); T.msg = ""; solveNow(); render(); AI.redraw(); },
+    async otherGoal() {
+      const T = W.T;
+      if (T.results && T.results.length > 1) { T.resultIdx = (T.resultIdx + 1) % T.results.length; await useResult(T.resultIdx); }
+      else { T.phase = "nogoal"; T.msg = "Avancez la vidéo jusqu'à une autre image où le but est visible, puis cliquez sur « Chercher le but »."; render(); AI.redraw(); }
+    },
+    validateTerrain(btn) { finishTerrain(btn.dataset.side); },
     skipLm() {
       AI.cancelPlacing();
       W.lmIdx = nextLandmark(W.lmIdx + 1); W.msg = ""; render(); beginLandmark();
@@ -186,7 +239,7 @@
       W.msg = ""; render(); beginLandmark();
     },
     calOk() {
-      if (AI.validateCalibration()) { AI.cancelPlacing(); W.same && W.shared && W.shared.kits ? enterRun() : enterPlayers(); }
+      if (AI.validateCalibration()) { AI.cancelPlacing(); W.T = null; W.same && W.shared && W.shared.kits ? enterRun() : enterPlayers(); }
       else { W.msg = $("ai-calib-msg").textContent; render(); }
     },
     async detect() { await detectPlayers(); },
@@ -206,7 +259,7 @@
     saveAs() { App.saveProject(true); },
     async next() { await openVideo(W.idx + 1); },
     finish() { W.queue = []; W.idx = 0; setStep("idle"); },
-    cancel() { if (W.running) $("ai-cancel").click(); AI.cancelPlacing(); AI.clearPoints(); W.det = null; AI.setPointer(null); W.queue = []; W.idx = 0; W.running = false; setStep("idle"); },
+    cancel() { if (W.T) W.T.cancel = true; W.T = null; if (W.running) $("ai-cancel").click(); AI.cancelPlacing(); AI.clearPoints(); W.det = null; AI.setPointer(null); W.queue = []; W.idx = 0; W.running = false; setStep("idle"); },
     async openRes(btn) {
       const r = W.results[Number(btn.dataset.i)];
       if (!r || !api) return;
@@ -226,6 +279,174 @@
     const id = LANDMARK_ORDER[W.lmIdx];
     if (id && W.step === "terrain") AI.beginPlacing(id);
   }
+
+  /* ---------- repérage assisté du terrain ---------- */
+  function seekVideo(t) {
+    return new Promise((resolve) => {
+      const target = Math.max(0, Math.min((video.duration || 0) - 0.05, t));
+      if (Math.abs(video.currentTime - target) < 0.02 && !video.seeking) return resolve();
+      const done = () => { clearTimeout(tm); video.removeEventListener("seeked", done); resolve(); };
+      const tm = setTimeout(done, 8000);
+      video.addEventListener("seeked", done);
+      video.currentTime = target;
+    });
+  }
+  const tick = () => new Promise((r) => setTimeout(r, 15));
+
+  function nextTarget() {
+    const T = W.T;
+    if (!T) return null;
+    return TARGETS.find((x) => !T.clicks.some((c) => c.key === x.key) && !T.skipped.has(x.key)) || null;
+  }
+
+  async function startTerrain() {
+    if (W.T) W.T.cancel = true;
+    W.T = { phase: "scan", text: "", msg: "", clicks: [], skipped: new Set(), colors: [], colorKey: null, cancel: false, busy: true, results: [], resultIdx: 0, pose: null, work: null, goal: null, frame: null };
+    const T = W.T;
+    AI.clearPoints(); AI.setPointer(terrainPointer);
+    setStep("terrain");
+    try {
+      const dur = video.duration || 0, n = 10;
+      const fr = [0.02, 0.06, 0.11, 0.17, 0.24, 0.32, 0.42, 0.53, 0.65, 0.8];
+      for (let i = 0; i < n; i++) {
+        if (T.cancel) return;
+        T.text = "Recherche d'un but dans la vidéo… (" + (i + 1) + " / " + n + ")"; render();
+        await tick();
+        await seekVideo(dur * fr[i]);
+        const g = AI.grabSam(), wk = CF.prepare(g.img, 640), goal = GL.detect(wk).goals[0];
+        if (goal) T.results.push({ t: g.t, h: Math.min(goal.left.v1 - goal.left.v0, goal.right.v1 - goal.right.v0) });
+      }
+    } catch (e) { T.msg = "Recherche impossible : " + e.message; }
+    if (T.cancel) return;
+    T.busy = false;
+    if (!T.results.length) { T.phase = "nogoal"; T.msg = ""; await seekVideo(0); render(); AI.redraw(); return; }
+    // on préfère le premier instant où le but est bien visible (l'analyse commence au repérage du terrain)
+    const best = Math.max(...T.results.map((r) => r.h));
+    T.results.sort((a, b) => a.t - b.t);
+    const first = T.results.findIndex((r) => r.h >= best * 0.7);
+    await useResult(first < 0 ? 0 : first);
+  }
+
+  async function useResult(i) {
+    const T = W.T, r = T.results[i];
+    T.resultIdx = i; T.busy = true;
+    await seekVideo(r.t);
+    T.busy = false;
+    await prepareFrame();
+  }
+
+  /* Analyse l'image affichée : but, couleurs de lignes. */
+  async function prepareFrame() {
+    const T = W.T;
+    if (!T || !App.isVideoReady()) return false;
+    T.busy = true; video.pause();
+    const g = AI.grabSam(), wk = CF.prepare(g.img, 640), goal = GL.detect(wk).goals[0] || null;
+    T.frame = { t: g.t, w: g.w, h: g.h, k: g.k }; T.work = wk; T.goal = goal; T.clicks = []; T.skipped = new Set(); T.pose = null; T.msg = "";
+    if (!goal) { T.phase = "nogoal"; T.msg = "Aucun but repéré sur cette image."; T.busy = false; render(); AI.redraw(); return false; }
+    T.sep = Math.hypot(goal.right.u - goal.left.u, goal.right.v1 - goal.left.v1);
+    T.colors = CF.colorCandidates(wk);
+    if (T.colors.length > 1) { T.phase = "color"; T.colorKey = null; T.rm = null; T.maskCanvas = null; }
+    else { T.colorKey = T.colors[0] ? T.colors[0].key : null; buildRidge(); T.phase = "clicks"; }
+    T.busy = false; render(); AI.redraw();
+    return true;
+  }
+
+  function buildRidge() {
+    const T = W.T;
+    T.rm = T.colorKey ? CF.ridgeMap(T.work, T.colorKey) : null;
+    T.maskCanvas = null;
+    if (T.rm) {
+      const c = document.createElement("canvas"); c.width = T.rm.w; c.height = T.rm.h;
+      const ctx = c.getContext("2d"), im = ctx.createImageData(c.width, c.height);
+      for (let i = 0; i < T.rm.mask.length; i++) if (T.rm.mask[i]) { im.data[i * 4] = 255; im.data[i * 4 + 1] = 0; im.data[i * 4 + 2] = 220; im.data[i * 4 + 3] = 150; }
+      ctx.putImageData(im, 0, 0);
+      T.maskCanvas = c;
+    }
+  }
+
+  function solveNow() {
+    const T = W.T, a = AI.ai();
+    if (!T.clicks.length) { T.pose = null; return; }
+    const extras = T.clicks.map((c) => ({ x: c.x, y: a.W / 2 + c.dy, u: c.u, v: c.v }));
+    const r = CF.poseFromGoal(T.goal, T.work.w, T.work.h, a.L, a.W, false, [], extras);
+    T.pose = r.pose; T.err = r.err;
+    T.msg = r.err > 6 ? "Les repères ne sont pas cohérents entre eux (écart " + r.err.toFixed(0) + " px) : annulez le dernier clic ou cliquez plus précisément sur la ligne." : "";
+  }
+
+  function onTerrainClick(ix, iy, ok) {
+    const T = W.T;
+    if (!ok || !T || T.phase !== "clicks" || T.busy) return;
+    const tg = nextTarget();
+    if (!tg) return;
+    const kk = T.work.w / AI.videoSize().w;
+    let u = ix * kk, v = iy * kk;
+    if (v < (T.goal.left.v1 + T.goal.right.v1) / 2 - 3) { T.msg = "Cliquez sur une ligne du sol, devant le but (plus bas que le pied des poteaux)."; render(); return; }
+    if (T.rm) { const sn = CF.snapToRidge(T.rm, u, v, 8); u = sn.u; v = sn.v; }
+    T.clicks.push({ key: tg.key, dy: tg.dy, x: tg.x, u, v });
+    T.msg = "";
+    solveNow();
+    render(); AI.redraw();
+  }
+  const terrainPointer = { click: onTerrainClick };
+
+  function finishTerrain(side) {
+    const T = W.T;
+    if (!T || !T.pose) return;
+    try {
+      const vs = AI.videoSize(), a = AI.ai();
+      let cal = CF.calibrationFromPose(T.pose, T.work.w, T.work.h, vs.w, vs.h, a.L, a.W, T.err, T.sep);
+      if (side === "att") cal = CF.rotateCalibration(cal, a.L, a.W, vs.w, vs.h);
+      AI.setCalibration(cal, T.frame.t);
+      AI.setCamera("mobile"); AI.setDirection(1);
+    } catch (e) { T.msg = "Repérage impossible : " + e.message; render(); return; }
+    AI.setPointer(null);
+    W.T = null;
+    if (W.same && W.shared && W.shared.kits) enterRun(); else enterPlayers();
+  }
+
+  AI.addLayer((ctx, h) => {
+    const T = W.T;
+    if (W.step !== "terrain" || !T || !T.work || T.phase === "manual" || T.phase === "scan") return;
+    const kk = AI.videoSize().w / T.work.w, V = (u, v) => h.toView(u * kk, v * kk);
+    if (T.maskCanvas && (T.phase === "clicks")) {
+      const o = V(0, 0), e = V(T.work.w, T.work.h);
+      ctx.drawImage(T.maskCanvas, o[0], o[1], e[0] - o[0], e[1] - o[1]);
+    }
+    if (T.goal) {
+      ctx.strokeStyle = "#22c55e"; ctx.lineWidth = 3;
+      [T.goal.left, T.goal.right].forEach((p) => { const a = V(p.u, p.v0), b = V(p.u, p.v1); ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke(); });
+      const a = V(T.goal.left.u, T.goal.left.v0), b = V(T.goal.right.u, T.goal.right.v0);
+      ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
+      ctx.fillStyle = "#22c55e"; ctx.font = "600 12px 'Segoe UI',Arial,sans-serif"; ctx.fillText("But", a[0] + 4, a[1] - 6);
+    }
+    if (T.phase !== "clicks") return;
+    const aiState = AI.ai();
+    if (T.pose) {
+      const B = CF.cameraBasis(T.pose), f = CF.focalPx(T.work.w, T.pose[5]);
+      CF.modelPoints(aiState.L, aiState.W, { step: 0.25 }).forEach((p) => {
+        const q = CF.project(B, f, T.work.w, T.work.h, p[0], p[1], 0);
+        if (!q || q.u < 0 || q.v < 0 || q.u > T.work.w || q.v > T.work.h) return;
+        const v = V(q.u, q.v);
+        ctx.fillStyle = p[2] >= 1 ? "#22d3ee" : "#facc15"; ctx.fillRect(v[0] - 1.2, v[1] - 1.2, 2.4, 2.4);
+      });
+    } else if (T.goal) {
+      // guide : verticale sous le milieu du but
+      const mu = (T.goal.left.u + T.goal.right.u) / 2, mv = (T.goal.left.v1 + T.goal.right.v1) / 2, a = V(mu, mv), b = V(mu, Math.min(T.work.h - 2, mv + T.sep * 3.2));
+      ctx.setLineDash([6, 5]); ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke(); ctx.setLineDash([]);
+    }
+    T.clicks.forEach((c) => {
+      const v = V(c.u, c.v);
+      ctx.strokeStyle = "#ef4444"; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(v[0] - 8, v[1]); ctx.lineTo(v[0] + 8, v[1]); ctx.moveTo(v[0], v[1] - 8); ctx.lineTo(v[0], v[1] + 8); ctx.stroke();
+    });
+    const nx = nextTarget();
+    if (nx && T.pose) {
+      const B = CF.cameraBasis(T.pose), f = CF.focalPx(T.work.w, T.pose[5]), q = CF.project(B, f, T.work.w, T.work.h, nx.x, aiState.W / 2 + nx.dy, 0);
+      if (q) { const v = V(q.u, q.v); ctx.setLineDash([4, 3]); ctx.strokeStyle = "#ef4444"; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.arc(v[0], v[1], 14, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]); }
+    }
+    ctx.fillStyle = "rgba(11,18,32,.85)"; ctx.fillRect(8, 8, 520, 26);
+    ctx.fillStyle = "#fff"; ctx.font = "600 13px 'Segoe UI',Arial,sans-serif";
+    ctx.fillText(nx ? "Cliquez sur " + nx.label.replace(/ \(.*/, "").slice(0, 70) : "Repères placés : vérifiez le tracé", 16, 26);
+  });
 
   async function openVideo(i) {
     const v = W.queue[i];
@@ -259,8 +480,7 @@
     W.catIdx = 0; W.det = null; W.hover = -1; W.addMode = false; W.lmIdx = 0; W.terrainT = null; W.progress = 0; W.running = false;
     AI.clearPoints();
     video.pause(); video.currentTime = 0;
-    setStep("terrain");
-    beginLandmark();
+    await startTerrain();
   }
 
   function enterPlayers() {
@@ -274,8 +494,8 @@
 
   function enterRun() {
     AI.setPointer(null); W.det = null;
-    const dur = video.duration || 0;
-    if (!AI.hasAnalysis()) AI.setRange(0, dur);
+    const dur = video.duration || 0, cal = AI.ai().calibrations[0];
+    if (!AI.hasAnalysis()) AI.setRange(cal ? Math.max(0, Math.ceil(cal.t)) : 0, dur);
     AI.updateEstimate();
     setStep("run");
   }
@@ -487,6 +707,14 @@
   });
   // changer d'image pendant la pose des repères invalide les repères déjà posés
   video.addEventListener("seeked", () => {
+    if (W.step === "terrain" && W.T && W.T.phase !== "manual") {
+      const T = W.T;
+      if (!T.busy && T.frame && (T.phase === "clicks" || T.phase === "color") && Math.abs(video.currentTime - T.frame.t) > 0.05) {
+        T.msg = "Vous avez déplacé la vidéo : je cherche à nouveau le but sur cette image.";
+        prepareFrame().then(() => { if (W.T && !W.T.goal) { W.T.msg = "Aucun but repéré sur cette image."; render(); } });
+      }
+      return;
+    }
     if (W.step === "terrain" && AI.getPoints().length && W.terrainT != null && Math.abs(video.currentTime - W.terrainT) > 0.05) {
       AI.clearPoints(); W.lmIdx = 0; W.terrainT = null; W.msg = "Vous avez déplacé la vidéo : les repères ont été effacés, recommencez sur cette image."; render(); beginLandmark();
     } else if (W.step === "players" && W.det && Math.abs(video.currentTime - W.det.frame.t) > 0.05) {

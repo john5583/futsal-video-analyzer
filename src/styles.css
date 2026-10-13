@@ -196,3 +196,4 @@ input[type=range]{accent-color:var(--blue)}
 .linklike{background:none;border:0;color:#93c5fd;text-decoration:underline;cursor:pointer;padding:0}
 .ai-adv{border:1px dashed var(--line);border-radius:8px;padding:6px 10px;margin-bottom:10px}
 .ai-adv>summary{cursor:pointer;color:var(--muted);font-size:12px}
+.wiz-colors{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}.wiz-colors button{display:inline-flex;align-items:center;gap:6px;padding:8px 14px}.wiz-colors .sw{width:18px;height:18px;border-radius:4px;border:1px solid #fff6;display:inline-block}

@@ -706,6 +706,15 @@
     setDirection: (v) => { $("ai-dir").value = String(v); $("ai-dir").dispatchEvent(new Event("change")); },
     setPrecision: (fps, tiles) => { $("ai-fps").value = String(fps); $("ai-tiles").value = String(tiles); $("ai-fps").dispatchEvent(new Event("change")); },
     hasAnalysis: () => frames.length > 0,
+    /* Enregistre le calibrage trouvé par l'assistant (remplace les précédents). */
+    setCalibration: (cal, t) => {
+      const a = ai();
+      a.calibrations = [{ t: Math.round(t * 10) / 10, points: cal.points, H: cal.H, err: cal.err }];
+      pts = []; placing = null;
+      $("ov-court").checked = true;
+      renderPoints(); renderCalibs(); updateOverlayMode(); App.changed();
+    },
+    videoSize: () => ({ w: video.videoWidth, h: video.videoHeight }),
     segment: (req) => (FSAI.segmentImpl ? FSAI.segmentImpl(req) : api.aiSegment(req)),
     detectPersons: async (canvas) => (await P.detectCanvas(canvas, 2, api, { minPerson: 0.3, minBall: 0.12 })).filter((d) => d.cls === 0),
     toggle: (id, on) => { $(id).checked = on; refreshLive(); }

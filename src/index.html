@@ -252,7 +252,7 @@
         <li><strong>Analyse IA</strong> (panneau de droite) : cliquez sur le grand bouton <strong>« ▶ Analyser une vidéo »</strong>, choisissez une ou plusieurs vidéos, puis suivez l'assistant :
           <ol>
             <li><em>Plusieurs vidéos</em> : indiquez si elles sont du <strong>même match</strong> (les tenues sont apprises une seule fois) ou de <strong>matchs différents</strong> (tout est redemandé pour chaque vidéo).</li>
-            <li><em>Terrain</em> : placez la vidéo sur une image où l'on voit bien les lignes, indiquez le sens du jeu et le type de caméra (à la main ou fixe), puis cliquez les points demandés (4 minimum). Un point invisible : « Je ne le vois pas ». Ne cliquez que les lignes du futsal (les lignes noires), pas celles d'un autre sport. Pour une caméra à la main, le programme suit ensuite le mouvement de la caméra.</li>
+            <li><em>Terrain</em> (automatique) : le programme cherche tout seul un <strong>but</strong> (poteaux rayés rouge et blanc) dans la vidéo et le repère en vert. S'il y a plusieurs couleurs de lignes au sol, il vous demande la <strong>couleur des lignes du futsal</strong> ; ces lignes sont alors surlignées. Cliquez ensuite sur la <strong>ligne des 6 m juste devant le milieu du but</strong> (la ligne pointillée verticale blanche vous guide), puis, si elles existent, sur la ligne pointillée des 9 m et sur les deux bouts de la ligne des 6 m (un cercle rouge indique où ils devraient être). Les lignes bleues et jaunes tracées par le programme doivent recouvrir les lignes du terrain ; terminez en indiquant si ce but est celui que vous <strong>défendez</strong> ou que vous <strong>attaquez</strong>. Précision de l'ordre de 0,5 à 1 m près du but, moins loin de lui. Si aucun but n'est repéré, ou pour les terrains sans but visible, utilisez « Placer les repères moi-même ». Pour une caméra tenue à la main, le programme suit ensuite le mouvement de la caméra.</li>
             <li><em>Silhouettes</em> : cliquez « Découper les joueurs de cette image » : l'IA dessine la silhouette de chaque personne. Cliquez la silhouette de <strong>vos joueurs</strong> (2 à 3 suffisent), puis <strong>« Valider »</strong> ; faites de même pour les <strong>adversaires</strong>, puis le <strong>gardien</strong>, le <strong>gardien adverse</strong> et l'<strong>arbitre</strong> (« Passer » s'ils ne sont pas visibles). Le programme apprend la vareuse, les manches, le short et les bas à partir de la silhouette seule (sans le décor). « ＋ Joueur non détecté » : tracez un rectangle autour d'un joueur oublié. « ↺ Autre image » : refaire la découpe sur une autre image.</li>
             <li><em>Analyse</em> : choisissez la plage et la précision, puis lancez. Le programme détecte les joueurs, reconnaît les équipes, suit le ballon et relève les erreurs tactiques.</li>
             <li><em>Résultats</em> : voir les joueurs sur la vidéo, la vue de dessus, le rapport, les corrections animées, corriger les équipes ou enregistrer. Chaque analyse est enregistrée automatiquement à côté de la vidéo (fichier <code>.fsal</code>).</li>
@@ -314,6 +314,8 @@
 <script src="report.js"></script>
 <script src="app.js"></script>
 <script src="ai-ui.js"></script>
+<script src="ai/goal.js"></script>
+<script src="ai/court-fit.js"></script>
 <script src="wizard.js"></script>
 <script src="corrections-ui.js"></script>
 </body>
