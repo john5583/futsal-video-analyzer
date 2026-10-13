@@ -35,7 +35,7 @@ async function onSegment(msg) {
     if (msg.buffer) await s.embed(msg.imgId, new Uint8ClampedArray(msg.buffer), msg.width, msg.height);
     const masks = [];
     for (const box of msg.boxes || []) {
-      const m = await s.segmentBox(box);
+      const m = await s.segmentBox(box, msg.imgId);
       masks.push({ x0: m.x0, y0: m.y0, w: m.w, h: m.h, area: m.area, iou: m.iou, data: m.data });
     }
     parentPort.postMessage({ type: "result", id: msg.id, masks });

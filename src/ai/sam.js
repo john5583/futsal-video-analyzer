@@ -78,8 +78,8 @@
     }
 
     /* Découpe une personne à partir de sa boîte [x1,y1,x2,y2] (pixels de l'image encodée). */
-    async function segmentBox(box) {
-      if (!cache) throw new Error("Aucune image encodée");
+    async function segmentBox(box, imgId) {
+      if (!cache || (imgId !== undefined && cache.imgId !== imgId)) throw new Error("Image non encodée : renvoyez l'image avec la demande");
       const { emb, w, h } = cache;
       const feeds = {
         image_embeddings: emb,

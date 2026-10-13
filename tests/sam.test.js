@@ -96,7 +96,7 @@ test("découpe réelle : chaque personne détectée donne une silhouette cohére
   // 3) une silhouette par personne ; boîtes en pixels de l'image encodée
   for (const d of people) {
     const b = [d.x1 / r * fit.s, d.y1 / r * fit.s, d.x2 / r * fit.s, d.y2 / r * fit.s];
-    const m = await sam.segmentBox(b);
+    const m = await sam.segmentBox(b, "bus");
     const boxArea = (b[2] - b[0]) * (b[3] - b[1]);
     assert.ok(m.area > boxArea * 0.2 && m.area <= boxArea * 1.1, "aire plausible : " + m.area + " / " + Math.round(boxArea));
     assert.ok(m.iou > 0.5, "qualité annoncée par le modèle : " + m.iou);
