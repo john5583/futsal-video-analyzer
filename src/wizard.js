@@ -20,6 +20,7 @@
     lmIdx: 0, terrainT: null, msg: "",
     catIdx: 0, det: null, hover: -1, addMode: false, drag: null, busy: "",
     progress: 0, running: false,
+    internalLoad: 0,          // > 0 pendant les chargements de projet faits par l'assistant lui-même
     T: null                   // repérage automatique du terrain (voir startTerrain)
   };
   const TARGETS = [
@@ -275,7 +276,8 @@
       if (!r || !api) return;
       const x = await api.readProject(r.path);
       if (x.error) { App.toast(x.error, true); return; }
-      await App.loadProject(x.project, x.path);
+      W.internalLoad++;
+      try { await App.loadProject(x.project, x.path); } finally { W.internalLoad--; }
     }
   };
 
@@ -472,7 +474,8 @@
       if (W.same && W.shared) {
         proj.teamName = W.shared.teamName; proj.opponentName = W.shared.opponentName; proj.defaultSystem = W.shared.defaultSystem;
       }
-      await App.loadProject(proj, null);
+      W.internalLoad++;
+      try { await App.loadProject(proj, null); } finally { W.internalLoad--; }
     }
     const ok = await waitVideo(20000);
     W.busy = "";
@@ -734,6 +737,17 @@
       W.det = null; W.hover = -1; render(); AI.redraw();
     }
   });
+
+  /* « Nouveau » / « Ouvrir » : le projet change hors de l'assistant -> on repart de l'accueil. */
+  function resetWizard() {
+    if (W.T) W.T.cancel = true;
+    if (W.running) { const c = $("ai-cancel"); if (c) c.click(); }
+    AI.cancelPlacing(); AI.clearPoints(); AI.setPointer(null);
+    W.T = null; W.det = null; W.queue = []; W.idx = 0; W.running = false; W.same = false; W.shared = null; W.acceptedCount = 0; W.msg = ""; W.busy = ""; W.addMode = false; W.hover = -1;
+    W.step = "idle"; render(); AI.redraw();
+  }
+  const prevOnLoad = App.hooks.onLoad;
+  App.hooks.onLoad = function () { prevOnLoad.apply(this, arguments); if (!W.internalLoad) resetWizard(); };
 
   window.FSWiz = { state: W, actions: ACTIONS, render };
   render();
