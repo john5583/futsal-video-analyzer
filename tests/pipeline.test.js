@@ -125,3 +125,20 @@ test("fusion des vignettes : un joueur coupé par la limite d'une vignette est i
   // sans dimensions de l'image : comportement précédent (aucun marquage)
   assert.ok(P.mergeTiles([tile0, tile1]).length >= 2);
 });
+
+test("zoom automatique : zone du terrain et vignettes qui la recouvrent", () => {
+  const H = [0.05, 0, 0, 0, 0.05, 0, 0, 0, 1]; // 20 px par mètre : terrain 40×20 m = 800×400 px
+  const r = P.courtRegion(H, 40, 20, 1, 1000, 600);
+  assert.ok(r && r.x === 0 && r.y === 0 && r.w > 800 && r.w <= 1000 && r.h > 400 && r.h <= 600, JSON.stringify(r));
+  const rects = P.zoomRects({ x: 0, y: 100, w: 1900, h: 700 });
+  assert.ok(rects.length >= 2 && rects.length <= 4);
+  assert.equal(rects[0].x, 0);
+  assert.equal(rects[rects.length - 1].x + rects[rects.length - 1].w, 1900);
+  for (let i = 1; i < rects.length; i++) assert.ok(rects[i].x < rects[i - 1].x + rects[i - 1].w, "recouvrement");
+  rects.forEach((q) => assert.ok(q.y === 100 && q.h === 700));
+  // vertical (vidéo portrait)
+  const v = P.zoomRects({ x: 10, y: 0, w: 600, h: 1700 });
+  assert.ok(v.length >= 2 && v.every((q) => q.x === 10 && q.w === 600));
+  // zone inutilisable : le terrain passe derrière la caméra -> pas de zoom (retour à l'image entière)
+  assert.equal(P.courtRegion([1, 0, 0, 0, 1, 0, 0.1, 0, -1], 40, 20, 1, 1000, 600), null);
+});

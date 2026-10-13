@@ -23,6 +23,42 @@
     return [{ x: 0, y: 0, w, h: th }, { x: 0, y: h - th, w, h: th }];
   }
 
+  /* Zone de l'image occupée par le terrain (en pixels de l'image analysée), à partir de H (pixels vidéo -> terrain).
+     Marge de 12 %. null si le calcul n'est pas fiable (le terrain déborde derrière la caméra, zone trop petite). */
+  function courtRegion(H, L, W, scale, cw, ch) {
+    let Hi;
+    try { Hi = HG.invert(H); } catch (_e) { return null; }
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    const m = 1.5;
+    const pts = [[-m, -m], [L + m, -m], [L + m, W + m], [-m, W + m], [L / 2, -m], [L / 2, W + m]];
+    for (const p of pts) {
+      const den = Hi[6] * p[0] + Hi[7] * p[1] + Hi[8];
+      if (!(den > 1e-9)) return null;
+      const q = HG.apply(Hi, p[0], p[1]);
+      if (!isFinite(q[0]) || !isFinite(q[1])) return null;
+      x0 = Math.min(x0, q[0] * scale); x1 = Math.max(x1, q[0] * scale); y0 = Math.min(y0, q[1] * scale); y1 = Math.max(y1, q[1] * scale);
+    }
+    const px = (x1 - x0) * 0.12, py = (y1 - y0) * 0.12;
+    x0 = Math.max(0, x0 - px); y0 = Math.max(0, y0 - py); x1 = Math.min(cw, x1 + px); y1 = Math.min(ch, y1 + py);
+    const w = x1 - x0, h = y1 - y0;
+    if (w < cw * 0.3 || h < ch * 0.2) return null;
+    return { x: Math.round(x0), y: Math.round(y0), w: Math.round(w), h: Math.round(h) };
+  }
+
+  /* Vignettes « zoom automatique » : on découpe la zone du terrain (au plus 4 morceaux qui se recouvrent) pour garder le détail d'origine. */
+  function zoomRects(crop) {
+    const horizontal = crop.w >= crop.h;
+    const along = horizontal ? crop.w : crop.h, across = horizontal ? crop.h : crop.w;
+    const tile = Math.min(along, Math.round(across * 1.15));
+    const n = Math.max(1, Math.min(4, Math.ceil((along - tile) / (tile * 0.7)) + 1));
+    const out = [];
+    for (let i = 0; i < n; i++) {
+      const off = n === 1 ? 0 : Math.round(((along - tile) * i) / (n - 1));
+      out.push(horizontal ? { x: crop.x + off, y: crop.y, w: tile, h: crop.h } : { x: crop.x, y: crop.y + off, w: crop.w, h: tile });
+    }
+    return out;
+  }
+
   /* Boîtes d'une vignette (espace 640x640 « letterbox ») -> espace de l'image.
      Une boîte collée à une limite intérieure de la vignette (pas au bord de l'image) est marquée « coupée » :
      le joueur y est partiel, il est ignoré s'il est déjà vu en entier ailleurs. */
@@ -164,9 +200,9 @@
   }
 
   /* Détecte les personnes et le ballon sur une image déjà dessinée dans frameCanvas. */
-  async function detectCanvas(frameCanvas, tilesMode, api, thresholds) {
+  async function detectCanvas(frameCanvas, tilesMode, api, thresholds, customRects) {
     const w = frameCanvas.width, h = frameCanvas.height;
-    const rects = tileRects(w, h, tilesMode);
+    const rects = customRects || tileRects(w, h, tilesMode);
     const work = document.createElement("canvas");
     work.width = Y.SIZE; work.height = Y.SIZE;
     const wctx = work.getContext("2d", { willReadFrequently: true });
@@ -196,7 +232,8 @@
     video.src = opts.url;
     await new Promise((res, rej) => { video.onloadedmetadata = res; video.onerror = () => rej(new Error("Vidéo illisible")); });
     const vw = video.videoWidth, vh = video.videoHeight;
-    const maxW = 1280;
+    const zoom = opts.tiles === 3;       // « zoom automatique » : résolution d'origine, zone du terrain découpée, recherche du ballon en gros plan
+    const maxW = zoom ? 1920 : 1280;
     const scale = Math.min(1, maxW / Math.max(vw, vh * (16 / 9)));
     const cw = Math.max(2, Math.round(vw * scale)), ch = Math.max(2, Math.round(vh * scale));
     const canvas = document.createElement("canvas");
@@ -222,15 +259,30 @@
     const gctx = gcanvas.getContext("2d", { willReadFrequently: true });
     const tracker = new T.Tracker();
     const frames = [], lost = [];
-    let anchor = null, M = IDENTITY, prev = null, lostStart = null;
+    let anchor = null, M = IDENTITY, prev = null, lostStart = null, lastBall = null;
     const started = Date.now();
     for (let i = 0; i < times.length; i++) {
       if (opts.signal && opts.signal.aborted) throw new Error("Analyse interrompue");
       const t = times[i];
       await seekTo(video, t);
       ctx.drawImage(video, 0, 0, cw, ch);
-      const dets = await detectCanvas(canvas, opts.tiles, opts.api, { minPerson: 0.35, minBall: 0.12 });
       const calib = calibrationAt(calibs, t);
+      let dets;
+      if (zoom) {
+        const Hprev = mobile && anchor === calib ? HG.mul3(anchor.H, M) : calib.H;
+        const crop = courtRegion(Hprev, opts.L, opts.W, scale, cw, ch);
+        dets = await detectCanvas(canvas, 1, opts.api, { minPerson: 0.35, minBall: 0.12 }, crop ? zoomRects(crop) : tileRects(cw, ch, 2));
+        // ballon non vu : recherche en gros plan autour de sa dernière position connue
+        if (!dets.some((d) => d.cls === Y.CLASS_BALL) && lastBall && t - lastBall.t <= 1.0) {
+          const half = Math.round(Math.max(90, Math.min(cw, ch) * 0.17));
+          const rx = Math.max(0, Math.min(cw - 2 * half, Math.round(lastBall.x - half))), ry = Math.max(0, Math.min(ch - 2 * half, Math.round(lastBall.y - half)));
+          const roi = await detectCanvas(canvas, 1, opts.api, { minPerson: 2, minBall: 0.07 }, [{ x: rx, y: ry, w: Math.min(cw, 2 * half), h: Math.min(ch, 2 * half) }]);
+          const best = roi.filter((d) => d.cls === Y.CLASS_BALL).sort((a, b) => b.score - a.score)[0];
+          if (best) dets.push(best);
+        }
+        const bd = dets.filter((d) => d.cls === Y.CLASS_BALL).sort((a, b) => b.score - a.score)[0];
+        if (bd) lastBall = { x: (bd.x1 + bd.x2) / 2, y: (bd.y1 + bd.y2) / 2, t };
+      } else dets = await detectCanvas(canvas, opts.tiles, opts.api, { minPerson: 0.35, minBall: 0.12 });
       let H = calib.H, reliable = true;
       if (mobile) {
         const boxes = dets.filter((d) => d.cls === Y.CLASS_PERSON).map((d) => [d.x1 * (gw / cw), d.y1 * (gh / ch), d.x2 * (gw / cw), d.y2 * (gh / ch)]);
@@ -300,5 +352,5 @@
     return { dets, scale, img: ctx.getImageData(0, 0, cw, ch), width: cw, height: ch };
   }
 
-  return { tileRects, tileToFrame, mergeTiles, calibrationAt, processDetections, finalizeFrames, compactFrames, expandFrames, frameNear, sampleTimes, analyseVideo, detectAt, detectCanvas, captureFrames, TEAM_CODE };
+  return { tileRects, courtRegion, zoomRects, tileToFrame, mergeTiles, calibrationAt, processDetections, finalizeFrames, compactFrames, expandFrames, frameNear, sampleTimes, analyseVideo, detectAt, detectCanvas, captureFrames, TEAM_CODE };
 });
