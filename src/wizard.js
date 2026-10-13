@@ -162,7 +162,7 @@
     const t0 = $("ai-t0").value, t1 = $("ai-t1").value, fpsv = $("ai-fps").value;
     return queueHeader() + progressDots() + "<h3>3. Lancer l'analyse</h3>" + chips() +
       "<div class=\"wiz-grid\"><label>De (mm:ss)<input data-set=\"t0\" type=\"text\" value=\"" + esc(t0) + "\" pattern=\"[0-9]{1,3}:[0-5][0-9]\"></label><label>À (mm:ss)<input data-set=\"t1\" type=\"text\" value=\"" + esc(t1) + "\" pattern=\"[0-9]{1,3}:[0-5][0-9]\"></label>" +
-      "<label>Précision<select data-set=\"fps\"><option value=\"2\"" + (fpsv === "2" ? " selected" : "") + ">Rapide</option><option value=\"3\"" + (fpsv === "3" ? " selected" : "") + ">Équilibrée</option><option value=\"5\"" + (fpsv === "5" ? " selected" : "") + ">Fine (plus lent)</option></select></label></div>" +
+      "<label>Détail (ballon, joueurs lointains)<select data-set=\"tiles\"><option value=\"1\"" + ($("ai-tiles").value === "1" ? " selected" : "") + ">Standard</option><option value=\"2\"" + ($("ai-tiles").value === "2" ? " selected" : "") + ">Renforcé (2× plus lent)</option></select></label><label>Précision<select data-set=\"fps\"><option value=\"2\"" + (fpsv === "2" ? " selected" : "") + ">Rapide</option><option value=\"3\"" + (fpsv === "3" ? " selected" : "") + ">Équilibrée</option><option value=\"5\"" + (fpsv === "5" ? " selected" : "") + ">Fine (plus lent)</option></select></label></div>" +
       "<p class=\"muted\" id=\"wiz-est\">" + esc($("ai-est").textContent || "") + "</p>" +
       (r.A && r.B ? "" : "<p class=\"wiz-err\">Il manque « Mon équipe » ou « Adversaires ».</p>") +
       (W.running ? "<div class=\"progress\"><i id=\"wiz-bar\" style=\"width:" + Math.round(W.progress * 100) + "%\"></i></div><p id=\"wiz-pmsg\" class=\"muted\">" + esc(W.msg) + "</p><div class=\"wiz-btns\"><button data-act=\"stopRun\">Arrêter</button></div>"
@@ -496,6 +496,7 @@
     AI.setPointer(null); W.det = null;
     const dur = video.duration || 0, cal = AI.ai().calibrations[0];
     if (!AI.hasAnalysis()) AI.setRange(cal ? Math.max(0, Math.ceil(cal.t)) : 0, dur);
+    if (!AI.hasAnalysis()) { $("ai-tiles").value = "2"; $("ai-tiles").dispatchEvent(new Event("change")); }
     AI.updateEstimate();
     setStep("run");
   }
@@ -703,6 +704,7 @@
     else if (k === "camera") AI.setCamera(t.value);
     else if (k === "t0") { $("ai-t0").value = t.value; $("ai-t0").dispatchEvent(new Event("change")); setTimeout(() => { const el = $("wiz-est"); if (el) el.textContent = $("ai-est").textContent; }, 0); }
     else if (k === "t1") { $("ai-t1").value = t.value; $("ai-t1").dispatchEvent(new Event("change")); setTimeout(() => { const el = $("wiz-est"); if (el) el.textContent = $("ai-est").textContent; }, 0); }
+    else if (k === "tiles") { $("ai-tiles").value = t.value; $("ai-tiles").dispatchEvent(new Event("change")); AI.updateEstimate(); const el = $("wiz-est"); if (el) el.textContent = $("ai-est").textContent; }
     else if (k === "fps") { $("ai-fps").value = t.value; $("ai-fps").dispatchEvent(new Event("change")); AI.updateEstimate(); const el = $("wiz-est"); if (el) el.textContent = $("ai-est").textContent; }
   });
   // changer d'image pendant la pose des repères invalide les repères déjà posés

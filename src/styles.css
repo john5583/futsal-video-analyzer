@@ -147,7 +147,12 @@ dialog form{display:flex;flex-direction:column;gap:10px}
 .corr-list button.item.active small{color:#dbeafe}
 .corr-list summary{cursor:pointer;margin:10px 0 4px}
 .corr-main{padding:14px;overflow:auto;min-width:0}
-.corr-stage{background:#000;border-radius:10px;overflow:hidden;max-width:1100px}
+.corr-stage{background:#000;border-radius:10px;overflow:hidden;max-width:1100px;position:relative}
+.corr-pip{position:absolute;right:10px;bottom:10px;width:30%;min-width:180px;max-width:340px;background:#000;border:2px solid #fff;border-radius:8px;overflow:hidden;box-shadow:0 4px 18px #000a}
+.corr-pip video{display:block;width:100%;height:auto;background:#000}
+.pip-bar{display:flex;align-items:center;gap:6px;background:#0b1220;padding:3px 6px;font-size:12px}
+.pip-bar span{flex:1;text-align:center;color:#dbeafe}
+.pip-bar button{padding:0 8px;font-size:12px}
 .corr-stage canvas{display:block;width:100%;height:auto}
 .corr-controls{display:flex;gap:8px;align-items:center;margin:10px 0;max-width:1100px}
 .corr-controls input[type=range]{flex:1}

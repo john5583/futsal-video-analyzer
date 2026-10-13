@@ -205,11 +205,16 @@
     <div class="corr-layout">
       <aside class="corr-list">
         <div id="corr-mine"></div>
-        <details open><summary><b>Toutes les corrections</b></summary><div id="corr-errors"></div></details>
+        <details open><summary><b>Catalogue complet des corrections</b> <span class="muted">(exemples types, pas vos erreurs)</span></summary><div id="corr-errors"></div></details>
         <details><summary><b>Exercices</b></summary><div id="corr-drills"></div></details>
       </aside>
       <div class="corr-main">
-        <div class="corr-stage"><canvas id="corr-canvas"></canvas></div>
+        <div class="corr-stage"><canvas id="corr-canvas"></canvas>
+          <div id="corr-pip" class="corr-pip" hidden>
+            <video id="corr-pip-video" muted playsinline preload="auto"></video>
+            <div class="pip-bar"><button id="pip-prev" title="Situation précédente">◀</button><span id="pip-label"></span><button id="pip-next" title="Situation suivante">▶</button></div>
+          </div>
+        </div>
         <div class="corr-controls">
           <button id="cp-play" class="primary">▶ Lecture</button>
           <button id="cp-restart">⏮ Début</button>

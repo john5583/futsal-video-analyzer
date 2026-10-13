@@ -10,6 +10,7 @@
   let current = null;       // { kind, id, title, desc, seq }
   let exporting = false;
   let built = false;
+  const pip = { events: [], idx: 0, t0: 0, t1: 0 };
 
   function seqFor(kind, id) {
     const scene = kind === "error" ? SC.forError(id) : SC.forDrill(id);
@@ -69,9 +70,36 @@
         $("cp-time").textContent = App.fmt(T) + " / " + App.fmt(dur);
         if (document.activeElement !== $("cp-seek")) $("cp-seek").value = dur ? Math.round((T / dur) * 1000) : 0;
         $("cp-play").textContent = playing ? "⏸ Pause" : "▶ Lecture";
+        syncPip(playing);
       },
       onEnd: () => { $("cp-play").textContent = "▶ Lecture"; }
     });
+  }
+
+  /* ---------- extrait de la vraie vidéo, en incrustation ---------- */
+  function setupPip(kind, id) {
+    const box = $("corr-pip"), v = $("corr-pip-video"), url = App.getVideoUrl();
+    pip.events = kind === "error" && url ? state.project.events.filter((e) => e.type === id).sort((a, b) => a.t - b.t) : [];
+    pip.idx = 0;
+    if (!pip.events.length) { box.hidden = true; v.pause(); return; }
+    box.hidden = false;
+    if (v.getAttribute("data-src") !== url) { v.setAttribute("data-src", url); v.src = url; }
+    showPipEvent();
+  }
+  function showPipEvent() {
+    const v = $("corr-pip-video"), e = pip.events[pip.idx], dur = state.project.duration || v.duration || 1e9;
+    pip.t0 = Math.max(0, e.t - 4); pip.t1 = Math.min(dur, e.t + 4);
+    $("pip-label").textContent = "Votre match · " + App.fmt(e.t) + " (" + (pip.idx + 1) + "/" + pip.events.length + ")";
+    $("pip-prev").disabled = $("pip-next").disabled = pip.events.length < 2;
+    const go = () => { try { v.currentTime = pip.t0; } catch (_e) { /* pas encore prête */ } };
+    if (v.readyState >= 1) go(); else v.addEventListener("loadedmetadata", go, { once: true });
+    if (player && player.playing) v.play().catch(() => {}); else v.pause();
+  }
+  function syncPip(playing) {
+    const v = $("corr-pip-video");
+    if ($("corr-pip").hidden) return;
+    if (playing && v.paused) v.play().catch(() => {});
+    else if (!playing && !v.paused) v.pause();
   }
 
   function select(kind, id, autoplay) {
@@ -81,6 +109,7 @@
     current = { kind, id, title: d.title, desc: d.desc, seq };
     $("cp-desc").textContent = d.title + " — " + d.desc;
     player.setSequence(seq);
+    setupPip(kind, id);
     markActive();
     if (autoplay !== false) player.play();
   }
@@ -133,6 +162,9 @@
   }
 
   function bind() {
+    $("corr-pip-video").addEventListener("timeupdate", () => { const v = $("corr-pip-video"); if (pip.events.length && v.currentTime >= pip.t1) v.currentTime = pip.t0; });
+    $("pip-prev").addEventListener("click", () => { pip.idx = (pip.idx + pip.events.length - 1) % pip.events.length; showPipEvent(); });
+    $("pip-next").addEventListener("click", () => { pip.idx = (pip.idx + 1) % pip.events.length; showPipEvent(); });
     $("cp-play").addEventListener("click", () => { if (!player || !current) return; if (player.playing) player.pause(); else player.play(); });
     $("cp-restart").addEventListener("click", () => { if (!player || !current) return; player.seek(0); player.play(); });
     $("cp-rate").addEventListener("change", () => { if (player) player.rate = Number($("cp-rate").value); });
