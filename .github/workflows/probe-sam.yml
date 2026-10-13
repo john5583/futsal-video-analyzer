@@ -1,0 +1,15 @@
+name: Sonde modèle de découpe (temporaire)
+on:
+  workflow_dispatch:
+  push:
+    paths: ["scripts/probe-sam.js", ".github/workflows/probe-sam.yml"]
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm ci
+      - run: node scripts/get-assets.js
+      - run: node scripts/probe-sam.js

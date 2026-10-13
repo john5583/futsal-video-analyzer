@@ -4,3 +4,4 @@ dist/
 !build/
 models/*.onnx
 tests/fixtures/
+tmp-probe/
