@@ -83,22 +83,31 @@
       }
     }
     if (best <= 0) return [];
-    const thr = best * 0.03;
-    const idx = [];
-    for (let i = 0; i < score.length; i++) if (score[i] > thr) idx.push(i);
-    idx.sort((p, q) => score[q] - score[p]);
+    // seuil très bas (relatif au meilleur coin) : un seul point très contrasté (tableau d'affichage, but) ne doit pas masquer le reste de l'image
+    const thr = best * 0.0008;
     const cell = Math.max(2, minDist), gw = Math.ceil(w / cell), gh = Math.ceil(h / cell);
+    // répartition sur toute l'image : au plus « quota » points par bloc de 8×6, les plus nets d'abord
+    const bx = 8, by = 6, quota = Math.max(4, Math.ceil(maxCorners / (bx * by)) + 2);
+    const buckets = Array.from({ length: bx * by }, () => []);
+    for (let i = 0; i < score.length; i++) if (score[i] > thr) { const x = i % w, y = (i / w) | 0; buckets[Math.min(by - 1, ((y * by) / h) | 0) * bx + Math.min(bx - 1, ((x * bx) / w) | 0)].push(i); }
     const occ = new Uint8Array(gw * gh);
     const pts = [];
-    for (const i of idx) {
+    const pick = (i) => {
       const x = i % w, y = (i / w) | 0;
       const cx = (x / cell) | 0, cy = (y / cell) | 0;
-      let free = true;
-      for (let j = Math.max(0, cy - 1); j <= Math.min(gh - 1, cy + 1) && free; j++) for (let k = Math.max(0, cx - 1); k <= Math.min(gw - 1, cx + 1); k++) if (occ[j * gw + k]) { free = false; break; }
-      if (!free) continue;
+      for (let j = Math.max(0, cy - 1); j <= Math.min(gh - 1, cy + 1); j++) for (let k = Math.max(0, cx - 1); k <= Math.min(gw - 1, cx + 1); k++) if (occ[j * gw + k]) return false;
       occ[cy * gw + cx] = 1;
       pts.push([x, y]);
-      if (pts.length >= maxCorners) break;
+      return true;
+    };
+    buckets.forEach((list) => {
+      list.sort((p, q) => score[q] - score[p]);
+      let n = 0;
+      for (const i of list) { if (n >= quota) break; if (pick(i)) n++; }
+    });
+    if (pts.length > maxCorners) {
+      pts.sort((p, q) => score[q[1] * w + q[0]] - score[p[1] * w + p[0]]);
+      pts.length = maxCorners;
     }
     return pts;
   }

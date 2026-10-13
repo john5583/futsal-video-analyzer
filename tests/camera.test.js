@@ -121,3 +121,18 @@ test("conversion pixels réduits -> natifs", () => {
   assert.equal(C.plausible([0.2, 0, 0, 0, 0.2, 0, 0, 0, 1]), false);
   assert.equal(C.plausible([1, 0, 0, 0, 1, 0, 0.5, 0, 1]), false);
 });
+
+test("points caractéristiques : un objet très contrasté (tableau d'affichage) ne masque pas le reste de l'image", () => {
+  const im = texture(480, 270, 11);
+  // tableau d'affichage : bloc très lumineux avec un bord net
+  for (let y = 20; y < 50; y++) for (let x = 200; x < 260; x++) im.data[y * im.w + x] = 255 * 20; // contraste énorme
+  const gray = new Uint8ClampedArray(im.w * im.h * 4);
+  for (let i = 0; i < im.w * im.h; i++) { const v = Math.max(0, Math.min(255, im.data[i] / (im.data[i] > 5000 ? 20 : 1))); gray[i * 4] = gray[i * 4 + 1] = gray[i * 4 + 2] = v; gray[i * 4 + 3] = 255; }
+  const prep = C.prepare(gray, im.w, im.h, [], 4);
+  const pts = C.goodFeatures(prep.pyr[0], 320, 7, prep.mask);
+  assert.ok(pts.length >= 150, "points trouvés : " + pts.length);
+  // répartition : chacun des quatre quarts de l'image contient des points
+  const quarters = [0, 0, 0, 0];
+  pts.forEach(([x, y]) => { quarters[(x >= im.w / 2 ? 1 : 0) + (y >= im.h / 2 ? 2 : 0)]++; });
+  assert.ok(quarters.every((n) => n >= 20), "répartition " + quarters.join(","));
+});

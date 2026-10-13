@@ -190,6 +190,7 @@
   /* ---- Lecture de la vidéo (navigateur uniquement) ---- */
   function seekTo(video, t) {
     return new Promise((resolve, reject) => {
+      if (Math.abs(video.currentTime - t) < 0.001 && !video.seeking && video.readyState >= 2) return resolve();
       const done = () => { clearTimeout(to); video.removeEventListener("seeked", done); video.removeEventListener("error", fail); resolve(); };
       const fail = () => { clearTimeout(to); video.removeEventListener("seeked", done); video.removeEventListener("error", fail); reject(new Error("Lecture de la vidéo impossible")); };
       const to = setTimeout(() => { video.removeEventListener("seeked", done); video.removeEventListener("error", fail); reject(new Error("Délai dépassé pendant le positionnement dans la vidéo")); }, 15000);
@@ -259,17 +260,56 @@
     const gctx = gcanvas.getContext("2d", { willReadFrequently: true });
     const tracker = new T.Tracker();
     const frames = [], lost = [];
-    let anchor = null, M = IDENTITY, prev = null, lostStart = null, lastBall = null;
+    let lostStart = null, lastBall = null;
+    const trk = { anchor: null, M: IDENTITY, prev: null, t: 0, boxes: [], keys: [], failCount: 0 };
+    const STEP = 0.1;
+    const grabSmall = (boxes) => { gctx.drawImage(video, 0, 0, gw, gh); return Cam.prepare(gctx.getImageData(0, 0, gw, gh).data, gw, gh, boxes, 4); };
+    const motion = (from, cur) => Cam.estimateMotion(from, cur, from.mask, cur.mask, { maxCorners: 320 });
+    const addKey = (st) => { const last = st.keys[st.keys.length - 1]; if (!last || st.t - last.t >= 1) { st.keys.push({ prev: st.prev, M: st.M, t: st.t }); if (st.keys.length > 14) st.keys.splice(1, 1); } };
+    /* Avance le suivi de st.t jusqu'à toT par pas courts ; en cas d'échec, on retente avec un pas deux fois plus court. */
+    async function advanceMotion(st, toT) {
+      let guard = 0;
+      while (st.t < toT - 1e-3 && guard++ < 400) {
+        let nt = Math.min(toT, st.t + STEP), r = null, cur = null;
+        for (let attempt = 0; attempt < 2; attempt++) {
+          await seekTo(video, nt);
+          cur = grabSmall(st.boxes);
+          r = motion(st.prev, cur);
+          if (r.ok) break;
+          nt = st.t + (nt - st.t) / 2;
+          if (nt - st.t < 0.02) break;
+        }
+        if (!r || !r.ok) { await seekTo(video, toT); return false; }
+        st.M = HG.mul3(st.M, HG.invert(Cam.toNative(r.H, gs)));
+        st.prev = cur; st.t = nt; addKey(st);
+      }
+      return st.t >= toT - 1e-3;
+    }
+    function relocalize(st, cur, t) {
+      for (let i = st.keys.length - 1; i >= 0; i--) {
+        const k = st.keys[i], r = motion(k.prev, cur);
+        if (r.ok) {
+          st.M = HG.mul3(k.M, HG.invert(Cam.toNative(r.H, gs)));
+          st.prev = cur; st.t = t; addKey(st); st.failCount = 0;
+          return true;
+        }
+      }
+      st.failCount++;
+      return false;
+    }
     const started = Date.now();
     for (let i = 0; i < times.length; i++) {
       if (opts.signal && opts.signal.aborted) throw new Error("Analyse interrompue");
       const t = times[i];
-      await seekTo(video, t);
-      ctx.drawImage(video, 0, 0, cw, ch);
       const calib = calibrationAt(calibs, t);
+      // Caméra mobile : le mouvement est suivi par petits pas (≤ 0,1 s), même si les images analysées sont plus espacées
+      let trackOk = true;
+      if (mobile && trk.anchor && trk.anchor === calib && trk.prev) trackOk = await advanceMotion(trk, t);
+      else await seekTo(video, t);
+      ctx.drawImage(video, 0, 0, cw, ch);
       let dets;
       if (zoom) {
-        const Hprev = mobile && anchor === calib ? HG.mul3(anchor.H, M) : calib.H;
+        const Hprev = mobile && trk.anchor === calib ? HG.mul3(trk.anchor.H, trk.M) : calib.H;
         const crop = courtRegion(Hprev, opts.L, opts.W, scale, cw, ch);
         dets = await detectCanvas(canvas, 1, opts.api, { minPerson: 0.35, minBall: 0.12 }, crop ? zoomRects(crop) : tileRects(cw, ch, 2));
         // ballon non vu : recherche en gros plan autour de sa dernière position connue
@@ -286,18 +326,18 @@
       let H = calib.H, reliable = true;
       if (mobile) {
         const boxes = dets.filter((d) => d.cls === Y.CLASS_PERSON).map((d) => [d.x1 * (gw / cw), d.y1 * (gh / ch), d.x2 * (gw / cw), d.y2 * (gh / ch)]);
-        gctx.drawImage(video, 0, 0, gw, gh);
-        const cur = Cam.prepare(gctx.getImageData(0, 0, gw, gh).data, gw, gh, boxes, 4);
-        if (calib !== anchor) {
-          anchor = calib; M = IDENTITY; prev = cur;
-        } else {
-          const r = Cam.estimateMotion(prev, cur, prev.mask, cur.mask, { maxCorners: 320 });
-          if (r.ok) {
-            M = HG.mul3(M, HG.invert(Cam.toNative(r.H, gs)));
-            prev = cur;
-          } else reliable = false;
+        trk.boxes = boxes;
+        if (calib !== trk.anchor || !trk.prev) {
+          gctx.drawImage(video, 0, 0, gw, gh);
+          const cur = Cam.prepare(gctx.getImageData(0, 0, gw, gh).data, gw, gh, boxes, 4);
+          trk.anchor = calib; trk.M = IDENTITY; trk.prev = cur; trk.t = t; trk.keys = [{ prev: cur, M: IDENTITY, t }]; trk.failCount = 0;
+        } else if (!trackOk) {
+          // dernier recours : retrouver la position en comparant l'image à des images clés déjà suivies
+          gctx.drawImage(video, 0, 0, gw, gh);
+          const cur = Cam.prepare(gctx.getImageData(0, 0, gw, gh).data, gw, gh, boxes, 4);
+          reliable = relocalize(trk, cur, t);
         }
-        H = HG.mul3(anchor.H, M);
+        H = HG.mul3(trk.anchor.H, trk.M);
       }
       if (!reliable) {
         if (lostStart == null) lostStart = t;
