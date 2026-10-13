@@ -103,6 +103,11 @@ dialog form{display:flex;flex-direction:column;gap:10px}
 .pane.active{display:flex}
 .ai-status{font-size:13px;margin-bottom:8px}
 .ai-status.bad{color:#fca5a5}
+.ai-next{border:1px solid #1d4ed8;background:#0c1f3d;border-radius:8px;padding:10px 12px;margin-bottom:10px;font-size:13px;line-height:1.45}
+.ai-next b.t{display:block;font-size:14px;margin-bottom:4px;color:#bfdbfe}
+.ai-next ol{margin:6px 0 0 18px;padding:0}
+.ai-next.done{border-color:#15803d;background:#0b2a17}
+.ai-next.done b.t{color:#bbf7d0}
 .ai-step{border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-bottom:8px;background:#0f1a2b}
 .ai-step summary{cursor:pointer;display:flex;gap:8px;align-items:center}
 .chip{font-size:11px;padding:1px 8px;border-radius:99px;background:#0b1220;color:var(--muted)}

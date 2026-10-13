@@ -184,6 +184,49 @@
   }
   function loop() { refreshLive(); raf = !video.paused && !video.ended ? requestAnimationFrame(loop) : 0; }
 
+  /* ---------- encadré « Prochaine étape » : dit à l'utilisateur quoi faire ---------- */
+  function renderNext() {
+    const box = $("ai-next"), a = state.project && state.project.ai;
+    if (!box || !a) return;
+    let title, steps = [], done = false;
+    if (!App.isVideoReady()) {
+      title = "Étape 0 — Charger la vidéo";
+      steps = ["À gauche, cliquez sur « Choisir une vidéo… » et sélectionnez votre fichier de match."];
+    } else if (!a.calibrations.length) {
+      title = "Étape 1 — Montrer le terrain au programme";
+      steps = [
+        "Mettez la vidéo en pause (Espace) sur une image où l'on voit bien les lignes noires du terrain.",
+        "Ci-dessous, dans « 1. Terrain », choisissez un repère dans la liste (ex. « Point de penalty gauche »).",
+        "Cliquez « Placer sur l'image », puis cliquez à cet endroit sur la vidéo. Recommencez pour 4 repères ou plus, bien répartis.",
+        "Cliquez « Valider le calibrage »."
+      ];
+    } else if (!(refs().A && refs().B)) {
+      title = "Étape 2 — Apprendre les couleurs des équipes";
+      steps = [
+        "Mettez la vidéo en pause sur une image où vos joueurs et leurs adversaires sont bien visibles.",
+        "Dans « 2. Tenues », ligne « Mon équipe », cliquez « Pipette », puis cliquez le maillot d'un de vos joueurs, puis son short, ses chaussettes et ses manches (« Passer » si inutile), puis « Terminer ».",
+        "Faites la même chose sur la ligne « Adversaire ».",
+        "Cliquez « Tester la reconnaissance sur cette image » pour vérifier."
+      ];
+    } else if (!(a.frames || frames.length)) {
+      title = "Étape 3 — Lancer l'analyse";
+      steps = [
+        "Dans « 3. Analyse », réglez « De » et « À » (commencez par 1 à 2 minutes pour tester).",
+        "Cliquez « Lancer l'analyse » et patientez (la durée estimée est affichée)."
+      ];
+    } else {
+      done = true;
+      title = "Analyse terminée ✔";
+      steps = [
+        "Dans « 4. Résultats », cochez Cadres, Silhouettes ou Trajectoires pour voir les joueurs sur la vidéo.",
+        "Acceptez ou écartez les « Erreurs suggérées ».",
+        "Ouvrez ensuite l'onglet « Rapport & solutions », puis « Corrections animées » pour obtenir les vidéos à partager."
+      ];
+    }
+    box.className = "ai-next" + (done ? " done" : "");
+    box.innerHTML = "<b class=\"t\">" + esc(title) + "</b>" + (steps.length === 1 ? esc(steps[0]) : "<ol>" + steps.map((x) => "<li>" + esc(x) + "</li>").join("") + "</ol>");
+  }
+
   /* ---------- volet de droite ---------- */
   function setChip(id, text, cls) { const e = $(id); e.textContent = text; e.className = "chip " + (cls || ""); }
 
@@ -209,6 +252,7 @@
       l.appendChild(d);
     });
     setChip("ai-s1-state", a.calibrations.length ? a.calibrations.length + " calibrage(s)" : "À faire", a.calibrations.length ? "ok" : "warn");
+    renderNext();
   }
 
   function fillLandmarks() {
@@ -235,12 +279,13 @@
     });
     const ok = !!(r.A && r.B);
     setChip("ai-s2-state", ok ? "Équipes reconnues" : "Choisir au moins 2 équipes", ok ? "ok" : "warn");
+    renderNext();
   }
 
   function renderStats() {
     const a = state.project.ai, box = $("ai-stats");
     box.innerHTML = "";
-    if (!a || !a.stats) { setChip("ai-s4-state", "Pas encore d'analyse", ""); return; }
+    if (!a || !a.stats) { setChip("ai-s4-state", "Pas encore d'analyse", ""); renderNext(); return; }
     const st = a.stats;
     const cells = [
       ["Possession (moi)", st.possession && st.possession.known ? st.possession.A + " %" : "n.d."],
@@ -252,6 +297,7 @@
     ];
     cells.forEach(([k, v]) => { const d = document.createElement("div"); d.className = "st"; d.innerHTML = esc(k) + "<b>" + esc(v) + "</b>"; box.appendChild(d); });
     setChip("ai-s4-state", frames.length + " images", "ok");
+    renderNext();
   }
 
   function renderSuggestions() {
@@ -590,6 +636,7 @@
       if (preview && ev === "seeked" && lastTest && Math.abs(video.currentTime - preview.t) > 0.2) { preview = null; lastTest = null; $("ai-test-msg").textContent = ""; }
       if (ev === "loadedmetadata" || ev === "emptied") updateOverlayMode(); else refreshLive();
     }));
+    ["loadedmetadata", "emptied", "error"].forEach((ev) => video.addEventListener(ev, () => setTimeout(renderNext, 0)));
     video.addEventListener("play", () => { preview = null; lastTest = null; $("ai-test-msg").textContent = ""; });
     video.addEventListener("play", () => { if (!raf) raf = requestAnimationFrame(loop); });
     window.addEventListener("resize", refreshLive);
