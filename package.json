@@ -28,6 +28,7 @@
     "files": [
       "main.js",
       "preload.js",
+      "updater.js",
       "src/**/*",
       "build/icon.png",
       "package.json",
@@ -85,10 +86,19 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "Futsal Analyzer",
-      "language": "1036"
-    }
+      "language": "1036",
+      "artifactName": "Futsal-Analyzer-Setup-${version}.${ext}"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "john5583",
+        "repo": "futsal-video-analyzer"
+      }
+    ]
   },
   "dependencies": {
+    "electron-updater": "^6.3.9",
     "onnxruntime-node": "^1.20.1"
   }
 }

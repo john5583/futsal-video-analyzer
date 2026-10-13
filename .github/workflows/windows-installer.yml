@@ -21,6 +21,10 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
       - run: npm ci
+      - name: Numéro de version = étiquette (publication uniquement)
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: npm version "$($env:GITHUB_REF_NAME.TrimStart('v'))" --no-git-tag-version --allow-same-version
       - name: Tests (téléchargent le modèle et une photo d'essai)
         run: npm test
       - name: Construire l'installeur
@@ -29,6 +33,7 @@ jobs:
         shell: pwsh
         run: |
           $exe = Get-ChildItem dist -Filter "*Setup*.exe" | Select-Object -First 1
+          if (-not (Test-Path dist/latest.yml)) { throw "latest.yml manquant (mise à jour automatique)" }
           if (-not $exe -or $exe.Length -lt 100MB) { throw "Installeur introuvable ou trop petit" }
           Write-Host "Installeur : $($exe.Name) ($([math]::Round($exe.Length/1MB)) Mo)"
           $res = "dist/win-unpacked/resources"
@@ -55,4 +60,6 @@ jobs:
         with:
           files: |
             dist/*Setup*.exe
+            dist/*.blockmap
+            dist/latest.yml
             dist/Futsal-Analyzer-Portable.zip

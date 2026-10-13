@@ -1,5 +1,6 @@
 "use strict";
 const { app, BrowserWindow, Menu, dialog, ipcMain, protocol, shell } = require("electron");
+const updater = require("./updater");
 const { Worker } = require("worker_threads");
 const path = require("path");
 const fs = require("fs");
@@ -191,6 +192,7 @@ function buildMenu() {
       label: "Aide",
       submenu: [
         { label: "Guide d'utilisation", click: send("help") },
+        { label: "Rechercher une mise à jour…", click: () => updater.check(true) },
         { label: "À propos", click: () => dialog.showMessageBox(mainWindow, { type: "info", title: "À propos", message: "Futsal Analyzer " + app.getVersion(), detail: "Analyse tactique vidéo du futsal : erreurs, solutions et base de connaissances." }) }
       ]
     }
@@ -391,6 +393,7 @@ app.whenReady().then(() => {
   protocol.handle("fsvideo", (request) => serveVideo(request));
   registerIpc();
   buildMenu();
+  updater.init(() => mainWindow);
   createWindow();
   app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
