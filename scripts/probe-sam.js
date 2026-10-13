@@ -27,7 +27,7 @@ const sha = (f) => crypto.createHash("sha256").update(fs.readFileSync(f)).digest
     console.log(k, "taille", fs.statSync(f).size, "sha256", sha(f));
   }
   const enc = await ort.InferenceSession.create(paths.enc), dec = await ort.InferenceSession.create(paths.dec);
-  const meta = (s) => (s.inputMetadata || []).map ? s.inputMetadata.map((m) => m.name + ":" + m.type + ":" + JSON.stringify(m.shape)) : s.inputNames;
+  const meta = (s) => s.inputNames;
   console.log("ENC in", JSON.stringify(meta(enc)), "out", JSON.stringify(enc.outputNames));
   console.log("DEC in", JSON.stringify(meta(dec)), "out", JSON.stringify(dec.outputNames));
   // image : bus.jpg, grand côté -> 1024, remplissage en bas/droite
