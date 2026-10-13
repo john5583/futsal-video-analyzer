@@ -85,6 +85,12 @@ const FAKE = () => { FSAI.segmentImpl = async (req) => ({ masks: req.boxes.map((
   await win.click("[data-act=run]");
   await waitFor(win, () => FSWiz.state.step === "done" || /arrêtée|aucun/.test(FSWiz.state.msg), null, { timeout: 180000 });
   must(await win.evaluate(() => FSWiz.state.step) === "done", "analyse terminée : " + (await win.evaluate(() => FSWiz.state.msg)).slice(0, 110));
+  // erreurs suggérées (simulées) : le bouton d'acceptation les fait entrer dans le diagnostic
+  await win.evaluate(() => { const a = FSAI.ai(); a.suggestedEvents = [{ sid: "s1", t: 2, type: "repli_tardif", note: "essai" }, { sid: "s2", t: 3, type: "perte_zone_def", note: "essai" }]; a.suggested = 2; FSAI.renderStats(); FSWiz.render(); });
+  must(await win.isVisible("[data-act=acceptAll]"), "bouton « Accepter les erreurs suggérées » affiché");
+  await win.click("[data-act=acceptAll]"); await new Promise((r) => setTimeout(r, 2500));
+  must(await win.evaluate(() => FSApp.state.project.events.length) === 2, "les erreurs sont entrées dans le projet");
+  must(/2 erreur\(s\) ajoutée/.test(await win.textContent("#wiz")), "confirmation affichée");
   out("LOGS:", JSON.stringify(logs)); if (logs.length) process.exitCode = 1;
   await app.close();
 })().catch((e) => { console.log("FAIL", e.stack || e.message); process.exit(1); });

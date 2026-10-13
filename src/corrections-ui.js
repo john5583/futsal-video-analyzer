@@ -45,7 +45,9 @@
     if (analysis && analysis.findings.length) {
       analysis.findings.forEach((f) => mine.appendChild(item("error", f.type, f.label, f.count + " fois · " + SEV[f.severity])));
     } else {
-      const p = document.createElement("p"); p.className = "muted"; p.style.padding = "4px 8px"; p.textContent = "Aucune erreur marquée pour ce match : marquez des situations ou lancez l'analyse IA.";
+      const pending = state.project.ai && state.project.ai.suggestedEvents ? state.project.ai.suggestedEvents.length : 0;
+      const p = document.createElement("p"); p.className = "muted"; p.style.padding = "4px 8px";
+      p.textContent = pending ? pending + " erreur(s) détectée(s) par l'IA attendent votre validation : dans « Analyse vidéo », cliquez sur « Accepter les erreurs suggérées » pour les voir ici avec leur extrait de vidéo." : "Aucune erreur marquée pour ce match : marquez des situations ou lancez l'analyse IA.";
       mine.appendChild(p);
     }
     const errs = $("corr-errors"); errs.innerHTML = "";

@@ -177,7 +177,9 @@
     const more = W.idx < W.queue.length - 1;
     const a = AI.ai(), n = (a.suggestedEvents || []).length;
     return queueHeader() + progressDots() + "<h3>✔ Analyse terminée</h3><p>" + esc(W.msg) + "</p>" +
-      "<p class=\"muted\">" + n + " erreur(s) suggérée(s) à valider dans « 4. Résultats » plus bas. Que voulez-vous faire maintenant ?</p>" +
+      (W.acceptedCount && !n ? "<p class=\"wiz-ok\">✔ " + W.acceptedCount + " erreur(s) ajoutée(s) au rapport et aux corrections animées.</p>" : "") +
+      (n ? "<div class=\"wiz-accept\"><p><b>" + n + " erreur(s) détectée(s) par l'IA</b> attendent votre validation. Tant qu'elles ne sont pas acceptées, le rapport et les corrections restent vides.</p><div class=\"wiz-btns\"><button class=\"primary big\" data-act=\"acceptAll\">✔ Accepter les " + n + " erreurs suggérées</button><button data-act=\"reviewSugg\">Les examiner une par une</button></div></div>" : (W.acceptedCount ? "" : "<p class=\"muted\">Aucune erreur suggérée par l'IA sur cette analyse.</p>")) +
+      "<p class=\"muted\">Que voulez-vous faire maintenant ?</p>" +
       "<div class=\"wiz-after\">" +
       "<button data-act=\"seeVideo\">👁 Voir les joueurs sur la vidéo</button>" +
       "<button data-act=\"seeTop\">🧭 Vue de dessus</button>" +
@@ -256,6 +258,14 @@
     fixTeams() {
       const a = AI.ai(); a.kits = {}; AI.renderKits(); W.catIdx = 0; W.det = null; enterPlayers();
     },
+    acceptAll() {
+      W.acceptedCount = (AI.ai().suggestedEvents || []).length;
+      const b = $("ai-accept-all"); if (b) b.click();
+      W.msg = $("ai-run-msg").textContent;
+      App.toast("Erreurs acceptées : elles apparaissent maintenant dans le rapport et les corrections animées.");
+      setTimeout(() => { render(); }, 600);
+    },
+    reviewSugg() { const e = $("ai-sugg"); if (e) e.scrollIntoView({ block: "center" }); },
     saveAs() { App.saveProject(true); },
     async next() { await openVideo(W.idx + 1); },
     finish() { W.queue = []; W.idx = 0; setStep("idle"); },

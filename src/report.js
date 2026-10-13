@@ -37,7 +37,8 @@
     h += "<div class=\"cards\">" +
       (st.possession && st.possession.known ? card("Possession (mon équipe)", st.possession.A + " %") + card("Possession (adversaire)", st.possession.B + " %") : "") +
       (st.shape ? card("Profondeur moyenne", st.shape.depth + " m") + card("Largeur moyenne", st.shape.width + " m") : "") +
-      card("Événements suggérés", (ai.suggested || 0)) + "</div>";
+      card("Erreurs suggérées (à valider)", (ai.suggestedEvents || []).length) + "</div>";
+    if ((ai.suggestedEvents || []).length) h += "<p class=\"note\"><b>" + ai.suggestedEvents.length + " erreur(s) détectée(s) par l'IA attendent votre validation</b> : elles ne sont pas encore comptées dans le diagnostic ni dans les corrections. Retournez dans « Analyse vidéo → 4. Résultats » et cliquez sur « Tout accepter » (ou validez-les une par une).</p>";
     if (!(st.possession && st.possession.known)) h += "<p class=\"empty\">Le ballon n'a pas été détecté de façon fiable : la possession et les pertes de balle ne sont pas calculées.</p>";
     if (st.heat && E) {
       h += "<h3>Zones occupées par mon équipe (joueurs de champ)</h3><div class=\"snap wide\">" + E.opsToSVG(E.liveOps(null, { heat: st.heat }), 760, E.COURT_VIEW) + "</div><p class=\"meta\">Mon équipe attaque vers la droite. Rouge : zone très fréquentée ; bleu : peu fréquentée.</p>";
