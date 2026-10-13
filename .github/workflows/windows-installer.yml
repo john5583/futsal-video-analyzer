@@ -2,6 +2,11 @@ name: Futsal Analyzer — installeur Windows
 
 on:
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Numéro de version à publier (ex. 1.1.0) ; laisser vide pour seulement compiler"
+        required: false
+        default: ""
   push:
     branches: ["main"]
     paths-ignore: ["**.md"]
@@ -22,9 +27,13 @@ jobs:
           cache-dependency-path: package-lock.json
       - run: npm ci
       - name: Numéro de version = étiquette (publication uniquement)
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.version != ''
         shell: pwsh
-        run: npm version "$($env:GITHUB_REF_NAME.TrimStart('v'))" --no-git-tag-version --allow-same-version
+        env:
+          VERSION_INPUT: ${{ inputs.version }}
+        run: |
+          $v = if ($env:VERSION_INPUT) { $env:VERSION_INPUT } else { $env:GITHUB_REF_NAME.TrimStart('v') }
+          npm version "$v" --no-git-tag-version --allow-same-version
       - name: Tests (téléchargent le modèle et une photo d'essai)
         run: npm test
       - name: Construire l'installeur
@@ -55,9 +64,11 @@ jobs:
           path: dist/Futsal-Analyzer-Portable.zip
           if-no-files-found: error
       - name: Publier la release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.version != ''
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ inputs.version != '' && format('v{0}', inputs.version) || github.ref_name }}
+          name: Futsal Analyzer ${{ inputs.version != '' && inputs.version || github.ref_name }}
           files: |
             dist/*Setup*.exe
             dist/*.blockmap
