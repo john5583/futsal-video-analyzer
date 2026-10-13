@@ -743,7 +743,8 @@
     if (W.T) W.T.cancel = true;
     if (W.running) { const c = $("ai-cancel"); if (c) c.click(); }
     AI.cancelPlacing(); AI.clearPoints(); AI.setPointer(null);
-    W.T = null; W.det = null; W.queue = []; W.idx = 0; W.running = false; W.same = false; W.shared = null; W.acceptedCount = 0; W.msg = ""; W.busy = ""; W.addMode = false; W.hover = -1;
+    W.T = null; W.det = null; W.queue = []; W.idx = 0; W.running = false; W.same = false; W.shared = null; W.results = []; W.acceptedCount = 0; W.msg = ""; W.busy = ""; W.addMode = false; W.hover = -1;
+    const pg = $("ai-progress"); if (pg) pg.hidden = true; const bar = $("ai-bar"); if (bar) bar.style.width = "0%";
     W.step = "idle"; render(); AI.redraw();
   }
   const prevOnLoad = App.hooks.onLoad;

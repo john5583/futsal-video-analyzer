@@ -96,6 +96,7 @@ const FAKE = () => { FSAI.segmentImpl = async (req) => ({ masks: req.boxes.map((
   await win.click("#btn-new"); await new Promise((r) => setTimeout(r, 800));
   must(await win.evaluate(() => FSWiz.state.step) === "idle" && await win.isVisible(".wiz-start"), "« Nouveau » ramène l'assistant à l'accueil");
   must(await win.evaluate(() => !FSApp.state.videoOk && FSApp.state.project.events.length === 0), "projet et vidéo remis à zéro");
+  must(await win.evaluate(() => FSWiz.state.results.length === 0 && !document.getElementById("wiz").textContent.includes("Analyses enregistrées")), "« Nouveau » efface aussi la liste des analyses enregistrées");
   out("LOGS:", JSON.stringify(logs)); if (logs.length) process.exitCode = 1;
   await app.close();
 })().catch((e) => { console.log("FAIL", e.stack || e.message); process.exit(1); });
