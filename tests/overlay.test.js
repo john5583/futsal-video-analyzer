@@ -63,3 +63,14 @@ test("projection de chaque image : conservée par le nettoyage final de l'analys
   const plain = P.finalizeFrames(frames.map((x) => ({ t: x.t, players: x.players, ball: null })));
   assert.ok(plain.every((x) => !("h" in x)), "anciennes analyses : rien n'est ajouté");
 });
+
+test("perte de balle sans coéquipier visible : le joueur est guidé vers le côté le plus proche", () => {
+  const two = [[10, 6], [11, 7]];   // le joueur qui perd le ballon (A) et l'adversaire (B), seuls à l'image
+  const fs = [frame(4.6, two), frame(5, two)];
+  fs.forEach((f) => { f.ball = { x: 10.5, y: 6.5 }; });
+  const o = O.buildOverlay({ t: 5, type: "perte_zone_def" }, fs, { L: 40, W: 20 });
+  assert.ok(o.correction && o.correction.ghost, "une correction animée existe");
+  assert.equal(o.correction.ghost.id, 1);
+  assert.equal(o.correction.ghost.to[1], 1.5, "vers la ligne de touche la plus proche");
+  assert.equal(o.correction.ghost.label, "Jouer vers l'extérieur");
+});

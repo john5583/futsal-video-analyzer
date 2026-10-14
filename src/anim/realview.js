@@ -121,7 +121,7 @@
     let tNow = s.ev.t, shown = s.ov.items.length, corr = -1;
     if (s.phase === "play") {
       tNow = v.currentTime;
-      shown = tNow >= s.ev.t - 1 ? s.ov.items.length : 0;
+      shown = s.ov.items.length;                     // les joueurs concernés sont suivis pendant tout l'extrait
       if (tNow >= s.win[1] || v.ended) {           // fin de l'extrait : retour sur l'erreur et correction animée
         v.pause(); s.phase = "correct"; s.start = now; this.notify();
         seek(v, s.ev.t);
@@ -158,41 +158,113 @@
     const posOf = (it) => { const p = it.id != null ? byId.get(it.id) : null; return p ? [p.x, p.y, p] : (it.id != null && s.mode === "seq" && Math.abs(tNow - s.ev.t) > 0.3 ? null : [it.x, it.y, null]); };
     const unit = Math.max(1, rh / 360);
     ctx.lineJoin = ctx.lineCap = "round";
-    // zones déjà occupées : la petite carte (si visible), puis chaque étiquette posée
-    this.placed = [];
+    // étiquettes posées à la fin (au plus 3), en évitant : la petite carte, les joueurs, les flèches, le fantôme
+    this.labelQ = []; this.obst = [];
     const mapEl = this.el.map;
     if (mapEl.offsetParent && getComputedStyle(mapEl).display !== "none") {
       const a = c.getBoundingClientRect(), b = mapEl.getBoundingClientRect(), sx = c.width / Math.max(1, a.width), sy = c.height / Math.max(1, a.height);
-      this.placed.push([(b.left - a.left) * sx, (b.top - a.top) * sy, (b.right - a.left) * sx, (b.bottom - a.top) * sy]);
+      this.obst.push([(b.left - a.left) * sx, (b.top - a.top) * sy, (b.right - a.left) * sx, (b.bottom - a.top) * sy]);
     }
+    st.players.forEach((p) => { if (p.b) this.obst.push([rx + (p.b[0] / 1000) * rw, ry + (p.b[1] / 1000) * rh, rx + (p.b[2] / 1000) * rw, ry + (p.b[3] / 1000) * rh]); });
     const labels = corr < 0;                        // pendant la correction, les étiquettes de l'erreur s'effacent (lisibilité)
-    s.ov.items.slice(0, shown).map((it) => (labels ? it : Object.assign({}, it, { label: null }))).forEach((it) => {
+    s.ov.items.slice(0, shown).map((it) => (labels ? it : Object.assign({}, it, { label: null }))).forEach((it, idx) => {
       if (it.type === "ring") {
         const q = posOf(it); if (!q) return;
-        this.groundCircle(P, q[0], q[1], 0.75, COLOR[it.color], unit);
+        const pl = q[2], boxW = pl && pl.b ? ((pl.b[2] - pl.b[0]) / 1000) * rw : null;
+        this.groundCircle(P, q[0], q[1], 0.75, COLOR[it.color], unit, boxW ? boxW * 1.3 : null);
         if (it.label) {
-          // étiquette au-dessus de la tête, reliée au joueur par un petit trait
-          const pl = q[2], foot = P(q[0], q[1]);
+          // étiquette reliée à la tête du joueur (ou au-dessus de son cercle)
+          const foot = P(q[0], q[1]);
           const head = pl && pl.b ? [rx + ((pl.b[0] + pl.b[2]) / 2000) * rw, ry + (pl.b[1] / 1000) * rh] : (foot ? [foot[0], foot[1] - 10 * unit] : null);
-          if (head) this.tag(ctx, head[0], head[1] - 30 * unit, it.label, COLOR[it.color], unit, head);
+          if (head) this.queueLabel(it.label, COLOR[it.color], head, idx);
         }
-      } else if (it.type === "arrow") this.polyArrow(it.pts.map((p) => P(p[0], p[1])), COLOR[it.color], unit, it.dashed, it.label);
-      else if (it.type === "line") this.polyArrow([P(it.from[0], it.from[1]), P(it.to[0], it.to[1])], COLOR[it.color], unit, it.dashed, it.label, true);
-      else if (it.type === "zone") this.zone(it.pts.map((p) => P(p[0], p[1])), COLOR[it.color], it.label, unit);
+      } else if (it.type === "arrow") this.polyArrow(it.pts.map((p) => P(p[0], p[1])), COLOR[it.color], unit, it.dashed, it.label, false, null, idx);
+      else if (it.type === "line") this.polyArrow([P(it.from[0], it.from[1]), P(it.to[0], it.to[1])], COLOR[it.color], unit, it.dashed, it.label, true, null, idx);
+      else if (it.type === "zone") this.zone(it.pts.map((p) => P(p[0], p[1])), COLOR[it.color], it.label, unit, idx);
     });
     if (corr >= 0 && s.ov.correction) this.drawCorrection(P, corr, unit, rx, ry, rw, rh);
+    this.flushLabels(unit);
   };
 
-  RealView.prototype.groundCircle = function (P, x, y, r, color, unit) {
-    const ctx = this.ctx, pts = [];
-    for (let i = 0; i < 28; i++) { const a = (i / 28) * Math.PI * 2, q = P(x + r * Math.cos(a), y + r * Math.sin(a)); if (q) pts.push(q); }
+  /* File des étiquettes : une demande = un texte, une couleur, un point d'attache ; prio basse = plus important. */
+  RealView.prototype.queueLabel = function (text, color, anchor, prio) {
+    if (!this.labelQ || !text || !anchor) return;
+    this.labelQ.push({ text, color, anchor, prio: prio == null ? 50 : prio });
+  };
+  const MAX_LABELS = 3;
+  /* Pose des étiquettes : regroupement des textes identiques, 3 au plus, plus petites, sur le côté,
+     sans chevaucher ni les autres étiquettes, ni les joueurs, ni les flèches, ni le fantôme, ni la petite carte. */
+  RealView.prototype.flushLabels = function (unit) {
+    const ctx = this.ctx, groups = new Map();
+    (this.labelQ || []).forEach((q) => {
+      const key = q.text + "|" + q.color, g = groups.get(key);
+      if (g) { g.anchors.push(q.anchor); g.prio = Math.min(g.prio, q.prio); } else groups.set(key, { text: q.text, color: q.color, anchors: [q.anchor], prio: q.prio });
+    });
+    const list = [...groups.values()].sort((a, b) => a.prio - b.prio).slice(0, MAX_LABELS);
+    ctx.save();
+    ctx.font = "600 " + Math.round(12.5 * unit) + "px system-ui, sans-serif";
+    const placed = [], W = ctx.canvas.width, H = ctx.canvas.height;
+    const overlap = (r, o) => Math.max(0, Math.min(r[2], o[2]) - Math.max(r[0], o[0])) * Math.max(0, Math.min(r[3], o[3]) - Math.max(r[1], o[1]));
+    list.forEach((g) => {
+      const w = ctx.measureText(g.text).width + 12 * unit, h = 18 * unit;
+      const ax = g.anchors.reduce((s, a) => s + a[0], 0) / g.anchors.length, ay = Math.min(...g.anchors.map((a) => a[1]));
+      const cands = [];
+      for (const k of [1, 1.8, 2.8]) for (const [dx, dy] of [[1, -0.6], [-1, -0.6], [1, 0.4], [-1, 0.4], [0, -1.4], [1, -1.4], [-1, -1.4]]) {
+        cands.push([ax + dx * (w / 2 + 26 * unit) * k, ay + dy * (h + 18 * unit) * k]);
+      }
+      let best = null, bestCost = Infinity;
+      cands.forEach(([x, y]) => {
+        const r = [x - w / 2 - 3 * unit, y - h / 2 - 3 * unit, x + w / 2 + 3 * unit, y + h / 2 + 3 * unit];
+        if (r[0] < 0 || r[1] < 0 || r[2] > W || r[3] > H) return;
+        let cost = 0; this.obst.concat(placed).forEach((o) => { cost += overlap(r, o); });
+        cost += Math.hypot(x - ax, y - ay) * 0.5;          // à coût égal, la position la plus proche
+        if (cost < bestCost) { bestCost = cost; best = [x, y, r]; }
+      });
+      if (!best) return;
+      const [x, y, r] = best;
+      placed.push(r);
+      // traits vers chaque joueur concerné (un seul texte pour plusieurs joueurs)
+      ctx.strokeStyle = g.color; ctx.lineWidth = 1.8 * unit; ctx.fillStyle = g.color;
+      g.anchors.forEach((a) => {
+        const ex = Math.max(x - w / 2, Math.min(x + w / 2, a[0])), ey = a[1] < y ? y - h / 2 : y + h / 2;
+        ctx.beginPath(); ctx.moveTo(ex, ey); ctx.lineTo(a[0], a[1]); ctx.stroke();
+        ctx.beginPath(); ctx.arc(a[0], a[1], 2.3 * unit, 0, Math.PI * 2); ctx.fill();
+      });
+      const x0 = x - w / 2, y0 = y - h / 2, rr = 4 * unit;
+      ctx.fillStyle = "#0b1220e6"; ctx.lineWidth = 1.3 * unit;
+      ctx.beginPath(); ctx.moveTo(x0 + rr, y0); ctx.arcTo(x0 + w, y0, x0 + w, y0 + h, rr); ctx.arcTo(x0 + w, y0 + h, x0, y0 + h, rr); ctx.arcTo(x0, y0 + h, x0, y0, rr); ctx.arcTo(x0, y0, x0 + w, y0, rr); ctx.closePath();
+      ctx.fill(); ctx.stroke();
+      ctx.fillStyle = "#fff"; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(g.text, x, y + 0.5);
+    });
+    ctx.restore();
+    this.labelQ = null;
+  };
+  /* Obstacle pour les étiquettes : le long d'un tracé (flèche, ligne). */
+  RealView.prototype.obstaclePath = function (pts, unit) {
+    if (!this.obst) return;
+    const r = 7 * unit;
+    for (let i = 1; i < pts.length; i++) {
+      const a = pts[i - 1], b = pts[i], n = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / (10 * unit)));
+      for (let j = 0; j <= n; j++) { const x = lerp(a[0], b[0], j / n), y = lerp(a[1], b[1], j / n); this.obst.push([x - r, y - r, x + r, y + r]); }
+    }
+  };
+
+  /* Cercle au sol ; maxW : largeur maximale à l'écran (joueur proche de la caméra : cercle réduit). */
+  RealView.prototype.groundCircle = function (P, x, y, r, color, unit, maxW) {
+    const ctx = this.ctx;
+    const ring = (rr) => { const out = []; for (let i = 0; i < 28; i++) { const a = (i / 28) * Math.PI * 2, q = P(x + rr * Math.cos(a), y + rr * Math.sin(a)); if (q) out.push(q); } return out; };
+    let pts = ring(r);
+    if (maxW && pts.length >= 10) {
+      const wpx = Math.max(...pts.map((q) => q[0])) - Math.min(...pts.map((q) => q[0]));
+      if (wpx > maxW) pts = ring(r * Math.max(0.35, maxW / wpx));
+    }
     if (pts.length < 10) return;
     ctx.beginPath(); pts.forEach((q, i) => (i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1]))); ctx.closePath();
     ctx.fillStyle = color + "33"; ctx.fill();
     ctx.lineWidth = 3.5 * unit; ctx.strokeStyle = color; ctx.stroke();
   };
 
-  RealView.prototype.polyArrow = function (pts, color, unit, dashed, label, noHead, progress) {
+  RealView.prototype.polyArrow = function (pts, color, unit, dashed, label, noHead, progress, prio) {
     const ctx = this.ctx;
     pts = pts.filter(Boolean);
     if (pts.length < 2) return;
@@ -213,14 +285,15 @@
       ctx.lineTo(b[0] - hs * Math.cos(ang + 0.45), b[1] - hs * Math.sin(ang + 0.45)); ctx.closePath(); ctx.fill();
     }
     ctx.restore();
-    if (label) { const m = pts[Math.floor(pts.length / 2)], m2 = pts[Math.max(0, Math.floor(pts.length / 2) - 1)]; this.tag(ctx, (m[0] + m2[0]) / 2, (m[1] + m2[1]) / 2 - 12 * unit, label, color, unit); }
+    this.obstaclePath(pts, unit);
+    if (label) { const m = pts[Math.floor(pts.length / 2)], m2 = pts[Math.max(0, Math.floor(pts.length / 2) - 1)]; this.queueLabel(label, color, [(m[0] + m2[0]) / 2, (m[1] + m2[1]) / 2], prio); }
   };
 
-  RealView.prototype.zone = function (pts, color, label, unit) {
+  RealView.prototype.zone = function (pts, color, label, unit, prio) {
     const ctx = this.ctx; pts = pts.filter(Boolean); if (pts.length < 3) return;
     ctx.beginPath(); pts.forEach((q, i) => (i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1]))); ctx.closePath();
     ctx.fillStyle = color + "2e"; ctx.fill(); ctx.setLineDash([8 * unit, 6 * unit]); ctx.lineWidth = 2 * unit; ctx.strokeStyle = color; ctx.stroke(); ctx.setLineDash([]);
-    if (label) { const cx = pts.reduce((a, q) => a + q[0], 0) / pts.length, cy = pts.reduce((a, q) => a + q[1], 0) / pts.length; this.tag(ctx, cx, cy, label, color, unit); }
+    if (label) { const cx = pts.reduce((a, q) => a + q[0], 0) / pts.length, cy = pts.reduce((a, q) => a + q[1], 0) / pts.length; this.queueLabel(label, color, [cx, cy], (prio || 0) + 20); }
   };
 
   RealView.prototype.cross = function (P, x, y, unit, k) {
@@ -261,7 +334,7 @@
   RealView.prototype.drawCorrection = function (P, k, unit, rx, ry, rw, rh) {
     const s = this.s, c = s.ov.correction, ctx = this.ctx;
     c.crosses.forEach((x) => this.cross(P, x.x, x.y, unit, Math.min(1, k * 3)));
-    c.lines.forEach((l) => this.polyArrow([P(l.from[0], l.from[1]), P(l.to[0], l.to[1])], COLOR.ok, unit, false, k > 0.3 ? l.label : null, false, Math.min(1, k * 2)));
+    c.lines.forEach((l) => this.polyArrow([P(l.from[0], l.from[1]), P(l.to[0], l.to[1])], COLOR.ok, unit, false, k > 0.3 ? l.label : null, false, Math.min(1, k * 2), -5));
     // flèches vertes sans texte : l'étiquette de la correction est posée à côté du fantôme (jamais dessus)
     c.arrows.forEach((a) => this.polyArrow(a.pts.map((p) => P(p[0], p[1])), COLOR.ok, unit, true, null, false, ease((k - 0.1) / 0.8)));
     const g = c.ghost; if (!g) return;
@@ -270,7 +343,7 @@
     if (!end || end[0] < rx - mx || end[0] > rx + rw + mx || end[1] < ry - my || end[1] > ry + rh + my) {
       if (k > 0.6 && end) {
         const ex = Math.max(rx + 70 * unit, Math.min(rx + rw - 70 * unit, end[0])), ey = Math.max(ry + 20 * unit, Math.min(ry + rh - 20 * unit, end[1]));
-        this.tag(ctx, ex, ey - 24 * unit, (g.label ? g.label + " : " : "") + "voir le plan", COLOR.ok, unit, [ex, ey]);
+        this.queueLabel((g.label ? g.label + " : " : "") + "voir le plan", COLOR.ok, [ex, ey], -10);
       }
       return;
     }
@@ -289,10 +362,8 @@
     if (s.ghost) { ctx.globalAlpha = 0.95; ctx.drawImage(s.ghost, foot[0] - gw / 2, foot[1] - gh, gw, gh); }
     else this.ghostShape(ctx, foot[0], foot[1], gw, gh, unit);
     ctx.restore();
-    if (g.label && k > 0.6) {
-      const right = foot[0] + gw / 2 + 70 * unit < this.el.overlay.width;
-      this.tag(ctx, foot[0] + (right ? 1 : -1) * (gw / 2 + 60 * unit), foot[1] - gh * 0.6, g.label, COLOR.ok, unit, [foot[0] + (right ? 1 : -1) * gw * 0.35, foot[1] - gh * 0.6]);
-    }
+    if (this.obst) this.obst.push([foot[0] - gw / 2, foot[1] - gh, foot[0] + gw / 2, foot[1]]);   // jamais d'étiquette sur le fantôme
+    if (g.label && k > 0.6) this.queueLabel(g.label, COLOR.ok, [foot[0] + gw * 0.3, foot[1] - gh * 0.6], -10);
   };
 
   /* Silhouette verte nette (repli quand la découpe est absente ou de mauvaise qualité). */

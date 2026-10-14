@@ -187,6 +187,9 @@
           const n = Math.hypot(away[0], away[1]) || 1;
           const back = type === "perte_zone_def" ? -1.5 : -0.5;
           ghost(mate, loser.x + (4 * away[0]) / n + back, loser.y + (4 * away[1]) / n, "Soutien");
+        } else {
+          // aucun coéquipier visible : le joueur sort le ballon vers le côté le plus proche (jouer simple et vers l'extérieur)
+          ghost(loser, loser.x - 1, loser.y < W / 2 ? 1.5 : W - 1.5, "Jouer vers l'extérieur");
         }
       }
       return out("perte");
