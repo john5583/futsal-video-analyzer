@@ -265,6 +265,11 @@
     if (cur) sel.value = cur;
   }
 
+  /* Tenues de référence trop proches : avertissements en clair (noms affichés dans l'interface). */
+  function kitWarnings(r) {
+    return K.ambiguityMessages(r || refs(), Object.fromEntries(ROLES.map(([key, label]) => [key, label])));
+  }
+
   function renderKits() {
     const a = ai(), box = $("ai-kits"), r = refs();
     box.innerHTML = "";
@@ -280,6 +285,7 @@
       if (c) c.addEventListener("click", () => { delete a.kits[key]; renderKits(); App.changed(); });
       box.appendChild(row);
     });
+    kitWarnings(r).forEach((m) => { const p = document.createElement("p"); p.className = "hint kit-warn"; p.textContent = "⚠ " + m; box.appendChild(p); });
     const ok = !!(r.A && r.B);
     setChip("ai-s2-state", ok ? "Équipes reconnues" : "Choisir au moins 2 équipes", ok ? "ok" : "warn");
     renderNext();
@@ -552,7 +558,7 @@
     try {
       const camera = $("ai-camera").value;
       const result = await P.analyseVideo({
-        url: App.getVideoUrl(), t0: range[0], t1: range[1], fps, tiles, camera, tol: tol(), L: L(), W: W(), calibrations: a.calibrations, refs: r, floorMarks: floorMarks(), signal: abort.signal, api,
+        url: App.getVideoUrl(), t0: range[0], t1: range[1], fps, tiles, camera, tol: tol(), L: L(), W: W(), calibrations: a.calibrations, refs: r, floorMarks: floorMarks(), dirAt, signal: abort.signal, api,
         onProgress: (p) => {
           $("ai-bar").style.width = Math.round((p.done / p.total) * 100) + "%";
           msg.textContent = "Image " + p.done + " / " + p.total + " — reste environ " + fmtEta(p.eta) + (p.lost ? " (caméra perdue sur cette image)" : "");
@@ -751,7 +757,7 @@
 
   const FSAI = window.FSAI = {
     hooks: {}, segmentImpl: null,
-    ai, refs, grabSam, renderKits, renderStats, renderCalibs, renderPoints, validateCalibration, runAnalysis, updateEstimate,
+    ai, refs, kitWarnings, grabSam, renderKits, renderStats, renderCalibs, renderPoints, validateCalibration, runAnalysis, updateEstimate,
     addLayer: (fn) => { layers.push(fn); }, setPointer: (p) => { pointer = p; updateOverlayMode(); }, redraw: refreshLive,
     beginPlacing: (id) => { if (!App.isVideoReady()) return false; video.pause(); pickRole = null; pip = null; renderPipette(); placing = id; $("ai-landmark").value = id; updateOverlayMode(); return true; },
     cancelPlacing: () => { placing = null; updateOverlayMode(); },

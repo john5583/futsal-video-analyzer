@@ -94,11 +94,31 @@
     return n / px.length;
   }
 
-  /* Calcule, pour chaque référence qui a un liseré, la part de pixels de ce liseré chez ce joueur (feat.acc[clé]). */
-  function addAccents(feat, img, box, refs) {
+  /* Mode « tenues proches » : part du buste en couleur de liseré (même critère que trimFromPixels : jaune-vert à vert),
+     à moins de 20° de teinte du liseré de référence. Contrairement à accentFraction, le jaune doré d'un lettrage
+     ne compte pas, et le seuil est bas (ACC_MIN_CLOSE) pour les joueurs lointains. */
+  const ACC_MIN_CLOSE = 0.006;
+  function hueOf(a, b) { return ((Math.atan2(b, a) * 180) / Math.PI + 360) % 360; }
+  function isTrimColor(l, a, b) { const h = hueOf(a, b); return Math.hypot(a, b) > 28 && l > 35 && a < -3 && h >= 95 && h <= 170; }
+  function trimHueFraction(img, box, lab) {
+    const px = torsoPixels(img, box);
+    if (!px.length || !lab) return 0;
+    const h0 = hueOf(lab[1], lab[2]), cMin = Math.max(25, Math.hypot(lab[1], lab[2]) * 0.55);
+    let n = 0;
+    for (const [l, a, b] of px) {
+      if (Math.hypot(a, b) < cMin || !isTrimColor(l, a, b)) continue;
+      if (Math.abs(((hueOf(a, b) - h0 + 540) % 360) - 180) <= 20) n++;
+    }
+    return n / px.length;
+  }
+
+  /* Calcule, pour chaque référence qui a un liseré, la part de pixels de ce liseré chez ce joueur (feat.acc[clé]).
+     opts.close (tenues de référence trop proches) : mesure par la teinte (trimHueFraction). */
+  function addAccents(feat, img, box, refs, opts) {
     if (!feat) return feat;
+    const close = !!(opts && opts.close);
     feat.acc = {};
-    Object.keys(refs || {}).forEach((k) => { if (refs[k] && refs[k].trim) feat.acc[k] = accentFraction(img, box, refs[k].trim); });
+    Object.keys(refs || {}).forEach((k) => { if (refs[k] && refs[k].trim) feat.acc[k] = close ? trimHueFraction(img, box, refs[k].trim) : accentFraction(img, box, refs[k].trim); });
     return feat;
   }
 
@@ -190,18 +210,23 @@
   /* opts.reject : distance maximale acceptée (tolérance, 42 par défaut).
      Si une référence a un liseré (manches de couleur), sa présence chez le joueur (feat.acc) rapproche de cette équipe,
      son absence l'éloigne ; les équipes sans liseré sont éloignées quand le liseré est présent. */
+  /* opts.close (tenues de référence trop proches, voir ambiguity) : le liseré ne départage que les deux équipes de champ
+     (A, B) — pas l'arbitre ni les gardiens, dont la tenue se reconnaît à sa couleur principale — avec le seuil ACC_MIN_CLOSE. */
+  const FIELD = { A: 1, B: 1 };
   function classify(feat, refs, opts) {
     if (!feat) return { team: "UNK", distance: Infinity };
     const reject = (opts && opts.reject) || REJECT_DISTANCE;
+    const close = !!(opts && opts.close);
+    const minAcc = close ? ACC_MIN_CLOSE : ACC_MIN;
     const keys = Object.keys(refs).filter((k) => refs[k]);
     const d = {};
     keys.forEach((k) => { d[k] = dist(feat, refs[k]); });
-    const accKeys = keys.filter((k) => refs[k].trim);
+    const accKeys = keys.filter((k) => refs[k].trim && (!close || FIELD[k]));
     if (accKeys.length && feat.acc) {
-      const present = accKeys.some((k) => (feat.acc[k] || 0) >= ACC_MIN);
+      const present = accKeys.some((k) => (feat.acc[k] || 0) >= minAcc);
       keys.forEach((k) => {
-        if (!isFinite(d[k])) return;
-        if (refs[k].trim) d[k] += (feat.acc[k] || 0) >= ACC_MIN ? -ACC_BONUS : ACC_BONUS;
+        if (!isFinite(d[k]) || (close && !FIELD[k])) return;
+        if (refs[k].trim) d[k] += (feat.acc[k] || 0) >= minAcc ? -ACC_BONUS : ACC_BONUS;
         else if (present) d[k] += ACC_BONUS;
         if (d[k] < 0) d[k] = 0;
       });
@@ -212,9 +237,46 @@
     return { team: best, distance: bd };
   }
 
+  /* Tenues de référence trop proches pour être distinguées par leurs seules couleurs.
+     Repère mesuré sur des matchs réels : un joueur s'écarte en moyenne de ~18 de sa propre tenue de référence ;
+     deux tenues à moins de CLOSE_DISTANCE l'une de l'autre se confondent donc d'une image à l'autre.
+     Renvoie { close (A et B proches), roles (un gardien proche de l'arbitre ou d'une équipe), pairs: [{ a, b, d }] }. */
+  const PLAYER_SPREAD = 18;
+  const CLOSE_DISTANCE = 15;
+  function ambiguity(refs) {
+    const r = refs || {}, pairs = [];
+    const check = (a, b) => { if (r[a] && r[b]) { const d = dist(r[a], r[b]); if (d < CLOSE_DISTANCE) pairs.push({ a, b, d: Math.round(d * 10) / 10 }); } };
+    check("A", "B");
+    ["GKA", "GKB"].forEach((g) => { check(g, "REF"); check(g, "A"); check(g, "B"); });
+    check("GKA", "GKB");
+    const close = pairs.some((p) => p.a === "A" && p.b === "B");
+    return { close, roles: pairs.some((p) => p.a !== "A"), pairs };
+  }
+
+  /* Avertissements en français pour l'utilisateur (vide si les tenues se distinguent bien). names : { A: "Mon équipe", ... }. */
+  const DEFAULT_NAMES = { A: "Mon équipe", B: "Adversaire", GKA: "Mon gardien", GKB: "Gardien adverse", REF: "Arbitre" };
+  function ambiguityMessages(refs, names) {
+    const n = Object.assign({}, DEFAULT_NAMES, names || {}), r = refs || {}, out = [];
+    ambiguity(r).pairs.forEach(({ a, b, d }) => {
+      const ecart = "écart " + Math.round(d) + ", alors qu'un joueur s'écarte en moyenne de " + PLAYER_SPREAD + " de sa propre tenue";
+      if (a === "A" && b === "B") {
+        const trim = r.A.trim || r.B.trim;
+        out.push("« " + n.A + " » et « " + n.B + " » ont des tenues presque identiques (" + ecart + "). " +
+          (trim ? "L'analyse s'appuiera sur le liseré de couleur (manches, col) et sur la position des gardiens. "
+            : "Aucun liseré de couleur n'a été repéré : les deux équipes risquent d'être confondues. ") +
+          "Pour plus de fiabilité, ajoutez des échantillons pris sur des joueurs proches de la caméra, liseré bien visible.");
+      } else if (b === "REF") {
+        out.push("« " + n[a] + " » et « " + n.REF + " » ont des tenues très proches (" + ecart + ") : ils seront distingués par leur position (le gardien reste près de son but).");
+      } else {
+        out.push("« " + n[a] + " » ressemble beaucoup à « " + n[b] + " » (" + ecart + ") : le gardien sera reconnu surtout par sa position dans la surface de réparation.");
+      }
+    });
+    return out;
+  }
+
   function swatches(ref) {
     return ref ? { shirt: ref.shirt ? toHex(ref.shirt) : null, shorts: ref.shorts ? toHex(ref.shorts) : null, socks: ref.socks ? toHex(ref.socks) : null, trim: ref.trim ? toHex(ref.trim) : null } : null;
   }
 
-  return { BANDS, REJECT_DISTANCE, rgbToLab, labToRgb, sample, average, classify, dist, swatches, toHex, pipette, fromParts, fromMask, detectTrim, accentFraction, addAccents, ACC_MIN };
+  return { BANDS, REJECT_DISTANCE, rgbToLab, labToRgb, sample, average, classify, dist, swatches, toHex, pipette, fromParts, fromMask, detectTrim, accentFraction, trimHueFraction, addAccents, ambiguity, ambiguityMessages, ACC_MIN, ACC_MIN_CLOSE, PLAYER_SPREAD, CLOSE_DISTANCE };
 });

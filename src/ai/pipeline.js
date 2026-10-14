@@ -121,7 +121,10 @@
   }
 
   /* Détections d'une image -> joueurs sur le terrain + ballon.
-     ctx : { frameW, frameH, scale (px analysés / px vidéo), img ({data,width,height}), H, L, W, refs, tracker, t } */
+     ctx : { frameW, frameH, scale (px analysés / px vidéo), img ({data,width,height}), H, L, W, refs, tracker, t,
+             close (tenues A et B trop proches : reconnaissance adaptée) }
+     Avec des tenues proches, chaque joueur garde aussi f = son équipe de champ la plus probable (A ou B), utilisée en fin
+     d'analyse pour décider gardien / joueur de champ par la position ; f est retiré par finalizeFrames. */
   function processDetections(dets, ctx) {
     const persons = [], balls = [];
     dets.forEach((d) => {
@@ -145,9 +148,14 @@
       if (!isFinite(p[0]) || !isFinite(p[1])) return;
       if (p[0] < -margin || p[0] > ctx.L + margin || p[1] < -margin || p[1] > ctx.W + margin) return;
       const feat = ctx.img ? K.sample(ctx.img, [d.x1, d.y1, d.x2, d.y2]) : null;
-      if (feat && ctx.refs) K.addAccents(feat, ctx.img, [d.x1, d.y1, d.x2, d.y2], ctx.refs);
-      const cls = ctx.refs ? K.classify(feat, ctx.refs, { reject: ctx.reject }) : { team: "UNK" };
-      list.push({ x: Math.round(p[0] * 100) / 100, y: Math.round(p[1] * 100) / 100, team: cls.team, box: [d.x1, d.y1, d.x2, d.y2], conf: d.score });
+      const close = !!ctx.close;
+      if (feat && ctx.refs) K.addAccents(feat, ctx.img, [d.x1, d.y1, d.x2, d.y2], ctx.refs, close ? { close } : undefined);
+      const cls = ctx.refs ? K.classify(feat, ctx.refs, close ? { reject: ctx.reject, close } : { reject: ctx.reject }) : { team: "UNK" };
+      const item = { x: Math.round(p[0] * 100) / 100, y: Math.round(p[1] * 100) / 100, team: cls.team, box: [d.x1, d.y1, d.x2, d.y2], conf: d.score };
+      // équipe de champ la plus proche (UNK si la tenue ne ressemble à aucune : arbitre, gardien d'une autre couleur…) ;
+      // ne sert qu'à revoir les rôles en fin d'analyse quand le cas est ambigu
+      if (ctx.refs && ctx.refs.A && ctx.refs.B) item.f = K.classify(feat, { A: ctx.refs.A, B: ctx.refs.B }, close ? { reject: ctx.reject, close } : { reject: ctx.reject }).team;
+      list.push(item);
     });
     ctx.tracker.update(ctx.t, list);
     let ball = null;
@@ -159,23 +167,101 @@
     });
     return {
       t: ctx.t,
-      players: list.map((p) => ({
-        id: p.id, team: p.team, x: p.x, y: p.y,
-        b: [Math.round((p.box[0] / ctx.frameW) * 1000), Math.round((p.box[1] / ctx.frameH) * 1000), Math.round((p.box[2] / ctx.frameW) * 1000), Math.round((p.box[3] / ctx.frameH) * 1000)]
-      })),
+      players: list.map((p) => {
+        const o = {
+          id: p.id, team: p.team, x: p.x, y: p.y,
+          b: [Math.round((p.box[0] / ctx.frameW) * 1000), Math.round((p.box[1] / ctx.frameH) * 1000), Math.round((p.box[2] / ctx.frameW) * 1000), Math.round((p.box[3] / ctx.frameH) * 1000)]
+        };
+        if (p.f) o.f = p.f;
+        return o;
+      }),
       ball
     };
   }
 
-  /* Fin d'analyse : équipe de chaque piste par vote, suppression des pistes éphémères et des joueurs non identifiés. */
-  function finalizeFrames(frames) {
-    const teams = T.finalTeams(frames);
+  /* Fin d'analyse : équipe de chaque piste par vote, suppression des pistes éphémères et des joueurs non identifiés.
+     opts (facultatif) : { L, W, dirAt(t) (+1 si l'équipe A attaque vers x croissant), roles (tenues de gardien / arbitre
+     confondables) }. Les rôles ne sont revus par la position que si le cas est ambigu (opts.roles, ou une même équipe
+     a souvent deux gardiens à la fois) ; sinon le résultat est celui du simple vote. */
+  function finalizeFrames(frames, opts) {
+    let teams = T.finalTeams(frames);
+    if (opts && opts.L && opts.W && (opts.roles || goalkeeperConflict(frames, teams))) teams = resolveRoles(frames, teams, opts);
     const counts = {};
     frames.forEach((f) => f.players.forEach((p) => { counts[p.id] = (counts[p.id] || 0) + 1; }));
     return frames.map((f) => ({
       t: f.t, ball: f.ball,
-      players: f.players.filter((p) => counts[p.id] >= 3 && CODE_TEAM_OK(teams[p.id])).map((p) => Object.assign({}, p, { team: teams[p.id] }))
+      players: f.players.filter((p) => counts[p.id] >= 3 && CODE_TEAM_OK(teams[p.id])).map((p) => {
+        const o = Object.assign({}, p, { team: teams[p.id] });
+        delete o.f;
+        return o;
+      })
     }));
+  }
+
+  /* Ambiguïté révélée par l'analyse : sur au moins 10 % des images, une même équipe a deux « gardiens » (ou plus). */
+  function goalkeeperConflict(frames, teams) {
+    if (!frames.length) return false;
+    let n = 0;
+    frames.forEach((f) => {
+      const c = {};
+      f.players.forEach((p) => { const k = teams[p.id]; if (k === "GKA" || k === "GKB") c[k] = (c[k] || 0) + 1; });
+      if ((c.GKA || 0) > 1 || (c.GKB || 0) > 1) n++;
+    });
+    return n >= frames.length * 0.1;
+  }
+
+  /* Rôles par la position, piste par piste :
+     - une personne quasi immobile longtemps (remplaçant assis, spectateur) n'est pas un joueur : écartée ;
+     - une piste présente au moins 70 % du temps dans une même surface de réparation, sans s'en éloigner, est le gardien ;
+       une piste « gardien » ou « arbitre » l'est dès 60 % ; c'est le gardien de l'équipe qui défend ce but (dirAt),
+       ou il garde son code de gardien si l'on ne sait pas qui défend ;
+     - une piste « gardien » présente moins de 40 % du temps dans une surface est un joueur de champ (équipe f la plus votée),
+       ou l'arbitre si sa tenue ne ressemble à aucune équipe ;
+     - les autres pistes gardent leur équipe. */
+  const GOAL_DEPTH = 6.5, GOAL_HALF_WIDTH = 6, STILL_SPREAD = 1, STILL_SECONDS = 8;
+  function resolveRoles(frames, teams, opts) {
+    const L = opts.L, W = opts.W, out = Object.assign({}, teams), pos = {};
+    frames.forEach((f) => f.players.forEach((p) => { (pos[p.id] = pos[p.id] || []).push({ t: f.t, x: p.x, y: p.y, f: p.f }); }));
+    const inGoal = (q) => (q.x <= GOAL_DEPTH || q.x >= L - GOAL_DEPTH) && Math.abs(q.y - W / 2) <= GOAL_HALF_WIDTH;
+    Object.keys(pos).forEach((id) => {
+      const team = teams[id], ps = pos[id];
+      if (ps.length < 5) return;
+      const mx = ps.reduce((s, q) => s + q.x, 0) / ps.length, my = ps.reduce((s, q) => s + q.y, 0) / ps.length;
+      const spread = Math.sqrt(ps.reduce((s, q) => s + (q.x - mx) ** 2 + (q.y - my) ** 2, 0) / ps.length);
+      const share = ps.filter(inGoal).length / ps.length;
+      // immobile longtemps hors des surfaces (un gardien peut rester immobile dans la sienne) : écarté du jeu
+      if (spread < STILL_SPREAD && share < 0.5 && ps[ps.length - 1].t - ps[0].t >= STILL_SECONDS) { out[id] = "REF"; return; }
+      const special = team === "GKA" || team === "GKB" || team === "REF";
+      if (!special && !(share >= 0.7 && spread <= 4)) return;
+      if (share >= 0.6) {
+        const mid = ps[ps.length >> 1], left = ps.filter((q) => q.x <= L / 2).length >= ps.length / 2;
+        if (typeof opts.dirAt === "function") {
+          const aDefendsLeft = opts.dirAt(mid.t) > 0;
+          out[id] = left === aDefendsLeft ? "GKA" : "GKB";
+        } else if (team === "REF") out[id] = left ? "GKA" : "GKB";
+      } else if (share < 0.4 && team !== "REF") {
+        // « gardien » qui joue hors de la surface : joueur de champ si sa tenue ressemble à une équipe, sinon arbitre (écarté)
+        const v = {}; ps.forEach((q) => { if (q.f === "A" || q.f === "B") v[q.f] = (v[q.f] || 0) + 1; });
+        const best = (v.A || 0) >= (v.B || 0) ? "A" : "B";
+        out[id] = v[best] >= ps.length * 0.3 ? best : "REF";
+      }
+    });
+    // un seul gardien par équipe : deux pistes « gardien » de la même équipe présentes ensemble (au moins 5 images),
+    // on garde celle qui est le plus souvent dans la surface ; l'autre redevient joueur de champ (f) ou est écartée
+    const shareOf = {}, framesOf = {};
+    Object.keys(pos).forEach((id) => { shareOf[id] = pos[id].filter(inGoal).length / pos[id].length; framesOf[id] = new Set(pos[id].map((q) => q.t)); });
+    ["GKA", "GKB"].forEach((gk) => {
+      const ids = Object.keys(out).filter((id) => out[id] === gk && pos[id]).sort((a, b) => shareOf[b] * pos[b].length - shareOf[a] * pos[a].length);
+      const kept = [];
+      ids.forEach((id) => {
+        const clash = kept.some((k) => { let n = 0; framesOf[id].forEach((t) => { if (framesOf[k].has(t)) n++; }); return n >= 5; });
+        if (!clash) { kept.push(id); return; }
+        const v = {}; pos[id].forEach((q) => { if (q.f === "A" || q.f === "B") v[q.f] = (v[q.f] || 0) + 1; });
+        const best = (v.A || 0) >= (v.B || 0) ? "A" : "B";
+        out[id] = v[best] >= pos[id].length * 0.3 ? best : "REF";
+      });
+    });
+    return out;
   }
   function CODE_TEAM_OK(team) { return team === "A" || team === "B" || team === "GKA" || team === "GKB"; }
 
@@ -285,7 +371,8 @@
   const IDENTITY = [1, 0, 0, 0, 1, 0, 0, 0, 1];
 
   /* Analyse complète d'une plage de la vidéo.
-     opts : { url, t0, t1, fps, tiles, camera ("fixed" | "mobile"), tol, L, W, calibrations, refs, floorMarks (false = garder les ballons jaunes), signal, onProgress, api }
+     opts : { url, t0, t1, fps, tiles, camera ("fixed" | "mobile"), tol, L, W, calibrations, refs, floorMarks (false = garder les ballons jaunes),
+              dirAt (sens de jeu de l'équipe A, pour savoir quel gardien défend quel but), signal, onProgress, api }
      Caméra mobile : à chaque calibrage, le terrain est recalé ; entre deux calibrages, le mouvement de la caméra est suivi.
      Renvoie { frames, lost: [[t0, t1], ...], notes: [texte, ...] }. */
   async function analyseVideo(opts) {
@@ -314,7 +401,9 @@
     const gcanvas = document.createElement("canvas");
     gcanvas.width = gw; gcanvas.height = gh;
     const gctx = gcanvas.getContext("2d", { willReadFrequently: true });
-    const tracker = new T.Tracker();
+    // tenues de référence trop proches (voir K.ambiguity) : reconnaissance, suivi et rôles adaptés ; sinon comportement inchangé
+    const amb = opts.refs ? K.ambiguity(opts.refs) : { close: false, roles: false };
+    const tracker = new T.Tracker(amb.close ? { soft: 2 } : undefined);
     const frames = [], lost = [];
     let lostStart = null, lastBall = null;
     const trk = { anchor: null, M: IDENTITY, prev: null, t: 0, boxes: [], keys: [], failCount: 0 };
@@ -402,7 +491,7 @@
         continue;
       }
       if (lostStart != null) { lost.push([lostStart, t]); lostStart = null; }
-      frames.push(processDetections(dets, { frameW: cw, frameH: ch, scale, img, H, L: opts.L, W: opts.W, refs: opts.refs, reject: opts.tol, tracker, t }));
+      frames.push(processDetections(dets, { frameW: cw, frameH: ch, scale, img, H, L: opts.L, W: opts.W, refs: opts.refs, reject: opts.tol, tracker, t, close: amb.close }));
       if (opts.onProgress) {
         const elapsed = (Date.now() - started) / 1000;
         opts.onProgress({ done: i + 1, total: times.length, eta: (elapsed / (i + 1)) * (times.length - i - 1), frame: frames[frames.length - 1] });
@@ -411,7 +500,7 @@
     if (lostStart != null) lost.push([lostStart, times[times.length - 1]]);
     video.removeAttribute("src"); video.load();
     if (lost.length) notes.push("Suivi de la caméra perdu sur " + lost.length + " passage(s) : ces images sont ignorées. Ajoutez un calibrage dans ces passages (flou, caméra trop rapide ou sol sans détails).");
-    return { frames: finalizeFrames(frames), lost, notes };
+    return { frames: finalizeFrames(frames, { L: opts.L, W: opts.W, dirAt: opts.dirAt, roles: amb.close || amb.roles }), lost, notes };
   }
 
   /* Vignettes JPEG de la vidéo à des instants donnés (illustrations des erreurs acceptées). */

@@ -161,7 +161,9 @@
     const dur = App.state.project.duration || video.duration || 0;
     const r = AI.refs();
     const t0 = $("ai-t0").value, t1 = $("ai-t1").value, fpsv = $("ai-fps").value;
+    const warn = AI.kitWarnings ? AI.kitWarnings(r) : [];
     return queueHeader() + progressDots() + "<h3>3. Lancer l'analyse</h3>" + chips() +
+      warn.map((m) => "<p class=\"wiz-hint kit-warn\">⚠ " + esc(m) + "</p>").join("") +
       "<div class=\"wiz-grid\"><label>De (mm:ss)<input data-set=\"t0\" type=\"text\" value=\"" + esc(t0) + "\" pattern=\"[0-9]{1,3}:[0-5][0-9]\"></label><label>À (mm:ss)<input data-set=\"t1\" type=\"text\" value=\"" + esc(t1) + "\" pattern=\"[0-9]{1,3}:[0-5][0-9]\"></label>" +
       "<label>Détail (ballon, joueurs lointains)<select data-set=\"tiles\"><option value=\"1\"" + ($("ai-tiles").value === "1" ? " selected" : "") + ">Standard</option><option value=\"2\"" + ($("ai-tiles").value === "2" ? " selected" : "") + ">Renforcé (2× plus lent)</option><option value=\"3\"" + ($("ai-tiles").value === "3" ? " selected" : "") + ">Zoom automatique (le plus précis)</option></select></label><label>Précision<select data-set=\"fps\"><option value=\"2\"" + (fpsv === "2" ? " selected" : "") + ">Rapide</option><option value=\"3\"" + (fpsv === "3" ? " selected" : "") + ">Équilibrée</option><option value=\"5\"" + (fpsv === "5" ? " selected" : "") + ">Fine (plus lent)</option></select></label></div>" +
       "<p class=\"muted\" id=\"wiz-est\">" + esc($("ai-est").textContent || "") + "</p>" +
