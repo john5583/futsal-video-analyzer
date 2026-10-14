@@ -218,7 +218,23 @@
             <video id="corr-pip-video" muted playsinline preload="auto"></video>
             <div class="pip-bar"><button id="pip-prev" title="Situation précédente">◀</button><span id="pip-label"></span><button id="pip-next" title="Situation suivante">▶</button></div>
           </div>
+          <!-- Correction animée sur la vraie vidéo (erreur confirmée de ce match, avec analyse) -->
+          <div id="corr-real" class="corr-real" hidden>
+            <video id="cr-video" muted playsinline preload="auto"></video>
+            <canvas id="cr-overlay" class="cr-overlay"></canvas>
+            <canvas id="cr-map" class="cr-map" title="Vue de dessus : la même scène"></canvas>
+            <div id="cr-msg" class="cr-msg" hidden></div>
+          </div>
         </div>
+        <div class="corr-controls" id="cr-bar" hidden>
+          <button id="cr-fixed" title="La vidéo s'arrête sur l'erreur, les dessins apparaissent un par un">Figé</button>
+          <button id="cr-seq" title="Quelques secondes réelles autour de l'erreur, dessins collés au sol">Séquencé</button>
+          <button id="cr-replay">⏮ Rejouer</button>
+          <button id="cr-prev" title="Occurrence précédente">◀</button><span id="cr-label" class="time"></span><button id="cr-next" title="Occurrence suivante">▶</button>
+          <button id="cr-map-pos" title="Déplacer ou masquer la petite carte">Carte : bas droite</button>
+          <button id="cr-catalog" class="ghost" title="Animation type, vue de dessus">Animation du catalogue</button>
+        </div>
+        <p id="cr-text" class="cr-text" hidden></p>
         <div class="corr-controls">
           <button id="cp-play" class="primary">▶ Lecture</button>
           <button id="cp-restart">⏮ Début</button>
@@ -320,12 +336,14 @@
 <script src="ai/camera.js"></script>
 <script src="ai/match.js"></script>
 <script src="ai/pipeline.js"></script>
+<script src="ai/overlay.js"></script>
 <script src="report.js"></script>
 <script src="app.js"></script>
 <script src="ai-ui.js"></script>
 <script src="ai/goal.js"></script>
 <script src="ai/court-fit.js"></script>
 <script src="wizard.js"></script>
+<script src="anim/realview.js"></script>
 <script src="corrections-ui.js"></script>
 </body>
 </html>

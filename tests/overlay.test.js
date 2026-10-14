@@ -54,3 +54,12 @@ test("dessins d'une perte de balle : cercles, ligne du ballon perdu, croix et co
   assert.ok(o.items.some((i) => i.type === "line"));
   assert.ok(o.correction && o.correction.crosses.length === 1);
 });
+
+test("projection de chaque image : conservée par le nettoyage final de l'analyse", () => {
+  const f = frame(1, SIX); f.h = HG.invert(Hc);
+  const frames = [0, 1, 2, 3].map((i) => Object.assign({}, f, { t: i * 0.2 }));
+  const out = P.finalizeFrames(frames);
+  assert.ok(out.every((x) => Array.isArray(x.h) && x.h.length === 9));
+  const plain = P.finalizeFrames(frames.map((x) => ({ t: x.t, players: x.players, ball: null })));
+  assert.ok(plain.every((x) => !("h" in x)), "anciennes analyses : rien n'est ajouté");
+});
