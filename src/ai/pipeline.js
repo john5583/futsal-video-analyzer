@@ -165,7 +165,7 @@
       ball = { x: Math.round(p[0] * 100) / 100, y: Math.round(p[1] * 100) / 100 };
       return true;
     });
-    return {
+    const out = {
       t: ctx.t,
       players: list.map((p) => {
         const o = {
@@ -177,6 +177,18 @@
       }),
       ball
     };
+    const h = normalizedProjection(ctx.H, ctx.frameW / ctx.scale, ctx.frameH / ctx.scale);
+    if (h) out.h = h;
+    return out;
+  }
+
+  /* Projection image -> terrain de cette image, en coordonnées d'image normalisées (0..1), pour redessiner sur la vidéo
+     (correction animée). H : pixels vidéo -> terrain ; vw, vh : taille de la vidéo. */
+  function normalizedProjection(H, vw, vh) {
+    if (!Array.isArray(H) || H.length !== 9 || !(vw > 0) || !(vh > 0)) return null;
+    const h = HG.mul3(H, [vw, 0, 0, 0, vh, 0, 0, 0, 1]);
+    if (!h.every(Number.isFinite) || Math.abs(h[8]) < 1e-12) return null;
+    return h.map((v) => Number((v / h[8]).toPrecision(7)));
   }
 
   /* Fin d'analyse : équipe de chaque piste par vote, suppression des pistes éphémères et des joueurs non identifiés.
@@ -188,14 +200,18 @@
     if (opts && opts.L && opts.W && (opts.roles || goalkeeperConflict(frames, teams))) teams = resolveRoles(frames, teams, opts);
     const counts = {};
     frames.forEach((f) => f.players.forEach((p) => { counts[p.id] = (counts[p.id] || 0) + 1; }));
-    return frames.map((f) => ({
-      t: f.t, ball: f.ball,
-      players: f.players.filter((p) => counts[p.id] >= 3 && CODE_TEAM_OK(teams[p.id])).map((p) => {
-        const o = Object.assign({}, p, { team: teams[p.id] });
-        delete o.f;
-        return o;
-      })
-    }));
+    return frames.map((f) => {
+      const o = {
+        t: f.t, ball: f.ball,
+        players: f.players.filter((p) => counts[p.id] >= 3 && CODE_TEAM_OK(teams[p.id])).map((p) => {
+          const q = Object.assign({}, p, { team: teams[p.id] });
+          delete q.f;
+          return q;
+        })
+      };
+      if (f.h) o.h = f.h;
+      return o;
+    });
   }
 
   /* Ambiguïté révélée par l'analyse : sur au moins 10 % des images, une même équipe a deux « gardiens » (ou plus). */
@@ -266,15 +282,24 @@
   function CODE_TEAM_OK(team) { return team === "A" || team === "B" || team === "GKA" || team === "GKB"; }
 
   /* Stockage compact (projet / sauvegarde) et retour au format d'analyse. */
+  /* 4e élément facultatif : projection de l'image (h), absente des analyses faites avant la 1.2.0. */
   function compactFrames(frames) {
-    return frames.map((f) => [Math.round(f.t * 100) / 100, f.players.map((p) => [p.id, TEAM_CODE[p.team], p.x, p.y].concat(p.b || [])), f.ball ? [f.ball.x, f.ball.y] : null]);
+    return frames.map((f) => {
+      const c = [Math.round(f.t * 100) / 100, f.players.map((p) => [p.id, TEAM_CODE[p.team], p.x, p.y].concat(p.b || [])), f.ball ? [f.ball.x, f.ball.y] : null];
+      if (Array.isArray(f.h) && f.h.length === 9) c.push(f.h);
+      return c;
+    });
   }
   function expandFrames(compact) {
     if (!Array.isArray(compact)) return [];
-    return compact.map((c) => ({
-      t: c[0], ball: c[2] ? { x: c[2][0], y: c[2][1] } : null,
-      players: c[1].map((p) => ({ id: p[0], team: CODE_TEAM[p[1]], x: p[2], y: p[3], b: p.slice(4, 8) }))
-    }));
+    return compact.map((c) => {
+      const f = {
+        t: c[0], ball: c[2] ? { x: c[2][0], y: c[2][1] } : null,
+        players: c[1].map((p) => ({ id: p[0], team: CODE_TEAM[p[1]], x: p[2], y: p[3], b: p.slice(4, 8) }))
+      };
+      if (Array.isArray(c[3]) && c[3].length === 9 && c[3].every(Number.isFinite)) f.h = c[3];
+      return f;
+    });
   }
 
   /* Image la plus proche d'un instant (recherche dichotomique) ; null si trop éloignée. */
