@@ -590,7 +590,7 @@
     const b = s.backend;
     if (b && b.kind === "dml") {
       const gain = b.cpuMs && b.ms ? Math.round(b.cpuMs / b.ms) : 0;
-      return "Détecteur prêt : calcul sur la carte graphique" + (gain >= 2 ? " (environ " + gain + " fois plus rapide que le processeur)" : "") + ".";
+      return "Détecteur prêt : calcul sur la carte graphique" + (b.model === "precis" ? " avec le modèle précis" : "") + (gain >= 2 ? " (environ " + gain + " fois plus rapide que le processeur)" : "") + ".";
     }
     return "Détecteur prêt : calcul sur le processeur, " + s.cpus + " cœurs" + ((b && ENGINE_WHY[b.reason]) || "") + ".";
   }

@@ -16,11 +16,12 @@ function fakeOrt(spec) {
   const ort = {
     Tensor: function (type, data, dims) { this.type = type; this.data = data; this.dims = dims; },
     InferenceSession: {
-      create: async (_file, opts) => {
+      create: async (file, opts) => {
         const ep = opts.executionProviders[0];
         const key = typeof ep === "string" ? ep : ep.name + ":" + ep.deviceId;
-        const s = spec[key];
-        log.created.push(key);
+        // « dml:N|fichier » : comportement propre à un modèle (ex. le modèle précis) sur cette carte
+        const s = spec[key + "|" + file] || spec[key];
+        log.created.push(spec[key + "|" + file] ? key + "|" + file : key);
         if (!s || s.noCreate) throw new Error("pas de carte " + key);
         let runs = 0;
         return {
@@ -125,7 +126,34 @@ test("moteur : la carte graphique qui échoue en cours d'analyse est remplacée 
   await assert.rejects(B.run(st, feeds), /image invalide/);
 });
 
+test("moteur : modèle précis sur la carte graphique, modèle standard s'il échoue, est trop lent, ou sur processeur", async () => {
+  const precise = { gpuModelPath: "g.onnx" };
+  const ok = fakeOrt({ cpu: { ms: 40 }, "dml:0": { ms: 5 }, "dml:0|g.onnx": { ms: 12 } });
+  const a = await B.open(ok.ort, base(tmpState(), precise));
+  assert.deepEqual([a.kind, a.model, a.ms], ["dml", "precis", 12]);
+  assert.equal(B.info(a).model, "precis");
+  const broken = fakeOrt({ cpu: { ms: 40 }, "dml:0": { ms: 5 }, "dml:0|g.onnx": { noCreate: true } });
+  const b = await B.open(broken.ort, base(tmpState(), precise));
+  assert.deepEqual([b.kind, b.model, b.ms], ["dml", "standard", 5]);
+  const slow = fakeOrt({ cpu: { ms: 40 }, "dml:0": { ms: 5 }, "dml:0|g.onnx": { ms: 45 } });
+  const c = await B.open(slow.ort, base(tmpState(), precise));
+  assert.deepEqual([c.kind, c.model], ["dml", "standard"]);
+  const cpu = fakeOrt({ cpu: { ms: 40 }, "dml:0": { ms: 5 }, "dml:0|g.onnx": { ms: 12 } });
+  const d = await B.open(cpu.ort, base(tmpState(), Object.assign({ prefer: "cpu" }, precise)));
+  assert.deepEqual([d.kind, d.model], ["cpu", "standard"]);
+  assert.deepEqual(cpu.log.created, ["cpu"]);
+  // panne de la carte en cours d'analyse : retour au processeur avec le modèle standard
+  const fail = fakeOrt({ cpu: { ms: 40 }, "dml:0": { ms: 5 }, "dml:0|g.onnx": { ms: 12, failAfter: 4 } });
+  const opts = base(tmpState(), precise);
+  const st = Object.assign(await B.open(fail.ort, opts), { ort: fail.ort, opts });
+  assert.equal(st.model, "precis");
+  await B.run(st, (s) => ({ [s.inputNames[0]]: 1 }));
+  assert.deepEqual([st.kind, st.model], ["cpu", "standard"]);
+  assert.equal(fail.log.created[fail.log.created.length - 1], "cpu");
+});
+
 const MODEL = path.join(__dirname, "..", "models", "yolox_s.onnx");
+const MODEL_M = path.join(__dirname, "..", "models", "yolox_m.onnx");
 test("moteur réel : le détecteur s'ouvre sur la carte graphique ou le processeur et produit une sortie valide", { skip: !fs.existsSync(MODEL) }, async () => {
   const ort = require("onnxruntime-node");
   const opts = { modelPath: MODEL, threads: 4, prefer: "auto", platform: process.platform, stateFile: tmpState(), signature: "test", size: 640 };
@@ -141,12 +169,17 @@ test("moteur réel : le détecteur s'ouvre sur la carte graphique ou le processe
 test("fil d'analyse : annonce le moteur utilisé et détecte, en automatique comme sur processeur", { skip: !fs.existsSync(MODEL) }, async () => {
   const { Worker } = require("worker_threads");
   for (const prefer of ["auto", "cpu"]) {
-    const w = new Worker(path.join(__dirname, "..", "src", "ai", "worker.js"), { workerData: { modelPath: MODEL, threads: 4, prefer, backendFile: tmpState(), signature: "test" } });
+    const gpuModelPath = fs.existsSync(MODEL_M) ? MODEL_M : null;
+    const w = new Worker(path.join(__dirname, "..", "src", "ai", "worker.js"), { workerData: { modelPath: MODEL, gpuModelPath, threads: 4, prefer, backendFile: tmpState(), signature: "test" } });
     try {
       const ready = await new Promise((resolve, reject) => { w.once("message", resolve); w.once("error", reject); });
       assert.equal(ready.type, "ready", JSON.stringify(ready));
-      if (prefer === "cpu") assert.deepEqual([ready.backend.kind, ready.backend.reason], ["cpu", "choix"]);
-      else assert.ok(["dml", "cpu"].includes(ready.backend.kind));
+      if (prefer === "cpu") assert.deepEqual([ready.backend.kind, ready.backend.reason, ready.backend.model], ["cpu", "choix", "standard"]);
+      else {
+        assert.ok(["dml", "cpu"].includes(ready.backend.kind));
+        if (ready.backend.kind === "cpu") assert.equal(ready.backend.model, "standard");
+        console.log("fil d'analyse :", JSON.stringify(ready.backend));
+      }
       const buf = new Uint8ClampedArray(640 * 640 * 4).fill(114).buffer;
       const res = await new Promise((resolve) => { w.on("message", (m) => { if (m.type === "result") resolve(m); }); w.postMessage({ type: "detect", id: 1, buffer: buf, minPerson: 0.35, minBall: 0.12 }, [buf]); });
       assert.equal(res.error, undefined);

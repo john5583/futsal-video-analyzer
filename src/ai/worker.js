@@ -12,7 +12,7 @@ let engine = null;
 async function init() {
   ort = require("onnxruntime-node");
   const opts = {
-    modelPath: workerData.modelPath, threads: Math.max(1, Math.min(8, (workerData && workerData.threads) || 4)),
+    modelPath: workerData.modelPath, gpuModelPath: workerData.gpuModelPath || null, threads: Math.max(1, Math.min(8, (workerData && workerData.threads) || 4)),
     prefer: workerData.prefer === "cpu" ? "cpu" : "auto", platform: process.platform,
     stateFile: workerData.backendFile || null, signature: workerData.signature || "", size: Y.SIZE
   };

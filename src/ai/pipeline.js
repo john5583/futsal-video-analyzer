@@ -89,6 +89,27 @@
     return Y.nms(whole, 0.5).map((d) => { const o = Object.assign({}, d); delete o.cut; return o; });
   }
 
+  /* Faux ballon : marquage jaune au sol (tirets) ou brassard fluo. Mesuré sur des matchs réels : ces boîtes
+     contiennent ~38 % de pixels jaunes et aucun blanc, un vrai ballon ~0 % de jaune.
+     img : { data (RGBA), width, height } ; box en pixels de img. */
+  function isFloorMark(img, box) {
+    const x0 = Math.max(0, Math.floor(box.x1)), y0 = Math.max(0, Math.floor(box.y1));
+    const x1 = Math.min(img.width, Math.ceil(box.x2)), y1 = Math.min(img.height, Math.ceil(box.y2));
+    const step = Math.max(1, Math.floor(Math.min(x1 - x0, y1 - y0) / 24));
+    let n = 0, yellow = 0, white = 0;
+    for (let y = y0; y < y1; y += step) for (let x = x0; x < x1; x += step) {
+      const o = (y * img.width + x) * 4, r = img.data[o], g = img.data[o + 1], b = img.data[o + 2];
+      n++;
+      if (r > 140 && g > 120 && b < 0.6 * g && r - b > 70) yellow++;
+      if (Math.min(r, g, b) > 170 && Math.max(r, g, b) - Math.min(r, g, b) < 45) white++;
+    }
+    return n > 0 && yellow / n >= 0.25 && white / n < 0.08;
+  }
+
+  function dropFloorMarks(dets, img) {
+    return img ? dets.filter((d) => d.cls !== Y.CLASS_BALL || !isFloorMark(img, d)) : dets;
+  }
+
   /* Étalonnage en vigueur à l'instant t (le plus récent déjà posé, sinon le premier). */
   function calibrationAt(calibs, t) {
     if (!calibs || !calibs.length) return null;
@@ -307,22 +328,23 @@
       if (mobile && trk.anchor && trk.anchor === calib && trk.prev) trackOk = await advanceMotion(trk, t);
       else await seekTo(video, t);
       ctx.drawImage(video, 0, 0, cw, ch);
+      const img = ctx.getImageData(0, 0, cw, ch);
       let dets;
       if (zoom) {
         const Hprev = mobile && trk.anchor === calib ? HG.mul3(trk.anchor.H, trk.M) : calib.H;
         const crop = courtRegion(Hprev, opts.L, opts.W, scale, cw, ch);
-        dets = await detectCanvas(canvas, 1, opts.api, { minPerson: 0.35, minBall: 0.12 }, crop ? zoomRects(crop) : tileRects(cw, ch, 2));
+        dets = dropFloorMarks(await detectCanvas(canvas, 1, opts.api, { minPerson: 0.35, minBall: 0.12 }, crop ? zoomRects(crop) : tileRects(cw, ch, 2)), img);
         // ballon non vu : recherche en gros plan autour de sa dernière position connue
         if (!dets.some((d) => d.cls === Y.CLASS_BALL) && lastBall && t - lastBall.t <= 1.0) {
           const half = Math.round(Math.max(90, Math.min(cw, ch) * 0.17));
           const rx = Math.max(0, Math.min(cw - 2 * half, Math.round(lastBall.x - half))), ry = Math.max(0, Math.min(ch - 2 * half, Math.round(lastBall.y - half)));
-          const roi = await detectCanvas(canvas, 1, opts.api, { minPerson: 2, minBall: 0.07 }, [{ x: rx, y: ry, w: Math.min(cw, 2 * half), h: Math.min(ch, 2 * half) }]);
+          const roi = dropFloorMarks(await detectCanvas(canvas, 1, opts.api, { minPerson: 2, minBall: 0.07 }, [{ x: rx, y: ry, w: Math.min(cw, 2 * half), h: Math.min(ch, 2 * half) }]), img);
           const best = roi.filter((d) => d.cls === Y.CLASS_BALL).sort((a, b) => b.score - a.score)[0];
           if (best) dets.push(best);
         }
         const bd = dets.filter((d) => d.cls === Y.CLASS_BALL).sort((a, b) => b.score - a.score)[0];
         if (bd) lastBall = { x: (bd.x1 + bd.x2) / 2, y: (bd.y1 + bd.y2) / 2, t };
-      } else dets = await detectCanvas(canvas, opts.tiles, opts.api, { minPerson: 0.35, minBall: 0.12 });
+      } else dets = dropFloorMarks(await detectCanvas(canvas, opts.tiles, opts.api, { minPerson: 0.35, minBall: 0.12 }), img);
       let H = calib.H, reliable = true;
       if (mobile) {
         const boxes = dets.filter((d) => d.cls === Y.CLASS_PERSON).map((d) => [d.x1 * (gw / cw), d.y1 * (gh / ch), d.x2 * (gw / cw), d.y2 * (gh / ch)]);
@@ -345,7 +367,6 @@
         continue;
       }
       if (lostStart != null) { lost.push([lostStart, t]); lostStart = null; }
-      const img = ctx.getImageData(0, 0, cw, ch);
       frames.push(processDetections(dets, { frameW: cw, frameH: ch, scale, img, H, L: opts.L, W: opts.W, refs: opts.refs, reject: opts.tol, tracker, t }));
       if (opts.onProgress) {
         const elapsed = (Date.now() - started) / 1000;
@@ -392,5 +413,5 @@
     return { dets, scale, img: ctx.getImageData(0, 0, cw, ch), width: cw, height: ch };
   }
 
-  return { tileRects, courtRegion, zoomRects, tileToFrame, mergeTiles, calibrationAt, processDetections, finalizeFrames, compactFrames, expandFrames, frameNear, sampleTimes, analyseVideo, detectAt, detectCanvas, captureFrames, TEAM_CODE };
+  return { tileRects, courtRegion, zoomRects, tileToFrame, mergeTiles, isFloorMark, dropFloorMarks, calibrationAt, processDetections, finalizeFrames, compactFrames, expandFrames, frameNear, sampleTimes, analyseVideo, detectAt, detectCanvas, captureFrames, TEAM_CODE };
 });

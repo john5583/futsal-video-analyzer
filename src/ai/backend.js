@@ -52,11 +52,30 @@ async function measure(ort, session, size, now) {
 }
 
 /* Ouvre le détecteur sur le meilleur moteur.
-   o : { modelPath, threads, prefer ("auto" | "cpu"), platform, stateFile, signature, size, now (horloge, pour les tests) }
-   Renvoie { session, kind ("dml" | "cpu"), deviceId, ms, cpuMs, reason }.
+   o : { modelPath, gpuModelPath (modèle précis, carte graphique seulement), threads, prefer ("auto" | "cpu"), platform,
+         stateFile, signature, size, now (horloge, pour les tests) }
+   Renvoie { session, kind ("dml" | "cpu"), deviceId, ms, cpuMs, reason, model ("precis" | "standard") }.
    reason : "choix" (processeur demandé), "plateforme" (hors Windows), "plus-rapide" (la carte n'est pas plus rapide),
             "indisponible" (aucune carte utilisable), "echec-precedent" (le dernier test a planté). */
 async function open(ort, o) {
+  const res = await openStandard(ort, o);
+  res.model = "standard";
+  if (res.kind !== "dml" || !o.gpuModelPath) return res;
+  // sur la carte retenue, le modèle précis remplace le modèle standard s'il répond correctement et reste plus rapide que le processeur
+  let s = null;
+  try {
+    s = await ort.InferenceSession.create(o.gpuModelPath, sessionOptions("dml", res.deviceId, o.threads));
+    const ms = await measure(ort, s, o.size || 640, o.now);
+    if (!res.cpuMs || ms < res.cpuMs) {
+      release(res.session);
+      return Object.assign(res, { session: s, ms, model: "precis" });
+    }
+  } catch (_e) { /* modèle précis inutilisable sur cette carte : on garde le modèle standard */ }
+  release(s);
+  return res;
+}
+
+async function openStandard(ort, o) {
   const size = o.size || 640;
   const create = (kind, id) => ort.InferenceSession.create(o.modelPath, sessionOptions(kind, id, o.threads));
   const cpu = async (reason, cpuMs) => ({ session: await create("cpu"), kind: "cpu", deviceId: null, ms: cpuMs || null, cpuMs: cpuMs || null, reason });
@@ -119,7 +138,7 @@ async function run(st, feedsFor) {
       st.switching = (async () => {
         const next = await st.ort.InferenceSession.create(st.opts.modelPath, sessionOptions("cpu", null, st.opts.threads));
         release(session);
-        st.session = next; st.kind = "cpu"; st.deviceId = null; st.ms = st.cpuMs; st.reason = "erreur-gpu";
+        st.session = next; st.kind = "cpu"; st.deviceId = null; st.ms = st.cpuMs; st.reason = "erreur-gpu"; st.model = "standard";
         // au prochain lancement, la carte sera de nouveau testée (l'erreur peut venir d'une mise en veille, d'une mise à jour du pilote…)
         writeState(st.opts.stateFile, {});
         if (st.onSwitch) st.onSwitch(info(st));
@@ -132,7 +151,7 @@ async function run(st, feedsFor) {
 }
 
 function info(st) {
-  return { kind: st.kind, deviceId: st.deviceId, ms: st.ms, cpuMs: st.cpuMs, reason: st.reason };
+  return { kind: st.kind, deviceId: st.deviceId, ms: st.ms, cpuMs: st.cpuMs, reason: st.reason, model: st.model || "standard" };
 }
 
 module.exports = { open, run, info, sessionOptions, measure, readState, GPU_IDS, MIN_GAIN };

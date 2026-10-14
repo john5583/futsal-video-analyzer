@@ -142,3 +142,22 @@ test("zoom automatique : zone du terrain et vignettes qui la recouvrent", () => 
   // zone inutilisable : le terrain passe derrière la caméra -> pas de zoom (retour à l'image entière)
   assert.equal(P.courtRegion([1, 0, 0, 0, 1, 0, 0.1, 0, -1], 40, 20, 1, 1000, 600), null);
 });
+
+test("faux ballons : tiret jaune au sol et brassard fluo rejetés, vrai ballon et joueurs conservés", () => {
+  const w = 200, h = 100, data = new Uint8ClampedArray(w * h * 4);
+  const paint = (x0, y0, x1, y1, rgb) => { for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) data.set([rgb[0], rgb[1], rgb[2], 255], (y * w + x) * 4); };
+  paint(0, 0, w, h, [52, 110, 170]);                                   // parquet bleu
+  paint(12, 14, 26, 22, [235, 200, 40]);                               // tiret jaune (boîte 10..28 x 10..26)
+  paint(60, 10, 80, 30, [230, 230, 225]); paint(66, 16, 74, 24, [200, 40, 30]);   // ballon blanc et rouge
+  paint(110, 12, 126, 20, [210, 235, 60]);                             // brassard fluo
+  const img = { data, width: w, height: h };
+  const ball = (x1, y1, x2, y2) => ({ cls: 32, score: 0.5, x1, y1, x2, y2 });
+  assert.equal(P.isFloorMark(img, ball(10, 10, 28, 26)), true);
+  assert.equal(P.isFloorMark(img, ball(108, 10, 128, 22)), true);
+  assert.equal(P.isFloorMark(img, ball(60, 10, 80, 30)), false);
+  assert.equal(P.isFloorMark(img, ball(150, 40, 170, 60)), false, "parquet seul : pas un marquage jaune");
+  const person = { cls: 0, score: 0.9, x1: 10, y1: 10, x2: 28, y2: 26 };   // même boîte qu'un tiret, mais c'est une personne
+  const kept = P.dropFloorMarks([ball(10, 10, 28, 26), ball(60, 10, 80, 30), person], img);
+  assert.deepEqual(kept.map((d) => d.cls + "@" + d.x1), ["32@60", "0@10"]);
+  assert.equal(P.dropFloorMarks([ball(10, 10, 28, 26)], null).length, 1, "sans image, rien n'est filtré");
+});

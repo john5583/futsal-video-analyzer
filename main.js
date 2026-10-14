@@ -80,6 +80,12 @@ function modelPath() {
   return app.isPackaged ? path.join(process.resourcesPath, "models", "yolox_s.onnx") : path.join(__dirname, "models", "yolox_s.onnx");
 }
 
+/* Modèle plus précis (YOLOX-m), utilisé seulement quand le calcul se fait sur la carte graphique. */
+function gpuModelPath() {
+  const p = app.isPackaged ? path.join(process.resourcesPath, "models", "yolox_m.onnx") : path.join(__dirname, "models", "yolox_m.onnx");
+  return fs.existsSync(p) ? p : null;
+}
+
 function samPaths() {
   const dir = app.isPackaged ? path.join(process.resourcesPath, "models") : path.join(__dirname, "models");
   return { enc: path.join(dir, "mobile_sam_encoder.onnx"), dec: path.join(dir, "mobile_sam_decoder.onnx") };
@@ -114,7 +120,7 @@ function aiStart() {
     let signature = app.getVersion();
     try { signature += ":" + fs.statSync(file).size; } catch (_e) { /* taille inconnue */ }
     const w = new Worker(workerFile, { workerData: {
-      modelPath: file, samEncPath: samPaths().enc, samDecPath: samPaths().dec, threads: Math.max(1, os.cpus().length - 1),
+      modelPath: file, gpuModelPath: gpuModelPath(), samEncPath: samPaths().enc, samDecPath: samPaths().dec, threads: Math.max(1, os.cpus().length - 1),
       prefer: aiDevicePref(), backendFile: path.join(app.getPath("userData"), "ai-backend.json"), signature
     } });
     ai.worker = w;
