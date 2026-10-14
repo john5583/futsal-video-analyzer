@@ -191,3 +191,22 @@ test("estimation de durée : proche des analyses réelles, carte graphique et pr
   assert.ok(Math.abs(P.estimateDuration(Object.assign({ kind: "dml", factor: 50 }, base)).seconds - 3 * gpu.seconds) < 1e-6);
   assert.deepEqual(P.estimateDuration(Object.assign({ kind: "cpu" }, base, { t0: 40, t1: 30, camera: "fixed" })), { images: 0, seconds: 0, t0: 40 });
 });
+
+test("estimation de durée : correction apprise, jusqu'à 4 fois plus rapide et 3 fois plus lent", () => {
+  assert.equal(P.FACTOR_MIN, 0.25); assert.equal(P.FACTOR_MAX, 3);
+  const base = { t0: 15, t1: 136, fps: 5, tiles: 3, camera: "mobile", calibrations: [{ t: 14.2 }], kind: "cpu" };
+  const planned = P.estimateDuration(base).seconds;
+  // cas réel : processeur annoncé ~15 min 27 s, analyse faite en 289 s (portable en pleine forme) -> ratio 0,31, accepté tel quel
+  const f = P.learnFactor(1, planned, 289);
+  assert.ok(f > 0.3 && f < 0.32, "facteur appris : " + f);
+  assert.ok(Math.abs(P.estimateDuration(Object.assign({ factor: f }, base)).seconds - 289) < 1, "l'estimation suivante retombe sur la durée réelle");
+  // bornes : au plus 4 fois plus rapide, au plus 3 fois plus lent
+  assert.equal(P.learnFactor(1, 1000, 100), 0.25);
+  assert.equal(P.learnFactor(undefined, 100, 1000), 3);
+  assert.ok(Math.abs(P.estimateDuration(Object.assign({ factor: 0.1 }, base)).seconds - planned * 0.25) < 1e-6);
+  // analyses suivantes : moyenne avec la correction précédente
+  assert.equal(P.learnFactor(0.5, 100, 100), 0.75);
+  // données inutilisables : on garde la correction connue
+  assert.equal(P.learnFactor(0.6, 0, 50), 0.6);
+  assert.equal(P.learnFactor(undefined, 100, NaN), 1);
+});

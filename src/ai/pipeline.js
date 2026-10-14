@@ -228,14 +228,24 @@
     cpu: { 1: 0.515, 2: 1.127, 3: 1.524, M: 0, F: 0 }
   };
   const EST_START = 3;   // ouverture de la vidéo et du détecteur
+  /* Correction apprise bornée : jusqu'à 4 fois plus rapide (le processeur d'un portable peut aller ~3 fois plus vite
+     qu'au moment des mesures, qui restent prudentes) et 3 fois plus lent. */
+  const FACTOR_MIN = 0.25, FACTOR_MAX = 3;
+  const clampFactor = (f) => Math.min(FACTOR_MAX, Math.max(FACTOR_MIN, f));
   /* o : { t0, t1, fps, tiles, camera, calibrations, kind ("dml" | "cpu"), factor } -> { images, seconds, t0 } */
   function estimateDuration(o) {
     const k = EST[o.kind === "dml" ? "dml" : "cpu"];
     const t0 = startTime(o.t0, o.calibrations, o.camera === "mobile").t0;
     const images = o.t1 > t0 ? sampleTimes(t0, o.t1, o.fps).length : 0;
     const perImage = (k[o.tiles] || k[1]) + (o.camera === "mobile" ? k.M + k.F / o.fps : 0);
-    const factor = o.factor > 0 ? Math.min(3, Math.max(0.33, o.factor)) : 1;
+    const factor = o.factor > 0 ? clampFactor(o.factor) : 1;
     return { images, seconds: images ? (images * perImage + EST_START) * factor : 0, t0 };
+  }
+  /* Nouvelle correction après une analyse : moyenne avec l'ancienne (prev ; absente ou 1 = première analyse). */
+  function learnFactor(prev, plannedSeconds, realSeconds) {
+    if (!(plannedSeconds > 0) || !(realSeconds > 0)) return prev > 0 ? clampFactor(prev) : 1;
+    const ratio = clampFactor(realSeconds / plannedSeconds);
+    return !(prev > 0) || prev === 1 ? ratio : clampFactor(prev * 0.5 + ratio * 0.5);
   }
 
   /* ---- Lecture de la vidéo (navigateur uniquement) ---- */
@@ -438,5 +448,5 @@
     return { dets, scale, img: ctx.getImageData(0, 0, cw, ch), width: cw, height: ch };
   }
 
-  return { tileRects, courtRegion, zoomRects, tileToFrame, mergeTiles, isFloorMark, dropFloorMarks, calibrationAt, processDetections, finalizeFrames, compactFrames, expandFrames, frameNear, sampleTimes, startTime, estimateDuration, analyseVideo, detectAt, detectCanvas, captureFrames, TEAM_CODE };
+  return { tileRects, courtRegion, zoomRects, tileToFrame, mergeTiles, isFloorMark, dropFloorMarks, calibrationAt, processDetections, finalizeFrames, compactFrames, expandFrames, frameNear, sampleTimes, startTime, estimateDuration, learnFactor, FACTOR_MIN, FACTOR_MAX, analyseVideo, detectAt, detectCanvas, captureFrames, TEAM_CODE };
 });

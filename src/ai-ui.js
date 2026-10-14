@@ -511,7 +511,7 @@
   /* Correction apprise sur cet ordinateur (durée réelle / durée prévue), une par moteur. */
   const factorKey = () => "fsal.estFactor." + engineKind;
   function estFactor() {
-    try { const v = Number(localStorage.getItem(factorKey())); return v > 0.3 && v < 3.5 ? v : 1; } catch (_e) { return 1; }
+    try { const v = Number(localStorage.getItem(factorKey())); return v >= P.FACTOR_MIN && v <= P.FACTOR_MAX ? v : 1; } catch (_e) { return 1; }
   }
   /* p : réglages de l'analyse { fps, tiles, camera } ; par défaut ceux affichés. */
   function estimate(range, withFactor, p) {
@@ -522,9 +522,7 @@
   function learnDuration(range, p, realSeconds) {
     const plan = estimate(range, false, p);
     if (plan.images < 20 || !(plan.seconds > 0)) return;   // trop court pour être représentatif
-    const ratio = Math.min(3, Math.max(0.33, realSeconds / plan.seconds));
-    const prev = estFactor();
-    try { localStorage.setItem(factorKey(), String(prev === 1 ? ratio : prev * 0.5 + ratio * 0.5)); } catch (_e) { /* stockage indisponible */ }
+    try { localStorage.setItem(factorKey(), String(P.learnFactor(estFactor(), plan.seconds, realSeconds))); } catch (_e) { /* stockage indisponible */ }
   }
   function updateEstimate() {
     const r = readRange(), e = $("ai-est");
