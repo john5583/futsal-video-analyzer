@@ -466,6 +466,7 @@
 
   /* ---------- test de la reconnaissance sur l'image en pause ---------- */
   function tol() { return Number($("ai-tol").value) || 42; }
+  function floorMarks() { return $("ai-marks").checked; }
 
   function renderPreview() {
     if (!lastTest) return;
@@ -505,13 +506,29 @@
     return [t0, t1];
   }
 
-  const SEC_KEY = "fsal.secPerSample";
-  function secPerSample() { try { const v = Number(localStorage.getItem(SEC_KEY)); return v > 0.05 && v < 30 ? v : 0.35; } catch (_e) { return 0.35; } }
+  let engineKind = "cpu";        // moteur du détecteur (« dml » = carte graphique) : l'estimation de durée en dépend
+  let engineBlocked = false;     // détecteur indisponible : le bouton d'analyse reste désactivé
+  /* Correction apprise sur cet ordinateur (durée réelle / durée prévue), une par moteur. */
+  const factorKey = () => "fsal.estFactor." + engineKind;
+  function estFactor() {
+    try { const v = Number(localStorage.getItem(factorKey())); return v >= P.FACTOR_MIN && v <= P.FACTOR_MAX ? v : 1; } catch (_e) { return 1; }
+  }
+  /* p : réglages de l'analyse { fps, tiles, camera } ; par défaut ceux affichés. */
+  function estimate(range, withFactor, p) {
+    p = p || { fps: Number($("ai-fps").value), tiles: Number($("ai-tiles").value), camera: $("ai-camera").value };
+    return P.estimateDuration({ t0: range[0], t1: range[1], fps: p.fps, tiles: p.tiles, camera: p.camera,
+      calibrations: ai().calibrations, kind: engineKind, factor: withFactor ? estFactor() : 1 });
+  }
+  function learnDuration(range, p, realSeconds) {
+    const plan = estimate(range, false, p);
+    if (plan.images < 20 || !(plan.seconds > 0)) return;   // trop court pour être représentatif
+    try { localStorage.setItem(factorKey(), String(P.learnFactor(estFactor(), plan.seconds, realSeconds))); } catch (_e) { /* stockage indisponible */ }
+  }
   function updateEstimate() {
     const r = readRange(), e = $("ai-est");
     if (!r) { e.textContent = ""; return; }
-    const n = Math.ceil((r[1] - r[0]) * Number($("ai-fps").value)) * Number($("ai-tiles").value);
-    e.textContent = "Durée estimée : environ " + fmtEta(n * secPerSample()) + " (" + n + " détections). Pour un match entier, analysez d'abord un extrait ou choisissez « Rapide ».";
+    const est = estimate(r, true);
+    e.textContent = "Durée estimée : environ " + fmtEta(est.seconds) + " (" + est.images + " images, calcul sur " + (engineKind === "dml" ? "la carte graphique" : "le processeur") + "). Pour un match entier, analysez d'abord un extrait ou choisissez « Rapide ».";
   }
 
   function fmtEta(s) { s = Math.max(0, Math.round(s)); return Math.floor(s / 60) + " min " + String(s % 60).padStart(2, "0") + " s"; }
@@ -530,12 +547,12 @@
     const fps = Number($("ai-fps").value), tiles = Number($("ai-tiles").value);
     running = true; abort = new AbortController(); live = null;
     const startedAt = Date.now();
-    $("ai-run").disabled = true; $("ai-cancel").hidden = false; $("ai-progress").hidden = false; $("ai-bar").style.width = "0%";
+    $("ai-run").disabled = true; $("ai-device").disabled = true; $("ai-cancel").hidden = false; $("ai-progress").hidden = false; $("ai-bar").style.width = "0%";
     msg.textContent = "Chargement du modèle de détection…";
     try {
       const camera = $("ai-camera").value;
       const result = await P.analyseVideo({
-        url: App.getVideoUrl(), t0: range[0], t1: range[1], fps, tiles, camera, tol: tol(), L: L(), W: W(), calibrations: a.calibrations, refs: r, signal: abort.signal, api,
+        url: App.getVideoUrl(), t0: range[0], t1: range[1], fps, tiles, camera, tol: tol(), L: L(), W: W(), calibrations: a.calibrations, refs: r, floorMarks: floorMarks(), signal: abort.signal, api,
         onProgress: (p) => {
           $("ai-bar").style.width = Math.round((p.done / p.total) * 100) + "%";
           msg.textContent = "Image " + p.done + " / " + p.total + " — reste environ " + fmtEta(p.eta) + (p.lost ? " (caméra perdue sur cette image)" : "");
@@ -552,10 +569,10 @@
       a.stats = Object.assign({}, res.stats);
       a.suggestedEvents = res.events.map((e, i) => Object.assign({ sid: "s" + Date.now().toString(36) + i }, e));
       a.suggested = a.suggestedEvents.length;
-      a.settings = { fps, tiles, t0: range[0], t1: range[1], tol: tol() };
+      a.settings = { fps, tiles, t0: range[0], t1: range[1], tol: tol(), floorMarks: floorMarks() };
       const lostTxt = result.lost.length ? " Caméra perdue : " + result.lost.map((l) => App.fmt(l[0]) + "–" + App.fmt(l[1])).join(", ") + "." : "";
       msg.textContent = (out.length ? "Analyse terminée : " + out.length + " images, " + a.suggestedEvents.length + " erreur(s) suggérée(s)." : "Analyse terminée, mais aucun joueur n'a été retenu : vérifiez le calibrage et les tenues.") + (result.notes.length ? " " + result.notes.join(" ") : "") + lostTxt;
-      try { localStorage.setItem(SEC_KEY, String(((Date.now() - startedAt) / 1000) / Math.max(1, out.length ? Math.ceil((range[1] - range[0]) * fps) * tiles : 1))); } catch (_e) { /* stockage indisponible */ }
+      if (out.length) learnDuration(range, { fps, tiles, camera }, (Date.now() - startedAt) / 1000);
       renderStats(); renderSuggestions(); refreshLive(); updateEstimate(); App.changed(true);
       okRun = out.length > 0;
     } catch (e) {
@@ -563,12 +580,45 @@
       msg.textContent = "Analyse arrêtée : " + e.message;
     } finally {
       running = false; abort = null;
-      $("ai-run").disabled = false; $("ai-cancel").hidden = true;
+      $("ai-run").disabled = engineBlocked; $("ai-device").disabled = false; $("ai-cancel").hidden = true;
       setTimeout(() => { $("ai-progress").hidden = true; }, 600);
       if (api && api.aiStop) { /* le détecteur reste chargé pour la prochaine analyse */ }
+      if (api && api.aiStatus) refreshEngine();   // la carte graphique a pu céder la place au processeur en cours de route
       if (FSAI.hooks.finished) FSAI.hooks.finished(okRun, msg.textContent);
     }
     return okRun;
+  }
+
+  /* ---------- moteur de calcul ---------- */
+  const ENGINE_WHY = {
+    choix: " (réglage « Processeur uniquement »)",
+    "plus-rapide": " (la carte graphique n'est pas plus rapide sur cet ordinateur)",
+    indisponible: " (aucune carte graphique utilisable)",
+    "echec-precedent": " (la carte graphique a posé problème lors d'un essai précédent)",
+    "erreur-gpu": " (la carte graphique a cessé de répondre ; l'analyse continue normalement)"
+  };
+  function engineText(s) {
+    const b = s.backend;
+    if (b && b.kind === "dml") {
+      const gain = b.cpuMs && b.ms ? Math.round(b.cpuMs / b.ms) : 0;
+      return "Détecteur prêt : calcul sur la carte graphique" + (b.model === "precis" ? " avec le modèle précis" : "") + (gain >= 2 ? " (environ " + gain + " fois plus rapide que le processeur)" : "") + ".";
+    }
+    return "Détecteur prêt : calcul sur le processeur, " + s.cpus + " cœurs" + ((b && ENGINE_WHY[b.reason]) || "") + ".";
+  }
+  function refreshEngine() {
+    const e = $("ai-status");
+    if (!e.textContent) e.textContent = "Préparation du détecteur… (au premier lancement, la carte graphique est testée : jusqu'à une minute)";
+    return api.aiStatus().then((s) => {
+      if (s.device) $("ai-device").value = s.device;
+      if (!s.modelPresent) { e.className = "ai-status bad"; e.textContent = "Modèle de détection introuvable : l'analyse IA est indisponible. Réinstallez l'application."; engineBlocked = true; $("ai-run").disabled = true; }
+      else if (s.engineError) { e.className = "ai-status bad"; e.textContent = "Le détecteur n'a pas pu démarrer : " + s.engineError + " (sous Windows, installez « Microsoft Visual C++ Redistributable 2015-2022 » puis relancez)."; engineBlocked = true; $("ai-run").disabled = true; }
+      else {
+        engineKind = s.backend && s.backend.kind === "dml" ? "dml" : "cpu";
+        e.className = "ai-status"; e.textContent = engineText(s) + " Fonctionne hors ligne : la vidéo ne quitte pas votre ordinateur.";
+        if (engineBlocked) { engineBlocked = false; $("ai-run").disabled = running; }
+        updateEstimate();
+      }
+    }).catch(() => {});
   }
 
   /* ---------- liaison ---------- */
@@ -581,6 +631,7 @@
     $("ai-fps").value = String((d.settings && d.settings.fps) || 3); $("ai-tiles").value = String((d.settings && d.settings.tiles) || 1);
     $("ai-camera").value = d.camera || "mobile"; $("ai-tol").value = String((d.settings && d.settings.tol) || 42); $("ai-tol-v").textContent = "(" + $("ai-tol").value + ")";
     pip = null; preview = null; lastTest = null; renderPipette(); $("ai-test-msg").textContent = "";
+    $("ai-marks").checked = !(d.settings && d.settings.floorMarks === false);
     $("ai-t0").value = App.fmt((d.settings && d.settings.t0) || 0);
     $("ai-t1").value = App.fmt((d.settings && d.settings.t1) || state.project.duration || 0);
     fillLandmarks(); renderPoints(); renderCalibs(); renderKits(); renderStats(); renderSuggestions(); updateEstimate();
@@ -595,10 +646,11 @@
       if (l >= 25 && l <= 42) a.L = l;
       if (w >= 15 && w <= 25) a.W = w;
       a.dir = Number($("ai-dir").value); a.flip = $("ai-flip").checked; a.camera = $("ai-camera").value;
-      a.settings = Object.assign({}, a.settings, { fps: Number($("ai-fps").value), tiles: Number($("ai-tiles").value), tol: tol() });
+      a.settings = Object.assign({}, a.settings, { fps: Number($("ai-fps").value), tiles: Number($("ai-tiles").value), tol: tol(), floorMarks: floorMarks() });
       fillLandmarks(); App.changed();
     };
-    ["ai-L", "ai-W", "ai-dir", "ai-flip", "ai-fps", "ai-tiles", "ai-camera"].forEach((id) => $(id).addEventListener("change", upd));
+    ["ai-L", "ai-W", "ai-dir", "ai-flip", "ai-fps", "ai-tiles", "ai-camera", "ai-marks"].forEach((id) => $(id).addEventListener("change", upd));
+    $("ai-camera").addEventListener("change", updateEstimate);
     $("ai-tol").addEventListener("input", () => { $("ai-tol-v").textContent = "(" + tol() + ")"; if (lastTest) renderPreview(); });
     $("ai-tol").addEventListener("change", upd);
     $("ai-test").addEventListener("click", testRecognition);
@@ -671,13 +723,18 @@
       updateEstimate();
     });
     if (api && api.aiStatus) {
-      api.aiStatus().then((s) => {
+      refreshEngine();
+      $("ai-device").addEventListener("change", async () => {
+        const sel = $("ai-device");
+        if (running || !api.aiSetDevice) return;
+        sel.disabled = true;
         const e = $("ai-status");
-        if (!s.modelPresent) { e.className = "ai-status bad"; e.textContent = "Modèle de détection introuvable : l'analyse IA est indisponible. Réinstallez l'application."; $("ai-run").disabled = true; }
-        else if (s.engineError) { e.className = "ai-status bad"; e.textContent = "Le détecteur n'a pas pu démarrer : " + s.engineError + " (sous Windows, installez « Microsoft Visual C++ Redistributable 2015-2022 » puis relancez)."; $("ai-run").disabled = true; }
-        else e.textContent = "Détecteur prêt (" + s.cpus + " cœurs de calcul). Fonctionne hors ligne : la vidéo ne quitte pas votre ordinateur.";
-      }).catch(() => {});
-    } else $("ai-status").textContent = "L'analyse IA est disponible dans l'application installée.";
+        e.className = "ai-status"; e.textContent = "Changement du moteur de calcul…";
+        try { const r = await api.aiSetDevice(sel.value); if (r && r.error) $("ai-run-msg").textContent = r.error; } catch (_e) { /* l'état ci-dessous indique le moteur réel */ }
+        await refreshEngine();
+        sel.disabled = running;
+      });
+    } else { $("ai-status").textContent = "L'analyse IA est disponible dans l'application installée."; $("ai-device").disabled = true; }
     syncFromProject();
   }
 

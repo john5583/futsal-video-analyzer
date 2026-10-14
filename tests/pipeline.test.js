@@ -142,3 +142,71 @@ test("zoom automatique : zone du terrain et vignettes qui la recouvrent", () => 
   // zone inutilisable : le terrain passe derrière la caméra -> pas de zoom (retour à l'image entière)
   assert.equal(P.courtRegion([1, 0, 0, 0, 1, 0, 0.1, 0, -1], 40, 20, 1, 1000, 600), null);
 });
+
+test("faux ballons : tiret jaune au sol et brassard fluo rejetés, vrai ballon et joueurs conservés", () => {
+  const w = 200, h = 100, data = new Uint8ClampedArray(w * h * 4);
+  const paint = (x0, y0, x1, y1, rgb) => { for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) data.set([rgb[0], rgb[1], rgb[2], 255], (y * w + x) * 4); };
+  paint(0, 0, w, h, [52, 110, 170]);                                   // parquet bleu
+  paint(12, 14, 26, 22, [235, 200, 40]);                               // tiret jaune (boîte 10..28 x 10..26)
+  paint(60, 10, 80, 30, [230, 230, 225]); paint(66, 16, 74, 24, [200, 40, 30]);   // ballon blanc et rouge
+  paint(110, 12, 126, 20, [210, 235, 60]);                             // brassard fluo
+  const img = { data, width: w, height: h };
+  const ball = (x1, y1, x2, y2) => ({ cls: 32, score: 0.5, x1, y1, x2, y2 });
+  assert.equal(P.isFloorMark(img, ball(10, 10, 28, 26)), true);
+  assert.equal(P.isFloorMark(img, ball(108, 10, 128, 22)), true);
+  assert.equal(P.isFloorMark(img, ball(60, 10, 80, 30)), false);
+  assert.equal(P.isFloorMark(img, ball(150, 40, 170, 60)), false, "parquet seul : pas un marquage jaune");
+  const person = { cls: 0, score: 0.9, x1: 10, y1: 10, x2: 28, y2: 26 };   // même boîte qu'un tiret, mais c'est une personne
+  const kept = P.dropFloorMarks([ball(10, 10, 28, 26), ball(60, 10, 80, 30), person], img);
+  assert.deepEqual(kept.map((d) => d.cls + "@" + d.x1), ["32@60", "0@10"]);
+  assert.equal(P.dropFloorMarks([ball(10, 10, 28, 26)], null).length, 1, "sans image, rien n'est filtré");
+  // réglage « ballon jaune » : filtre désactivé, le ballon jaune est gardé ; activé par défaut (undefined / true)
+  assert.equal(P.dropFloorMarks([ball(10, 10, 28, 26)], img, false).length, 1);
+  assert.equal(P.dropFloorMarks([ball(10, 10, 28, 26)], img, true).length, 0);
+  assert.equal(P.dropFloorMarks([ball(10, 10, 28, 26)], img, undefined).length, 0);
+});
+
+test("estimation de durée : proche des analyses réelles, carte graphique et processeur", () => {
+  const calibrations = [{ t: 14.2 }];
+  const base = { t0: 15, t1: 136, fps: 5, tiles: 3, camera: "mobile", calibrations };
+  // analyses réelles mesurées (vidéo 1920x1080, 121 s, caméra mobile, zoom automatique, 5 images/s)
+  const gpu = P.estimateDuration(Object.assign({ kind: "dml" }, base));
+  const cpu = P.estimateDuration(Object.assign({ kind: "cpu" }, base));
+  assert.equal(gpu.images, 606);
+  assert.ok(Math.abs(gpu.seconds / 348 - 1) < 0.15, "carte graphique : " + Math.round(gpu.seconds) + " s pour 348 s réelles");
+  assert.ok(Math.abs(cpu.seconds / 941 - 1) < 0.15, "processeur : " + Math.round(cpu.seconds) + " s pour 941 s réelles");
+  // extraits courts mesurés : caméra fixe en mode standard, caméra mobile à 2 images/s
+  const short = { t0: 15, t1: 45, calibrations };
+  assert.ok(Math.abs(P.estimateDuration(Object.assign({ kind: "dml", fps: 5, tiles: 1, camera: "fixed" }, short)).seconds / 15 - 1) < 0.25);
+  assert.ok(Math.abs(P.estimateDuration(Object.assign({ kind: "cpu", fps: 2, tiles: 3, camera: "mobile" }, short)).seconds / 97 - 1) < 0.25);
+  // caméra mobile : l'analyse repart du dernier calibrage (plus d'images), pas en caméra fixe
+  const late = P.estimateDuration(Object.assign({ kind: "dml" }, base, { t0: 30 }));
+  assert.equal(late.t0, 14.2);
+  assert.equal(P.estimateDuration(Object.assign({ kind: "dml" }, base, { t0: 30, camera: "fixed" })).t0, 30);
+  assert.equal(P.startTime(5, calibrations, true).t0, 14.2);
+  assert.match(P.startTime(30, calibrations, true).note, /dernier calibrage/);
+  assert.equal(P.startTime(15, calibrations, true).note, null);
+  // correction apprise sur l'ordinateur, bornée ; plage vide = 0
+  assert.ok(Math.abs(P.estimateDuration(Object.assign({ kind: "dml", factor: 2 }, base)).seconds - 2 * gpu.seconds) < 1e-6);
+  assert.ok(Math.abs(P.estimateDuration(Object.assign({ kind: "dml", factor: 50 }, base)).seconds - 3 * gpu.seconds) < 1e-6);
+  assert.deepEqual(P.estimateDuration(Object.assign({ kind: "cpu" }, base, { t0: 40, t1: 30, camera: "fixed" })), { images: 0, seconds: 0, t0: 40 });
+});
+
+test("estimation de durée : correction apprise, jusqu'à 4 fois plus rapide et 3 fois plus lent", () => {
+  assert.equal(P.FACTOR_MIN, 0.25); assert.equal(P.FACTOR_MAX, 3);
+  const base = { t0: 15, t1: 136, fps: 5, tiles: 3, camera: "mobile", calibrations: [{ t: 14.2 }], kind: "cpu" };
+  const planned = P.estimateDuration(base).seconds;
+  // cas réel : processeur annoncé ~15 min 27 s, analyse faite en 289 s (portable en pleine forme) -> ratio 0,31, accepté tel quel
+  const f = P.learnFactor(1, planned, 289);
+  assert.ok(f > 0.3 && f < 0.32, "facteur appris : " + f);
+  assert.ok(Math.abs(P.estimateDuration(Object.assign({ factor: f }, base)).seconds - 289) < 1, "l'estimation suivante retombe sur la durée réelle");
+  // bornes : au plus 4 fois plus rapide, au plus 3 fois plus lent
+  assert.equal(P.learnFactor(1, 1000, 100), 0.25);
+  assert.equal(P.learnFactor(undefined, 100, 1000), 3);
+  assert.ok(Math.abs(P.estimateDuration(Object.assign({ factor: 0.1 }, base)).seconds - planned * 0.25) < 1e-6);
+  // analyses suivantes : moyenne avec la correction précédente
+  assert.equal(P.learnFactor(0.5, 100, 100), 0.75);
+  // données inutilisables : on garde la correction connue
+  assert.equal(P.learnFactor(0.6, 0, 50), 0.6);
+  assert.equal(P.learnFactor(undefined, 100, NaN), 1);
+});

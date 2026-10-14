@@ -45,6 +45,17 @@ const must = (c, m) => { if (!c) { console.error("ÉCHEC : " + m); process.exitC
   // erreur propre si l'image n'a jamais été encodée
   const bad = await win.evaluate(async () => (await window.fsal.aiSegment({ imgId: "inconnue", width: 1024, height: 768, boxes: [[10, 10, 100, 100]] })).error || "");
   must(/encod/i.test(bad), "erreur claire si l'image n'est pas encodée : " + bad);
+  // réglage avancé « marquage jaune du sol » : coché par défaut, décoché = enregistré dans le projet (ballon jaune)
+  const marks = await win.evaluate(() => {
+    document.querySelectorAll("#pane-ai details").forEach((d) => { d.open = true; });
+    const cb = document.getElementById("ai-marks"), before = cb.checked;
+    const label = cb.closest("label").textContent.trim();
+    cb.click();
+    const s = window.FSAI.ai().settings || {};
+    return { label, before, after: cb.checked, saved: s.floorMarks };
+  });
+  must(marks.label === "Ignorer le marquage jaune du sol (à décocher uniquement si votre ballon est jaune)", "libellé de la case : " + marks.label);
+  must(marks.before === true && marks.after === false && marks.saved === false, "filtre du marquage jaune désactivable et enregistré " + JSON.stringify(marks));
   must(errors.length === 0, "aucune erreur dans l'interface " + JSON.stringify(errors));
   await app.close();
 })().catch((e) => { console.error("ÉCHEC : " + (e.stack || e.message)); process.exit(1); });

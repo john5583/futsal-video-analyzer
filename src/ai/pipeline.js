@@ -89,6 +89,28 @@
     return Y.nms(whole, 0.5).map((d) => { const o = Object.assign({}, d); delete o.cut; return o; });
   }
 
+  /* Faux ballon : marquage jaune au sol (tirets) ou brassard fluo. Mesuré sur des matchs réels : ces boîtes
+     contiennent ~38 % de pixels jaunes et aucun blanc, un vrai ballon ~0 % de jaune.
+     img : { data (RGBA), width, height } ; box en pixels de img. */
+  function isFloorMark(img, box) {
+    const x0 = Math.max(0, Math.floor(box.x1)), y0 = Math.max(0, Math.floor(box.y1));
+    const x1 = Math.min(img.width, Math.ceil(box.x2)), y1 = Math.min(img.height, Math.ceil(box.y2));
+    const step = Math.max(1, Math.floor(Math.min(x1 - x0, y1 - y0) / 24));
+    let n = 0, yellow = 0, white = 0;
+    for (let y = y0; y < y1; y += step) for (let x = x0; x < x1; x += step) {
+      const o = (y * img.width + x) * 4, r = img.data[o], g = img.data[o + 1], b = img.data[o + 2];
+      n++;
+      if (r > 140 && g > 120 && b < 0.6 * g && r - b > 70) yellow++;
+      if (Math.min(r, g, b) > 170 && Math.max(r, g, b) - Math.min(r, g, b) < 45) white++;
+    }
+    return n > 0 && yellow / n >= 0.25 && white / n < 0.08;
+  }
+
+  /* enabled === false : filtre désactivé (match joué avec un ballon jaune). */
+  function dropFloorMarks(dets, img, enabled) {
+    return img && enabled !== false ? dets.filter((d) => d.cls !== Y.CLASS_BALL || !isFloorMark(img, d)) : dets;
+  }
+
   /* Étalonnage en vigueur à l'instant t (le plus récent déjà posé, sinon le premier). */
   function calibrationAt(calibs, t) {
     if (!calibs || !calibs.length) return null;
@@ -187,6 +209,45 @@
     return out;
   }
 
+  /* Début réel de l'analyse : caméra mobile, on part d'un calibrage pour pouvoir suivre la caméra. */
+  function startTime(t0, calibs, mobile) {
+    const c = (calibs || []).slice().sort((a, b) => a.t - b.t);
+    if (!mobile || !c.length) return { t0, note: null };
+    if (t0 < c[0].t - 0.01) return { t0: c[0].t, note: "L'analyse commence au premier calibrage (le terrain n'est pas connu avant)." };
+    const prior = c.filter((x) => x.t <= t0 + 0.01).pop();
+    if (prior && t0 - prior.t > 1.5) return { t0: prior.t, note: "L'analyse commence au dernier calibrage avant la plage choisie, pour suivre la caméra sans interruption." };
+    return { t0, note: null };
+  }
+
+  /* Durée d'analyse attendue, en secondes par image analysée, mesurée sur une vidéo 1920x1080 réelle
+     (i5-12450H + RTX 4050 : carte graphique avec le modèle précis, processeur avec le modèle standard).
+     Caméra mobile : suivi du mouvement entre les images (coût M + F / images par seconde ; invisible sur processeur,
+     où il se fait pendant les calculs du détecteur). Le facteur appris sur l'ordinateur de l'utilisateur corrige le reste. */
+  const EST = {
+    dml: { 1: 0.098, 2: 0.121, 3: 0.252, M: 0.2, F: 0.561 },
+    cpu: { 1: 0.515, 2: 1.127, 3: 1.524, M: 0, F: 0 }
+  };
+  const EST_START = 3;   // ouverture de la vidéo et du détecteur
+  /* Correction apprise bornée : jusqu'à 4 fois plus rapide (le processeur d'un portable peut aller ~3 fois plus vite
+     qu'au moment des mesures, qui restent prudentes) et 3 fois plus lent. */
+  const FACTOR_MIN = 0.25, FACTOR_MAX = 3;
+  const clampFactor = (f) => Math.min(FACTOR_MAX, Math.max(FACTOR_MIN, f));
+  /* o : { t0, t1, fps, tiles, camera, calibrations, kind ("dml" | "cpu"), factor } -> { images, seconds, t0 } */
+  function estimateDuration(o) {
+    const k = EST[o.kind === "dml" ? "dml" : "cpu"];
+    const t0 = startTime(o.t0, o.calibrations, o.camera === "mobile").t0;
+    const images = o.t1 > t0 ? sampleTimes(t0, o.t1, o.fps).length : 0;
+    const perImage = (k[o.tiles] || k[1]) + (o.camera === "mobile" ? k.M + k.F / o.fps : 0);
+    const factor = o.factor > 0 ? clampFactor(o.factor) : 1;
+    return { images, seconds: images ? (images * perImage + EST_START) * factor : 0, t0 };
+  }
+  /* Nouvelle correction après une analyse : moyenne avec l'ancienne (prev ; absente ou 1 = première analyse). */
+  function learnFactor(prev, plannedSeconds, realSeconds) {
+    if (!(plannedSeconds > 0) || !(realSeconds > 0)) return prev > 0 ? clampFactor(prev) : 1;
+    const ratio = clampFactor(realSeconds / plannedSeconds);
+    return !(prev > 0) || prev === 1 ? ratio : clampFactor(prev * 0.5 + ratio * 0.5);
+  }
+
   /* ---- Lecture de la vidéo (navigateur uniquement) ---- */
   function seekTo(video, t) {
     return new Promise((resolve, reject) => {
@@ -224,7 +285,7 @@
   const IDENTITY = [1, 0, 0, 0, 1, 0, 0, 0, 1];
 
   /* Analyse complète d'une plage de la vidéo.
-     opts : { url, t0, t1, fps, tiles, camera ("fixed" | "mobile"), tol, L, W, calibrations, refs, signal, onProgress, api }
+     opts : { url, t0, t1, fps, tiles, camera ("fixed" | "mobile"), tol, L, W, calibrations, refs, floorMarks (false = garder les ballons jaunes), signal, onProgress, api }
      Caméra mobile : à chaque calibrage, le terrain est recalé ; entre deux calibrages, le mouvement de la caméra est suivi.
      Renvoie { frames, lost: [[t0, t1], ...], notes: [texte, ...] }. */
   async function analyseVideo(opts) {
@@ -244,14 +305,9 @@
     const notes = [];
     const calibs = (opts.calibrations || []).slice().sort((a, b) => a.t - b.t);
     if (!calibs.length) throw new Error("Aucun calibrage du terrain");
-    let t0 = opts.t0;
-    if (mobile) {
-      if (t0 < calibs[0].t - 0.01) { t0 = calibs[0].t; notes.push("L'analyse commence au premier calibrage (le terrain n'est pas connu avant)."); }
-      else {
-        const prior = calibs.filter((c) => c.t <= t0 + 0.01).pop();
-        if (prior && t0 - prior.t > 1.5) { t0 = prior.t; notes.push("L'analyse commence au dernier calibrage avant la plage choisie, pour suivre la caméra sans interruption."); }
-      }
-    }
+    const start = startTime(opts.t0, calibs, mobile);
+    const t0 = start.t0;
+    if (start.note) notes.push(start.note);
     const times = sampleTimes(t0, Math.min(opts.t1, video.duration - 0.05), opts.fps);
     // images réduites pour le suivi de la caméra
     const gw = Math.min(480, cw), gh = Math.max(2, Math.round((ch * gw) / cw)), gs = gw / vw;
@@ -307,22 +363,23 @@
       if (mobile && trk.anchor && trk.anchor === calib && trk.prev) trackOk = await advanceMotion(trk, t);
       else await seekTo(video, t);
       ctx.drawImage(video, 0, 0, cw, ch);
+      const img = ctx.getImageData(0, 0, cw, ch);
       let dets;
       if (zoom) {
         const Hprev = mobile && trk.anchor === calib ? HG.mul3(trk.anchor.H, trk.M) : calib.H;
         const crop = courtRegion(Hprev, opts.L, opts.W, scale, cw, ch);
-        dets = await detectCanvas(canvas, 1, opts.api, { minPerson: 0.35, minBall: 0.12 }, crop ? zoomRects(crop) : tileRects(cw, ch, 2));
+        dets = dropFloorMarks(await detectCanvas(canvas, 1, opts.api, { minPerson: 0.35, minBall: 0.12 }, crop ? zoomRects(crop) : tileRects(cw, ch, 2)), img, opts.floorMarks);
         // ballon non vu : recherche en gros plan autour de sa dernière position connue
         if (!dets.some((d) => d.cls === Y.CLASS_BALL) && lastBall && t - lastBall.t <= 1.0) {
           const half = Math.round(Math.max(90, Math.min(cw, ch) * 0.17));
           const rx = Math.max(0, Math.min(cw - 2 * half, Math.round(lastBall.x - half))), ry = Math.max(0, Math.min(ch - 2 * half, Math.round(lastBall.y - half)));
-          const roi = await detectCanvas(canvas, 1, opts.api, { minPerson: 2, minBall: 0.07 }, [{ x: rx, y: ry, w: Math.min(cw, 2 * half), h: Math.min(ch, 2 * half) }]);
+          const roi = dropFloorMarks(await detectCanvas(canvas, 1, opts.api, { minPerson: 2, minBall: 0.07 }, [{ x: rx, y: ry, w: Math.min(cw, 2 * half), h: Math.min(ch, 2 * half) }]), img, opts.floorMarks);
           const best = roi.filter((d) => d.cls === Y.CLASS_BALL).sort((a, b) => b.score - a.score)[0];
           if (best) dets.push(best);
         }
         const bd = dets.filter((d) => d.cls === Y.CLASS_BALL).sort((a, b) => b.score - a.score)[0];
         if (bd) lastBall = { x: (bd.x1 + bd.x2) / 2, y: (bd.y1 + bd.y2) / 2, t };
-      } else dets = await detectCanvas(canvas, opts.tiles, opts.api, { minPerson: 0.35, minBall: 0.12 });
+      } else dets = dropFloorMarks(await detectCanvas(canvas, opts.tiles, opts.api, { minPerson: 0.35, minBall: 0.12 }), img, opts.floorMarks);
       let H = calib.H, reliable = true;
       if (mobile) {
         const boxes = dets.filter((d) => d.cls === Y.CLASS_PERSON).map((d) => [d.x1 * (gw / cw), d.y1 * (gh / ch), d.x2 * (gw / cw), d.y2 * (gh / ch)]);
@@ -345,7 +402,6 @@
         continue;
       }
       if (lostStart != null) { lost.push([lostStart, t]); lostStart = null; }
-      const img = ctx.getImageData(0, 0, cw, ch);
       frames.push(processDetections(dets, { frameW: cw, frameH: ch, scale, img, H, L: opts.L, W: opts.W, refs: opts.refs, reject: opts.tol, tracker, t }));
       if (opts.onProgress) {
         const elapsed = (Date.now() - started) / 1000;
@@ -392,5 +448,5 @@
     return { dets, scale, img: ctx.getImageData(0, 0, cw, ch), width: cw, height: ch };
   }
 
-  return { tileRects, courtRegion, zoomRects, tileToFrame, mergeTiles, calibrationAt, processDetections, finalizeFrames, compactFrames, expandFrames, frameNear, sampleTimes, analyseVideo, detectAt, detectCanvas, captureFrames, TEAM_CODE };
+  return { tileRects, courtRegion, zoomRects, tileToFrame, mergeTiles, isFloorMark, dropFloorMarks, calibrationAt, processDetections, finalizeFrames, compactFrames, expandFrames, frameNear, sampleTimes, startTime, estimateDuration, learnFactor, FACTOR_MIN, FACTOR_MAX, analyseVideo, detectAt, detectCanvas, captureFrames, TEAM_CODE };
 });

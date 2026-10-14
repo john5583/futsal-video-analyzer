@@ -49,6 +49,10 @@
         "to": "models/yolox_s.onnx"
       },
       {
+        "from": "models/yolox_m.onnx",
+        "to": "models/yolox_m.onnx"
+      },
+      {
         "from": "models/mobile_sam_encoder.onnx",
         "to": "models/mobile_sam_encoder.onnx"
       },
@@ -68,6 +72,10 @@
       ],
       "icon": "build/icon.png",
       "files": [
+        "!models/**",
+        "!tests/**",
+        "!scripts/**",
+        "!dist/**",
         "!node_modules/onnxruntime-node/bin/napi-v3/linux/**",
         "!node_modules/onnxruntime-node/bin/napi-v3/win32/arm64/**"
       ]
@@ -75,6 +83,10 @@
     "linux": {
       "target": "dir",
       "files": [
+        "!models/**",
+        "!tests/**",
+        "!scripts/**",
+        "!dist/**",
         "!node_modules/onnxruntime-node/bin/napi-v3/win32/**",
         "!node_modules/onnxruntime-node/bin/napi-v3/linux/arm64/**"
       ]

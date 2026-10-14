@@ -80,18 +80,30 @@ function modelPath() {
   return app.isPackaged ? path.join(process.resourcesPath, "models", "yolox_s.onnx") : path.join(__dirname, "models", "yolox_s.onnx");
 }
 
+/* Modèle plus précis (YOLOX-m), utilisé seulement quand le calcul se fait sur la carte graphique. */
+function gpuModelPath() {
+  const p = app.isPackaged ? path.join(process.resourcesPath, "models", "yolox_m.onnx") : path.join(__dirname, "models", "yolox_m.onnx");
+  return fs.existsSync(p) ? p : null;
+}
+
 function samPaths() {
   const dir = app.isPackaged ? path.join(process.resourcesPath, "models") : path.join(__dirname, "models");
   return { enc: path.join(dir, "mobile_sam_encoder.onnx"), dec: path.join(dir, "mobile_sam_decoder.onnx") };
 }
 
-const ai = { worker: null, ready: null, pending: new Map(), nextId: 1, error: null };
+const ai = { worker: null, ready: null, pending: new Map(), nextId: 1, error: null, backend: null };
+
+/* Moteur de calcul : « auto » (carte graphique si elle est plus rapide) ou « cpu » (processeur uniquement). */
+function aiPrefsFile() { return path.join(app.getPath("userData"), "ai-prefs.json"); }
+function aiDevicePref() {
+  try { return JSON.parse(fs.readFileSync(aiPrefsFile(), "utf8")).device === "cpu" ? "cpu" : "auto"; } catch (_e) { return "auto"; }
+}
 
 function aiStop() {
   if (ai.worker) { try { ai.worker.terminate(); } catch (_e) { /* déjà arrêté */ } }
   ai.pending.forEach((p) => p.reject(new Error("Détecteur arrêté")));
   ai.pending.clear();
-  ai.worker = null; ai.ready = null;
+  ai.worker = null; ai.ready = null; ai.backend = null;
 }
 
 function aiStart() {
@@ -104,10 +116,17 @@ function aiStart() {
   }
   ai.ready = new Promise((resolve, reject) => {
     const workerFile = path.join(__dirname, "src", "ai", "worker.js").replace("app.asar" + path.sep, "app.asar.unpacked" + path.sep);
-    const w = new Worker(workerFile, { workerData: { modelPath: file, samEncPath: samPaths().enc, samDecPath: samPaths().dec, threads: Math.max(1, os.cpus().length - 1) } });
+    // le choix de la carte graphique est refait quand l'application ou le modèle change
+    let signature = app.getVersion();
+    try { signature += ":" + fs.statSync(file).size; } catch (_e) { /* taille inconnue */ }
+    const w = new Worker(workerFile, { workerData: {
+      modelPath: file, gpuModelPath: gpuModelPath(), samEncPath: samPaths().enc, samDecPath: samPaths().dec, threads: Math.max(1, os.cpus().length - 1),
+      prefer: aiDevicePref(), backendFile: path.join(app.getPath("userData"), "ai-backend.json"), signature
+    } });
     ai.worker = w;
     w.on("message", (m) => {
-      if (m.type === "ready") resolve(true);
+      if (m.type === "ready") { ai.backend = m.backend || null; resolve(true); }
+      else if (m.type === "backend") ai.backend = m.backend || null;
       else if (m.type === "fatal") { reject(new Error(m.error)); aiStop(); }
       else if (m.type === "result") {
         const p = ai.pending.get(m.id);
@@ -304,8 +323,17 @@ function registerIpc() {
   ipcMain.handle("ai:status", async () => {
     const st = { samPresent: fs.existsSync(samPaths().enc) && fs.existsSync(samPaths().dec), modelPresent: fs.existsSync(modelPath()), cpus: os.cpus().length, engineError: null };
     if (!st.modelPresent) return st;
+    st.device = aiDevicePref();
     try { await aiStart(); } catch (err) { st.engineError = String(err && err.message || err); }
+    st.backend = ai.backend;
     return st;
+  });
+  ipcMain.handle("ai:setDevice", (_e, device) => {
+    const d = device === "cpu" ? "cpu" : "auto";
+    if (d === aiDevicePref()) return true;
+    try { atomicWrite(aiPrefsFile(), JSON.stringify({ device: d })); } catch (err) { return { error: "Réglage non enregistré : " + err.message }; }
+    aiStop();   // le détecteur redémarre sur le nouveau moteur à la prochaine demande
+    return true;
   });
   ipcMain.handle("ai:detect", async (_e, buffer, opts) => {
     try { return { dets: await aiDetect(buffer, opts || {}) }; }

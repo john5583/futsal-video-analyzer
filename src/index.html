@@ -158,6 +158,10 @@
               <label>Joueurs lointains
                 <select id="ai-tiles"><option value="1">Standard</option><option value="2">Renforcé (plus lent)</option><option value="3">Zoom automatique (précis, plus lent)</option></select>
               </label>
+              <label>Calcul
+                <select id="ai-device"><option value="auto">Automatique (carte graphique si plus rapide)</option><option value="cpu">Processeur uniquement</option></select>
+              </label>
+              <label class="row"><input id="ai-marks" type="checkbox" checked> Ignorer le marquage jaune du sol (à décocher uniquement si votre ballon est jaune)</label>
             </div>
             <div class="ai-run">
               <button id="ai-run" class="primary">Lancer l'analyse</button>
