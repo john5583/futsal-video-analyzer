@@ -160,4 +160,34 @@ test("faux ballons : tiret jaune au sol et brassard fluo rejetés, vrai ballon e
   const kept = P.dropFloorMarks([ball(10, 10, 28, 26), ball(60, 10, 80, 30), person], img);
   assert.deepEqual(kept.map((d) => d.cls + "@" + d.x1), ["32@60", "0@10"]);
   assert.equal(P.dropFloorMarks([ball(10, 10, 28, 26)], null).length, 1, "sans image, rien n'est filtré");
+  // réglage « ballon jaune » : filtre désactivé, le ballon jaune est gardé ; activé par défaut (undefined / true)
+  assert.equal(P.dropFloorMarks([ball(10, 10, 28, 26)], img, false).length, 1);
+  assert.equal(P.dropFloorMarks([ball(10, 10, 28, 26)], img, true).length, 0);
+  assert.equal(P.dropFloorMarks([ball(10, 10, 28, 26)], img, undefined).length, 0);
+});
+
+test("estimation de durée : proche des analyses réelles, carte graphique et processeur", () => {
+  const calibrations = [{ t: 14.2 }];
+  const base = { t0: 15, t1: 136, fps: 5, tiles: 3, camera: "mobile", calibrations };
+  // analyses réelles mesurées (vidéo 1920x1080, 121 s, caméra mobile, zoom automatique, 5 images/s)
+  const gpu = P.estimateDuration(Object.assign({ kind: "dml" }, base));
+  const cpu = P.estimateDuration(Object.assign({ kind: "cpu" }, base));
+  assert.equal(gpu.images, 606);
+  assert.ok(Math.abs(gpu.seconds / 348 - 1) < 0.15, "carte graphique : " + Math.round(gpu.seconds) + " s pour 348 s réelles");
+  assert.ok(Math.abs(cpu.seconds / 941 - 1) < 0.15, "processeur : " + Math.round(cpu.seconds) + " s pour 941 s réelles");
+  // extraits courts mesurés : caméra fixe en mode standard, caméra mobile à 2 images/s
+  const short = { t0: 15, t1: 45, calibrations };
+  assert.ok(Math.abs(P.estimateDuration(Object.assign({ kind: "dml", fps: 5, tiles: 1, camera: "fixed" }, short)).seconds / 15 - 1) < 0.25);
+  assert.ok(Math.abs(P.estimateDuration(Object.assign({ kind: "cpu", fps: 2, tiles: 3, camera: "mobile" }, short)).seconds / 97 - 1) < 0.25);
+  // caméra mobile : l'analyse repart du dernier calibrage (plus d'images), pas en caméra fixe
+  const late = P.estimateDuration(Object.assign({ kind: "dml" }, base, { t0: 30 }));
+  assert.equal(late.t0, 14.2);
+  assert.equal(P.estimateDuration(Object.assign({ kind: "dml" }, base, { t0: 30, camera: "fixed" })).t0, 30);
+  assert.equal(P.startTime(5, calibrations, true).t0, 14.2);
+  assert.match(P.startTime(30, calibrations, true).note, /dernier calibrage/);
+  assert.equal(P.startTime(15, calibrations, true).note, null);
+  // correction apprise sur l'ordinateur, bornée ; plage vide = 0
+  assert.ok(Math.abs(P.estimateDuration(Object.assign({ kind: "dml", factor: 2 }, base)).seconds - 2 * gpu.seconds) < 1e-6);
+  assert.ok(Math.abs(P.estimateDuration(Object.assign({ kind: "dml", factor: 50 }, base)).seconds - 3 * gpu.seconds) < 1e-6);
+  assert.deepEqual(P.estimateDuration(Object.assign({ kind: "cpu" }, base, { t0: 40, t1: 30, camera: "fixed" })), { images: 0, seconds: 0, t0: 40 });
 });

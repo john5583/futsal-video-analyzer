@@ -466,6 +466,7 @@
 
   /* ---------- test de la reconnaissance sur l'image en pause ---------- */
   function tol() { return Number($("ai-tol").value) || 42; }
+  function floorMarks() { return $("ai-marks").checked; }
 
   function renderPreview() {
     if (!lastTest) return;
@@ -505,19 +506,31 @@
     return [t0, t1];
   }
 
-  const SEC_KEY = "fsal.secPerSample";
-  let engineKind = "cpu";        // moteur du détecteur (« dml » = carte graphique) : la durée mesurée est mémorisée pour chacun
+  let engineKind = "cpu";        // moteur du détecteur (« dml » = carte graphique) : l'estimation de durée en dépend
   let engineBlocked = false;     // détecteur indisponible : le bouton d'analyse reste désactivé
-  const secKey = () => (engineKind === "dml" ? SEC_KEY + ".gpu" : SEC_KEY);
-  function secPerSample() {
-    const def = engineKind === "dml" ? 0.08 : 0.35;
-    try { const v = Number(localStorage.getItem(secKey())); return v > 0.005 && v < 30 ? v : def; } catch (_e) { return def; }
+  /* Correction apprise sur cet ordinateur (durée réelle / durée prévue), une par moteur. */
+  const factorKey = () => "fsal.estFactor." + engineKind;
+  function estFactor() {
+    try { const v = Number(localStorage.getItem(factorKey())); return v > 0.3 && v < 3.5 ? v : 1; } catch (_e) { return 1; }
+  }
+  /* p : réglages de l'analyse { fps, tiles, camera } ; par défaut ceux affichés. */
+  function estimate(range, withFactor, p) {
+    p = p || { fps: Number($("ai-fps").value), tiles: Number($("ai-tiles").value), camera: $("ai-camera").value };
+    return P.estimateDuration({ t0: range[0], t1: range[1], fps: p.fps, tiles: p.tiles, camera: p.camera,
+      calibrations: ai().calibrations, kind: engineKind, factor: withFactor ? estFactor() : 1 });
+  }
+  function learnDuration(range, p, realSeconds) {
+    const plan = estimate(range, false, p);
+    if (plan.images < 20 || !(plan.seconds > 0)) return;   // trop court pour être représentatif
+    const ratio = Math.min(3, Math.max(0.33, realSeconds / plan.seconds));
+    const prev = estFactor();
+    try { localStorage.setItem(factorKey(), String(prev === 1 ? ratio : prev * 0.5 + ratio * 0.5)); } catch (_e) { /* stockage indisponible */ }
   }
   function updateEstimate() {
     const r = readRange(), e = $("ai-est");
     if (!r) { e.textContent = ""; return; }
-    const n = Math.ceil((r[1] - r[0]) * Number($("ai-fps").value)) * Number($("ai-tiles").value);
-    e.textContent = "Durée estimée : environ " + fmtEta(n * secPerSample()) + " (" + n + " détections). Pour un match entier, analysez d'abord un extrait ou choisissez « Rapide ».";
+    const est = estimate(r, true);
+    e.textContent = "Durée estimée : environ " + fmtEta(est.seconds) + " (" + est.images + " images, calcul sur " + (engineKind === "dml" ? "la carte graphique" : "le processeur") + "). Pour un match entier, analysez d'abord un extrait ou choisissez « Rapide ».";
   }
 
   function fmtEta(s) { s = Math.max(0, Math.round(s)); return Math.floor(s / 60) + " min " + String(s % 60).padStart(2, "0") + " s"; }
@@ -541,7 +554,7 @@
     try {
       const camera = $("ai-camera").value;
       const result = await P.analyseVideo({
-        url: App.getVideoUrl(), t0: range[0], t1: range[1], fps, tiles, camera, tol: tol(), L: L(), W: W(), calibrations: a.calibrations, refs: r, signal: abort.signal, api,
+        url: App.getVideoUrl(), t0: range[0], t1: range[1], fps, tiles, camera, tol: tol(), L: L(), W: W(), calibrations: a.calibrations, refs: r, floorMarks: floorMarks(), signal: abort.signal, api,
         onProgress: (p) => {
           $("ai-bar").style.width = Math.round((p.done / p.total) * 100) + "%";
           msg.textContent = "Image " + p.done + " / " + p.total + " — reste environ " + fmtEta(p.eta) + (p.lost ? " (caméra perdue sur cette image)" : "");
@@ -558,10 +571,10 @@
       a.stats = Object.assign({}, res.stats);
       a.suggestedEvents = res.events.map((e, i) => Object.assign({ sid: "s" + Date.now().toString(36) + i }, e));
       a.suggested = a.suggestedEvents.length;
-      a.settings = { fps, tiles, t0: range[0], t1: range[1], tol: tol() };
+      a.settings = { fps, tiles, t0: range[0], t1: range[1], tol: tol(), floorMarks: floorMarks() };
       const lostTxt = result.lost.length ? " Caméra perdue : " + result.lost.map((l) => App.fmt(l[0]) + "–" + App.fmt(l[1])).join(", ") + "." : "";
       msg.textContent = (out.length ? "Analyse terminée : " + out.length + " images, " + a.suggestedEvents.length + " erreur(s) suggérée(s)." : "Analyse terminée, mais aucun joueur n'a été retenu : vérifiez le calibrage et les tenues.") + (result.notes.length ? " " + result.notes.join(" ") : "") + lostTxt;
-      try { localStorage.setItem(secKey(), String(((Date.now() - startedAt) / 1000) / Math.max(1, out.length ? Math.ceil((range[1] - range[0]) * fps) * tiles : 1))); } catch (_e) { /* stockage indisponible */ }
+      if (out.length) learnDuration(range, { fps, tiles, camera }, (Date.now() - startedAt) / 1000);
       renderStats(); renderSuggestions(); refreshLive(); updateEstimate(); App.changed(true);
       okRun = out.length > 0;
     } catch (e) {
@@ -620,6 +633,7 @@
     $("ai-fps").value = String((d.settings && d.settings.fps) || 3); $("ai-tiles").value = String((d.settings && d.settings.tiles) || 1);
     $("ai-camera").value = d.camera || "mobile"; $("ai-tol").value = String((d.settings && d.settings.tol) || 42); $("ai-tol-v").textContent = "(" + $("ai-tol").value + ")";
     pip = null; preview = null; lastTest = null; renderPipette(); $("ai-test-msg").textContent = "";
+    $("ai-marks").checked = !(d.settings && d.settings.floorMarks === false);
     $("ai-t0").value = App.fmt((d.settings && d.settings.t0) || 0);
     $("ai-t1").value = App.fmt((d.settings && d.settings.t1) || state.project.duration || 0);
     fillLandmarks(); renderPoints(); renderCalibs(); renderKits(); renderStats(); renderSuggestions(); updateEstimate();
@@ -634,10 +648,11 @@
       if (l >= 25 && l <= 42) a.L = l;
       if (w >= 15 && w <= 25) a.W = w;
       a.dir = Number($("ai-dir").value); a.flip = $("ai-flip").checked; a.camera = $("ai-camera").value;
-      a.settings = Object.assign({}, a.settings, { fps: Number($("ai-fps").value), tiles: Number($("ai-tiles").value), tol: tol() });
+      a.settings = Object.assign({}, a.settings, { fps: Number($("ai-fps").value), tiles: Number($("ai-tiles").value), tol: tol(), floorMarks: floorMarks() });
       fillLandmarks(); App.changed();
     };
-    ["ai-L", "ai-W", "ai-dir", "ai-flip", "ai-fps", "ai-tiles", "ai-camera"].forEach((id) => $(id).addEventListener("change", upd));
+    ["ai-L", "ai-W", "ai-dir", "ai-flip", "ai-fps", "ai-tiles", "ai-camera", "ai-marks"].forEach((id) => $(id).addEventListener("change", upd));
+    $("ai-camera").addEventListener("change", updateEstimate);
     $("ai-tol").addEventListener("input", () => { $("ai-tol-v").textContent = "(" + tol() + ")"; if (lastTest) renderPreview(); });
     $("ai-tol").addEventListener("change", upd);
     $("ai-test").addEventListener("click", testRecognition);
