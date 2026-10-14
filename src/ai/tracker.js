@@ -8,8 +8,11 @@
   const MAX_SPEED = 9;       // m/s, plafond réaliste d'un joueur de futsal
   const MAX_MISSED = 3;      // secondes sans détection avant d'abandonner une piste
 
+  /* opts.soft (mètres, 0 par défaut) : tenues trop proches, l'équipe lue sur une image n'est pas fiable.
+     Une piste peut alors recevoir une détection d'une autre équipe moyennant ce surcoût (au lieu d'être coupée),
+     et son équipe est un vote où les images récentes pèsent davantage. */
   function Tracker(opts) {
-    this.opts = Object.assign({ maxSpeed: MAX_SPEED, maxMissed: MAX_MISSED }, opts || {});
+    this.opts = Object.assign({ maxSpeed: MAX_SPEED, maxMissed: MAX_MISSED, soft: 0 }, opts || {});
     this.tracks = [];
     this.nextId = 1;
   }
@@ -21,16 +24,18 @@
   /* dets : [{x, y, team, box, conf}] ; renvoie les mêmes objets avec .id. */
   Tracker.prototype.update = function (t, dets) {
     const live = this.tracks.filter((tr) => t - tr.lastT <= this.opts.maxMissed);
+    const soft = this.opts.soft > 0 ? this.opts.soft : 0;
     const pairs = [];
     live.forEach((tr, ti) => {
       const dt = Math.max(0.05, t - tr.lastT);
       const px = tr.x + tr.vx * dt * 0.5, py = tr.y + tr.vy * dt * 0.5;
       const gate = this.opts.maxSpeed * dt + 1;
       dets.forEach((d, di) => {
-        if (!compatible(tr.team, d.team)) return;
+        const ok = compatible(tr.team, d.team);
+        if (!ok && !soft) return;
         const dd = Math.hypot(d.x - px, d.y - py);
         if (dd > gate) return;
-        pairs.push({ ti, di, cost: dd + (tr.team !== d.team ? 1.5 : 0) });
+        pairs.push({ ti, di, cost: dd + (ok ? (tr.team !== d.team ? 1.5 : 0) : soft) });
       });
     });
     pairs.sort((a, b) => a.cost - b.cost);
@@ -43,7 +48,10 @@
       tr.vx = (d.x - tr.x) / dt * 0.6 + tr.vx * 0.4;
       tr.vy = (d.y - tr.y) / dt * 0.6 + tr.vy * 0.4;
       tr.x = d.x; tr.y = d.y; tr.lastT = t; tr.n += 1;
-      if (d.team !== "UNK") tr.votes[d.team] = (tr.votes[d.team] || 0) + 1;
+      if (d.team !== "UNK") {
+        if (soft) Object.keys(tr.votes).forEach((k) => { tr.votes[k] *= 0.9; });
+        tr.votes[d.team] = (tr.votes[d.team] || 0) + 1;
+      }
       tr.team = bestVote(tr.votes, tr.team);
       d.id = tr.id;
     });
