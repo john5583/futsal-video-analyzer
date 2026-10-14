@@ -14,6 +14,7 @@ contextBridge.exposeInMainWorld("fsal", {
   aiDetect: (buffer, opts) => ipcRenderer.invoke("ai:detect", buffer, opts || {}),
   aiSegment: (req) => ipcRenderer.invoke("ai:segment", req),
   aiStop: () => ipcRenderer.invoke("ai:stop"),
+  aiSetDevice: (device) => ipcRenderer.invoke("ai:setDevice", device),
   saveAnimation: (buffer, name, ext) => ipcRenderer.invoke("animation:save", buffer, name, ext),
   showItem: (p) => ipcRenderer.invoke("shell:showItem", p),
   loadAutosave: () => ipcRenderer.invoke("autosave:load"),

@@ -1,21 +1,25 @@
-/* Fil d'exécution d'inférence (YOLOX via onnxruntime-node) : isolé du processus principal pour ne jamais figer l'interface. */
+/* Fil d'exécution d'inférence (YOLOX via onnxruntime-node) : isolé du processus principal pour ne jamais figer l'interface.
+   Le détecteur tourne sur la carte graphique quand elle est plus rapide, sinon sur le processeur (voir backend.js). */
 "use strict";
 const { parentPort, workerData } = require("worker_threads");
 const Y = require("./yolox");
 const SAM = require("./sam");
+const Backend = require("./backend");
 
 let ort = null;
-let session = null;
+let engine = null;
 
 async function init() {
   ort = require("onnxruntime-node");
-  const threads = Math.max(1, Math.min(8, (workerData && workerData.threads) || 4));
-  session = await ort.InferenceSession.create(workerData.modelPath, {
-    executionProviders: ["cpu"], intraOpNumThreads: threads, graphOptimizationLevel: "all"
-  });
+  const opts = {
+    modelPath: workerData.modelPath, threads: Math.max(1, Math.min(8, (workerData && workerData.threads) || 4)),
+    prefer: workerData.prefer === "cpu" ? "cpu" : "auto", platform: process.platform,
+    stateFile: workerData.backendFile || null, signature: workerData.signature || "", size: Y.SIZE
+  };
+  engine = Object.assign(await Backend.open(ort, opts), { ort, opts, onSwitch: (b) => parentPort.postMessage({ type: "backend", backend: b }) });
 }
 
-const ready = init().then(() => parentPort.postMessage({ type: "ready" })).catch((e) => parentPort.postMessage({ type: "fatal", error: String(e && e.message || e) }));
+const ready = init().then(() => parentPort.postMessage({ type: "ready", backend: Backend.info(engine) })).catch((e) => parentPort.postMessage({ type: "fatal", error: String(e && e.message || e) }));
 
 /* Découpe (silhouettes) : le modèle n'est chargé qu'à la première demande. */
 let sam = null;
@@ -49,11 +53,12 @@ parentPort.on("message", async (msg) => {
   if (!msg || msg.type !== "detect") return;
   try {
     await ready;
-    if (!session) throw new Error("Modèle non chargé");
+    if (!engine) throw new Error("Modèle non chargé");
     const rgba = new Uint8ClampedArray(msg.buffer);
     const input = new ort.Tensor("float32", Y.rgbaToTensor(rgba, Y.SIZE), [1, 3, Y.SIZE, Y.SIZE]);
-    const res = await session.run({ [session.inputNames[0]]: input });
-    const out = res[session.outputNames[0]].data;
+    let outName = null;
+    const res = await Backend.run(engine, (s) => { outName = s.outputNames[0]; return { [s.inputNames[0]]: input }; });
+    const out = res[outName].data;
     const dets = Y.postprocess(out, { minPerson: msg.minPerson, minBall: msg.minBall, iou: 0.45 });
     parentPort.postMessage({ type: "result", id: msg.id, dets });
   } catch (e) {
