@@ -3,9 +3,9 @@
    A = mon équipe. Le moteur remet toujours le terrain « de mon équipe qui attaque vers x croissant ».
    Sortie : événements suggérés (à valider par le coach) et statistiques de match. */
 (function (root, factory) {
-  if (typeof module === "object" && module.exports) module.exports = factory();
-  else root.FutsalMatch = factory();
-})(typeof self !== "undefined" ? self : this, function () {
+  if (typeof module === "object" && module.exports) module.exports = factory(require("./context"));
+  else root.FutsalMatch = factory(root.FutsalContext);
+})(typeof self !== "undefined" ? self : this, function (C) {
   "use strict";
 
   const POSSESSION_RADIUS = 2.2;     // m : le ballon est « au pied » du joueur le plus proche
@@ -40,6 +40,7 @@
   const MIN_LOSS_DURATION = 1.0;     // s : une possession adverse plus courte est un duel gagné, pas une perte
   const BALL_CONF_MIN = 0.6;         // part minimale d'images avec ballon détecté autour d'une erreur pour la suggérer
   const CONF_BEFORE = 1.5, CONF_AFTER = 0.5;   // s : fenêtre de cette mesure autour de l'erreur
+  const CONF_CTX = 1.0;              // s : l'erreur est écartée si le jeu est arrêté ou incertain dans la seconde qui précède
 
   /* Possession image par image : "A", "B" ou null (ballon libre ou inconnu).
      Seules les images où le ballon est réellement détecté peuvent confirmer un changement : une position recopiée
@@ -270,21 +271,36 @@
     };
   }
 
-  /* L, W : dimensions du terrain ; dirAt(t) : +1 si mon équipe attaque vers x croissant à l'instant t, -1 sinon. */
+  /* L, W : dimensions du terrain ; dirAt(t) : +1 si mon équipe attaque vers x croissant à l'instant t, -1 sinon ;
+     lost : passages où la caméra est perdue ; span : [t0, t1] plage analysée (pour la part du temps analysée). */
   function analyze(frames, opts) {
     opts = opts || {};
     const L = opts.L || 40, W = opts.W || 20;
     const sorted = (frames || []).filter((f) => f && isFinite(f.t)).slice().sort((a, b) => a.t - b.t);
     const nf = normalize(sorted, L, W, opts.dirAt);
     const poss = possessionSeries(nf);
-    // toutes les erreurs reposent sur la possession, donc sur le ballon : sans ballon fiable, pas d'erreur suggérée
+    const ctx = C.analyzeContext(nf, { L, W, lost: opts.lost, span: opts.span });
+    // toutes les erreurs reposent sur la possession, donc sur le ballon : sans ballon fiable, ou hors du jeu en cours
+    // (arrêt de jeu probable, ballon non visible), pas d'erreur suggérée
     const events = [], uncertain = [];
     detectEvents(nf, poss, L, W).forEach((e) => {
       e.ballConf = ballConfidence(nf, e.t);
-      if (e.ballConf >= BALL_CONF_MIN) events.push(e);
+      const blocked = contextAt(nf, ctx.states, e.t);
+      if (blocked) uncertain.push({ t: e.t, type: e.type, ballConf: e.ballConf, reason: blocked });
+      else if (e.ballConf >= BALL_CONF_MIN) events.push(e);
       else uncertain.push({ t: e.t, type: e.type, ballConf: e.ballConf, reason: "ballon pas assez visible" });
     });
-    return { events, uncertain, stats: stats(nf, poss, L, W), normalized: nf };
+    return { events, uncertain, context: { passages: ctx.passages, reliable: ctx.reliable }, stats: stats(nf, poss, L, W), normalized: nf };
+  }
+
+  /* Raison de ne pas suggérer une erreur à l'instant t : arrêt de jeu ou ballon non visible dans la seconde qui précède. */
+  function contextAt(nf, states, t) {
+    for (let i = 0; i < nf.length; i++) {
+      if (nf[i].t < t - CONF_CTX - 1e-6 || nf[i].t > t + 1e-6) continue;
+      if (states[i].play === "arret") return states[i].why;
+      if (states[i].play === "incertain") return "ballon non visible";
+    }
+    return null;
   }
 
   /* Part des images où le ballon est réellement détecté juste avant et pendant l'instant t (0 à 1, arrondi à 0,01). */

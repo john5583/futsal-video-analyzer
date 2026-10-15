@@ -315,11 +315,16 @@
     const items = (a && a.suggestedEvents) || [];
     $("ai-sugg-count").textContent = "(" + items.length + ")";
     const unc = (a && a.uncertain) || [];
+    const ctxInfo = a && a.context;
     const uncNote = () => {
-      if (!unc.length) return;
-      const p = document.createElement("p"); p.className = "muted"; p.id = "ai-uncertain"; p.style.padding = "6px";
-      p.textContent = unc.length + " situation(s) non signalée(s), ballon pas assez visible : " + unc.map((u) => App.fmt(u.t) + " (" + App.labelOf(u.type) + ")").join(", ") + ".";
-      list.appendChild(p);
+      const add = (id, text) => { const p = document.createElement("p"); p.className = "muted"; p.id = id; p.style.padding = "6px"; p.textContent = text; list.appendChild(p); return p; };
+      if (unc.length) add("ai-uncertain", unc.length + " situation(s) non signalée(s), contexte incertain : " + unc.map((u) => App.fmt(u.t) + " " + App.labelOf(u.type) + " (" + (u.reason || "ballon pas assez visible") + ")").join(", ") + ".");
+      if (ctxInfo && ctxInfo.reliable && ctxInfo.reliable.total > 0) {
+        const r = ctxInfo.reliable;
+        add("ai-reliable", "Temps de jeu analysé de façon fiable : " + Math.round(r.ratio * 100) + " % (" + App.fmt(r.sec) + " sur " + App.fmt(r.total) + ").");
+        const ps = (ctxInfo.passages || []).filter((x) => x.kind !== "tenu");
+        if (ps.length) { const p = add("ai-passages", ""); p.innerHTML = ps.map((x) => esc(x.text)).join("<br>"); }
+      }
     };
     if (!items.length) { list.innerHTML = "<p class=\"muted\" style=\"padding:6px\">Aucune erreur en attente.</p>"; uncNote(); return; }
     items.forEach((e) => {
@@ -579,14 +584,15 @@
       frames = out;
       a.camera = camera; a.lost = result.lost; a.notes = result.notes;
       a.frames = P.compactFrames(frames);
-      const res = M.analyze(frames, { L: L(), W: W(), dirAt });
+      const res = M.analyze(frames, { L: L(), W: W(), dirAt, lost: result.lost, span: range });
       a.stats = Object.assign({}, res.stats);
       a.suggestedEvents = res.events.map((e, i) => Object.assign({ sid: "s" + Date.now().toString(36) + i }, e));
       a.suggested = a.suggestedEvents.length;
       a.uncertain = res.uncertain;
+      a.context = res.context;
       a.settings = { fps, tiles, t0: range[0], t1: range[1], tol: tol(), floorMarks: floorMarks() };
       const lostTxt = result.lost.length ? " Caméra perdue : " + result.lost.map((l) => App.fmt(l[0]) + "–" + App.fmt(l[1])).join(", ") + "." : "";
-      msg.textContent = (out.length ? "Analyse terminée : " + out.length + " images, " + a.suggestedEvents.length + " erreur(s) suggérée(s)" + (res.uncertain.length ? ", " + res.uncertain.length + " non signalée(s) faute de ballon assez visible" : "") + "." : "Analyse terminée, mais aucun joueur n'a été retenu : vérifiez le calibrage et les tenues.") + (result.notes.length ? " " + result.notes.join(" ") : "") + lostTxt;
+      msg.textContent = (out.length ? "Analyse terminée : " + out.length + " images, " + a.suggestedEvents.length + " erreur(s) suggérée(s)" + (res.uncertain.length ? ", " + res.uncertain.length + " non signalée(s) (contexte incertain)" : "") + ". Temps de jeu analysé de façon fiable : " + Math.round(res.context.reliable.ratio * 100) + " %." : "Analyse terminée, mais aucun joueur n'a été retenu : vérifiez le calibrage et les tenues.") + (result.notes.length ? " " + result.notes.join(" ") : "") + lostTxt;
       if (out.length) learnDuration(range, { fps, tiles, camera }, (Date.now() - startedAt) / 1000);
       renderStats(); renderSuggestions(); refreshLive(); updateEstimate(); App.changed(true);
       okRun = out.length > 0;
@@ -772,7 +778,7 @@
     cancelPlacing: () => { placing = null; updateOverlayMode(); },
     getPoints: () => pts.slice(), clearPoints: () => { pts = []; placing = null; renderPoints(); updateOverlayMode(); },
     removePoint: (id) => { pts = pts.filter((q) => q.id !== id); renderPoints(); refreshLive(); },
-    clearAnalysis: () => { frames = []; const a = ai(); a.frames = null; a.stats = null; a.suggestedEvents = []; a.uncertain = []; a.suggested = 0; renderStats(); renderSuggestions(); refreshLive(); },
+    clearAnalysis: () => { frames = []; const a = ai(); a.frames = null; a.stats = null; a.suggestedEvents = []; a.uncertain = []; a.context = null; a.suggested = 0; renderStats(); renderSuggestions(); refreshLive(); },
     setRange: (t0, t1) => { $("ai-t0").value = App.fmt(t0); $("ai-t1").value = App.fmt(t1); updateEstimate(); },
     setCamera: (v) => { $("ai-camera").value = v; $("ai-camera").dispatchEvent(new Event("change")); },
     setDirection: (v) => { $("ai-dir").value = String(v); $("ai-dir").dispatchEvent(new Event("change")); },
