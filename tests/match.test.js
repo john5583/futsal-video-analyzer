@@ -214,3 +214,29 @@ test("rythme : perte sous pressing -> conseil adapté ; ballon touché moins de 
   const duel = M.analyze(make(2.4, false), { L, W });
   assert.ok(!duel.events.some((e) => /perte/.test(e.type)) && !duel.uncertain.some((e) => /perte/.test(e.type)), JSON.stringify(duel.events));
 });
+
+test("bancs : réglage gauche/droite, déduction seulement si les remplaçants sont nombreux et d'un seul côté", () => {
+  assert.equal(M.benchSide({ W, bench: "left" }, 0).y, 0);
+  assert.equal(M.benchSide({ W, bench: "right" }, 0).y, W);
+  assert.equal(M.benchSide({ W, bench: "left", dirAt: () => -1 }, 0).y, W, "mon équipe attaque vers x décroissant : la gauche est de l'autre côté");
+  assert.equal(M.benchSide({ W, benchSeen: { y0: 0, yW: 7 } }, 0), null, "trop peu de remplaçants vus : pas de déduction");
+  assert.equal(M.benchSide({ W, benchSeen: { y0: 12, yW: 25 } }, 0), null, "pas nettement d'un seul côté");
+  const d = M.benchSide({ W, benchSeen: { y0: 2, yW: 40 } }, 0);
+  assert.ok(d && d.y === W && d.side === "right" && d.source === "déduit");
+});
+
+test("remplacement volant : le joueur qui entre par la zone de remplacement n'est pas compté pendant 3 s", () => {
+  const fr = seq(40, (i, t) => {
+    const pl = base();
+    if (t >= 3) pl.push(P(16, "B", 21, Math.max(14, W - 0.5 - (t - 3) * 1.5)));   // entre près du banc (y = W) au milieu
+    return { players: pl, ball: { x: 10.2, y: 6 } };
+  });
+  const r = M.analyze(fr, { L, W, bench: "right" });
+  const at = (t) => r.normalized.find((f) => Math.abs(f.t - t) < 0.01).B.find((p) => p.id === 16);
+  assert.equal(at(4).sub, true);
+  assert.ok(!at(7).sub, "compté normalement après 3 s");
+  assert.equal(r.context.bench.source, "réglage");
+  const auto = M.analyze(fr, { L, W });
+  assert.ok(!auto.normalized.some((f) => f.B.some((p) => p.sub)), "côté inconnu : rien n'est écarté");
+  assert.equal(auto.context.bench, null);
+});

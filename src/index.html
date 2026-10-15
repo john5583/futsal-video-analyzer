@@ -162,6 +162,9 @@
                 <select id="ai-device"><option value="auto">Automatique (carte graphique si plus rapide)</option><option value="cpu">Processeur uniquement</option></select>
               </label>
               <label class="row"><input id="ai-marks" type="checkbox" checked> Ignorer le marquage jaune du sol (à décocher uniquement si votre ballon est jaune)</label>
+              <label title="En regardant le but que votre équipe attaque en première mi-temps. Sert à ne pas compter comme une erreur un joueur qui entre ou sort par la zone de remplacement.">Bancs des remplaçants
+                <select id="ai-bench"><option value="auto">À déduire</option><option value="left">À gauche</option><option value="right">À droite</option></select>
+              </label>
             </div>
             <div class="ai-run">
               <button id="ai-run" class="primary">Lancer l'analyse</button>

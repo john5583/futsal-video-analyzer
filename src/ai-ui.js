@@ -324,6 +324,9 @@
         add("ai-reliable", "Temps de jeu analysé de façon fiable : " + Math.round(r.ratio * 100) + " % (" + App.fmt(r.sec) + " sur " + App.fmt(r.total) + ").");
         const ps = (ctxInfo.passages || []).filter((x) => x.kind !== "tenu");
         if (ps.length) { const p = add("ai-passages", ""); p.innerHTML = ps.map((x) => esc(x.text)).join("<br>"); }
+        add("ai-bench-info", ctxInfo.bench
+          ? "Bancs des remplaçants : " + (ctxInfo.bench.side === "left" ? "à gauche" : "à droite") + " (" + ctxInfo.bench.source + ") ; les joueurs qui entrent ou sortent par la zone de remplacement ne sont pas comptés comme des erreurs."
+          : "Côté des bancs non déduit (trop peu de remplaçants visibles) : choisissez-le dans les réglages ; en attendant, les remplacements volants ne sont pas distingués.");
       }
     };
     if (!items.length) { list.innerHTML = "<p class=\"muted\" style=\"padding:6px\">Aucune erreur en attente.</p>"; uncNote(); return; }
@@ -486,6 +489,19 @@
   /* ---------- test de la reconnaissance sur l'image en pause ---------- */
   function tol() { return Number($("ai-tol").value) || 42; }
   function floorMarks() { return $("ai-marks").checked; }
+  function benchSetting() { return $("ai-bench").value; }
+
+  /* Recalcule les erreurs suggérées à partir des images déjà analysées (après un changement de réglage qui ne demande
+     pas de nouvelle détection, comme le côté des bancs). */
+  function reanalyzeSuggestions() {
+    const a = state.project.ai;
+    if (!a || !frames.length) return;
+    const s = a.settings || {};
+    const res = M.analyze(frames, { L: L(), W: W(), dirAt, lost: a.lost || [], span: [s.t0 || frames[0].t, s.t1 || frames[frames.length - 1].t], bench: benchSetting(), benchSeen: a.benchSeen || null });
+    a.suggestedEvents = res.events.filter((e) => !state.project.events.some((x) => x.type === e.type && Math.abs(x.t - e.t) < 2)).map((e, i) => Object.assign({ sid: "s" + Date.now().toString(36) + i }, e));
+    a.suggested = a.suggestedEvents.length; a.uncertain = res.uncertain; a.context = res.context;
+    renderSuggestions(); App.changed();
+  }
 
   function renderPreview() {
     if (!lastTest) return;
@@ -584,13 +600,14 @@
       frames = out;
       a.camera = camera; a.lost = result.lost; a.notes = result.notes;
       a.frames = P.compactFrames(frames);
-      const res = M.analyze(frames, { L: L(), W: W(), dirAt, lost: result.lost, span: range });
+      a.benchSeen = result.bench || null;
+      const res = M.analyze(frames, { L: L(), W: W(), dirAt, lost: result.lost, span: range, bench: benchSetting(), benchSeen: a.benchSeen });
       a.stats = Object.assign({}, res.stats);
       a.suggestedEvents = res.events.map((e, i) => Object.assign({ sid: "s" + Date.now().toString(36) + i }, e));
       a.suggested = a.suggestedEvents.length;
       a.uncertain = res.uncertain;
       a.context = res.context;
-      a.settings = { fps, tiles, t0: range[0], t1: range[1], tol: tol(), floorMarks: floorMarks() };
+      a.settings = { fps, tiles, t0: range[0], t1: range[1], tol: tol(), floorMarks: floorMarks(), bench: benchSetting() };
       const lostTxt = result.lost.length ? " Caméra perdue : " + result.lost.map((l) => App.fmt(l[0]) + "–" + App.fmt(l[1])).join(", ") + "." : "";
       msg.textContent = (out.length ? "Analyse terminée : " + out.length + " images, " + a.suggestedEvents.length + " erreur(s) suggérée(s)" + (res.uncertain.length ? ", " + res.uncertain.length + " non signalée(s) (contexte incertain)" : "") + ". Temps de jeu analysé de façon fiable : " + Math.round(res.context.reliable.ratio * 100) + " %." : "Analyse terminée, mais aucun joueur n'a été retenu : vérifiez le calibrage et les tenues.") + (result.notes.length ? " " + result.notes.join(" ") : "") + lostTxt;
       if (out.length) learnDuration(range, { fps, tiles, camera }, (Date.now() - startedAt) / 1000);
@@ -653,6 +670,7 @@
     $("ai-camera").value = d.camera || "mobile"; $("ai-tol").value = String((d.settings && d.settings.tol) || 42); $("ai-tol-v").textContent = "(" + $("ai-tol").value + ")";
     pip = null; preview = null; lastTest = null; renderPipette(); $("ai-test-msg").textContent = "";
     $("ai-marks").checked = !(d.settings && d.settings.floorMarks === false);
+    $("ai-bench").value = (d.settings && ["left", "right"].includes(d.settings.bench)) ? d.settings.bench : "auto";
     $("ai-t0").value = App.fmt((d.settings && d.settings.t0) || 0);
     $("ai-t1").value = App.fmt((d.settings && d.settings.t1) || state.project.duration || 0);
     fillLandmarks(); renderPoints(); renderCalibs(); renderKits(); renderStats(); renderSuggestions(); updateEstimate();
@@ -667,10 +685,11 @@
       if (l >= 25 && l <= 42) a.L = l;
       if (w >= 15 && w <= 25) a.W = w;
       a.dir = Number($("ai-dir").value); a.flip = $("ai-flip").checked; a.camera = $("ai-camera").value;
-      a.settings = Object.assign({}, a.settings, { fps: Number($("ai-fps").value), tiles: Number($("ai-tiles").value), tol: tol(), floorMarks: floorMarks() });
+      a.settings = Object.assign({}, a.settings, { fps: Number($("ai-fps").value), tiles: Number($("ai-tiles").value), tol: tol(), floorMarks: floorMarks(), bench: benchSetting() });
       fillLandmarks(); App.changed();
     };
     ["ai-L", "ai-W", "ai-dir", "ai-flip", "ai-fps", "ai-tiles", "ai-camera", "ai-marks"].forEach((id) => $(id).addEventListener("change", upd));
+    $("ai-bench").addEventListener("change", () => { upd(); reanalyzeSuggestions(); });
     $("ai-camera").addEventListener("change", updateEstimate);
     $("ai-tol").addEventListener("input", () => { $("ai-tol-v").textContent = "(" + tol() + ")"; if (lastTest) renderPreview(); });
     $("ai-tol").addEventListener("change", upd);

@@ -50,7 +50,8 @@
     for (let i = 0; i < n; i++) {
       const b = nf[i].ball;
       if (!b || !isOut(b, L, W)) continue;
-      const kind = b.x < -OUT_MARGIN || b.x > L + OUT_MARGIN ? "ligne de but" : "ligne de touche";
+      // vocabulaire du futsal : touche -> rentrée de touche au pied ; ligne de but -> corner ou relance du gardien
+      const kind = b.x < -OUT_MARGIN || b.x > L + OUT_MARGIN ? "ligne de but : corner ou relance du gardien" : "en touche : rentrée de touche au pied";
       let j = i;
       while (j + 1 < n && !(nf[j + 1].ball && isIn(nf[j + 1].ball, L, W))) j++;
       for (let k = i; k <= j; k++) { states[k].play = "arret"; states[k].conf = 0.8; states[k].why = "ballon sorti (" + kind + ")"; }

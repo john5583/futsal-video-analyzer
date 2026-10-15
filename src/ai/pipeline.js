@@ -13,6 +13,8 @@
   const BALL_CAND = 0.05;      // score minimal d'un candidat ballon
   const BALL_STRONG = 0.2;     // score d'une détection de ballon fiable seule
   const MAX_BALL_CANDS = 4;    // candidats gardés par image
+  const BENCH_HALF_LEN = 12;   // m : zone des bancs de part et d'autre de la ligne médiane
+  const BENCH_DEPTH = 6;       // m : profondeur de la zone des bancs derrière la ligne de touche
   const CODE_TEAM = { A: "A", B: "B", a: "GKA", b: "GKB" };
 
   /* Rectangles de détection : 1 = image entière ; 2 = deux moitiés qui se recouvrent (joueurs lointains plus nets). */
@@ -150,7 +152,14 @@
       const fx = (d.x1 + d.x2) / 2 / ctx.scale, fy = d.y2 / ctx.scale;
       const p = HG.apply(ctx.H, fx, fy);
       if (!isFinite(p[0]) || !isFinite(p[1])) return;
-      if (p[0] < -margin || p[0] > ctx.L + margin || p[1] < -margin || p[1] > ctx.W + margin) return;
+      if (p[0] < -margin || p[0] > ctx.L + margin || p[1] < -margin || p[1] > ctx.W + margin) {
+        // personne assise ou debout le long d'une ligne de touche, près du milieu : remplaçants (côté des bancs)
+        if (ctx.bench && Math.abs(p[0] - ctx.L / 2) <= BENCH_HALF_LEN) {
+          if (p[1] < -margin && p[1] >= -BENCH_DEPTH) ctx.bench.y0++;
+          else if (p[1] > ctx.W + margin && p[1] <= ctx.W + BENCH_DEPTH) ctx.bench.yW++;
+        }
+        return;
+      }
       const feat = ctx.img ? K.sample(ctx.img, [d.x1, d.y1, d.x2, d.y2]) : null;
       const close = !!ctx.close;
       if (feat && ctx.refs) K.addAccents(feat, ctx.img, [d.x1, d.y1, d.x2, d.y2], ctx.refs, close ? { close } : undefined);
@@ -439,6 +448,7 @@
     const tracker = new T.Tracker(amb.close ? { soft: 2 } : undefined);
     const frames = [], lost = [];
     let lostStart = null, lastBall = null;
+    const bench = { y0: 0, yW: 0 };      // personnes vues le long de chaque ligne de touche (côté des bancs)
     const trk = { anchor: null, M: IDENTITY, prev: null, t: 0, boxes: [], keys: [], failCount: 0 };
     const STEP = 0.1;
     const grabSmall = (boxes) => { gctx.drawImage(video, 0, 0, gw, gh); return Cam.prepare(gctx.getImageData(0, 0, gw, gh).data, gw, gh, boxes, 4); };
@@ -524,7 +534,7 @@
         continue;
       }
       if (lostStart != null) { lost.push([lostStart, t]); lostStart = null; }
-      frames.push(processDetections(dets, { frameW: cw, frameH: ch, scale, img, H, L: opts.L, W: opts.W, refs: opts.refs, reject: opts.tol, tracker, t, close: amb.close }));
+      frames.push(processDetections(dets, { frameW: cw, frameH: ch, scale, img, H, L: opts.L, W: opts.W, refs: opts.refs, reject: opts.tol, tracker, t, close: amb.close, bench }));
       if (opts.onProgress) {
         const elapsed = (Date.now() - started) / 1000;
         opts.onProgress({ done: i + 1, total: times.length, eta: (elapsed / (i + 1)) * (times.length - i - 1), frame: frames[frames.length - 1] });
@@ -533,7 +543,7 @@
     if (lostStart != null) lost.push([lostStart, times[times.length - 1]]);
     video.removeAttribute("src"); video.load();
     if (lost.length) notes.push("Suivi de la caméra perdu sur " + lost.length + " passage(s) : ces images sont ignorées. Ajoutez un calibrage dans ces passages (flou, caméra trop rapide ou sol sans détails).");
-    return { frames: finalizeFrames(frames, { L: opts.L, W: opts.W, dirAt: opts.dirAt, roles: amb.close || amb.roles }), lost, notes };
+    return { frames: finalizeFrames(frames, { L: opts.L, W: opts.W, dirAt: opts.dirAt, roles: amb.close || amb.roles }), lost, notes, bench };
   }
 
   /* Vignettes JPEG de la vidéo à des instants donnés (illustrations des erreurs acceptées). */

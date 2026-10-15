@@ -27,7 +27,7 @@ test("ballon vu hors du terrain : arrêt jusqu'à sa reprise à l'intérieur (re
   assert.equal(c.states[out].play, "arret");
   assert.equal(c.states[nf.findIndex((f) => f.t === 4)].play, "arret");
   assert.equal(c.states[nf.length - 1].play, "jeu");
-  assert.ok(c.passages.some((p) => p.kind === "arret" && /ligne de touche/.test(p.text)));
+  assert.ok(c.passages.some((p) => p.kind === "arret" && /rentrée de touche au pied/.test(p.text)));
 });
 
 test("ballon caché longtemps pendant le jeu : « non visible, non analysé », jamais inventé", () => {

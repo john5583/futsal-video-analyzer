@@ -19,7 +19,7 @@
   const PLAYING = { A: 1, B: 1, GKA: 1, GKB: 1 };   // arbitres, public et joueurs non identifiés sont ignorés
 
   /* Remet les coordonnées dans le repère « mon équipe attaque vers x croissant ». */
-  function normalize(frames, L, W, dirAt) {
+  function normalize(frames, L, W, dirAt, subs) {
     return frames.map((f) => {
       const flip = (typeof dirAt === "function" ? dirAt(f.t) : 1) < 0;
       const tf = (o) => (flip ? { x: L - o.x, y: W - o.y } : { x: o.x, y: o.y });
@@ -27,6 +27,7 @@
       f.players.forEach((p) => {
         if (!PLAYING[p.team]) return;
         const q = Object.assign({ id: p.id, gk: isGK(p) }, tf(p));
+        if (subs && subs.has(p.id) && subs.get(p.id).some(([a, b]) => f.t >= a - 1e-6 && f.t <= b + 1e-6)) q.sub = true;
         (side(p) === "A" ? A : B).push(q);
       });
       return { t: f.t, A, B, ball: f.ball ? tf(f.ball) : null };
@@ -40,6 +41,11 @@
   const MIN_LOSS_DURATION = 1.0;     // s : une possession adverse plus courte est un duel gagné, pas une perte
   const BALL_CONF_MIN = 0.6;         // part minimale d'images avec ballon détecté autour d'une erreur pour la suggérer
   const CONF_BEFORE = 1.5, CONF_AFTER = 0.5;   // s : fenêtre de cette mesure autour de l'erreur
+  const BENCH_MIN_SEEN = 20;         // remplaçants vus au minimum pour déduire le côté des bancs…
+  const BENCH_RATIO = 3;             // …et au moins 3 fois plus d'un côté que de l'autre
+  const SUB_LINE = 3;                // m : zone de remplacement le long de la ligne de touche des bancs
+  const SUB_ZONE = 10;               // m : de part et d'autre de la ligne médiane
+  const SUB_WINDOW = 3;              // s : durée pendant laquelle le joueur qui entre ou sort n'est pas compté
   const PRESS_DIST = 3;              // m : adversaire qui presse le porteur
   const LONG_POSSESSION = 8;         // s : au-delà, attaque placée
   const MIN_PROGRESS = 4;            // m : avancée adverse minimale pour parler de repli tardif
@@ -108,7 +114,37 @@
     return res;
   }
 
-  function fieldOf(list) { return list.filter((p) => !p.gk); }
+  // joueurs de champ ; un joueur qui entre ou sort par la zone de remplacement n'est pas compté (remplacement volant)
+  function fieldOf(list) { return list.filter((p) => !p.gk && !p.sub); }
+
+  /* Côté des bancs, en coordonnées terrain brutes (y = 0 ou y = W) : réglage « left » / « right » (en regardant le but que
+     mon équipe attaque en première mi-temps), sinon déduit des remplaçants vus le long des lignes de touche
+     (seen = { y0, yW }) s'ils sont assez nombreux et nettement d'un seul côté. Renvoie { y, side, source } ou null. */
+  function benchSide(opts, t0) {
+    const W = opts.W || 20, d0 = typeof opts.dirAt === "function" ? opts.dirAt(t0) : 1;
+    const toRaw = (side) => ((side === "left") === (d0 >= 0) ? 0 : W);   // à gauche = petits y une fois normalisé
+    if (opts.bench === "left" || opts.bench === "right") return { y: toRaw(opts.bench), side: opts.bench, source: "réglage" };
+    const s = opts.benchSeen;
+    if (!s) return null;
+    const hi = Math.max(s.y0, s.yW), lo = Math.min(s.y0, s.yW);
+    if (hi < BENCH_MIN_SEEN || hi < BENCH_RATIO * lo) return null;
+    const y = s.yW > s.y0 ? W : 0;
+    return { y, side: (y === 0) === (d0 >= 0) ? "left" : "right", source: "déduit" };
+  }
+
+  /* Remplacements volants : piste qui commence ou finit dans la zone de remplacement (près de la ligne de touche des bancs,
+     à moins de SUB_ZONE m de la ligne médiane) -> écartée des erreurs de placement pendant SUB_WINDOW s. */
+  function substitutions(frames, L, bench, span) {
+    const subs = new Map();
+    if (!bench || !frames.length) return subs;
+    const first = new Map(), last = new Map();
+    frames.forEach((f) => f.players.forEach((p) => { if (!first.has(p.id)) first.set(p.id, [f.t, p]); last.set(p.id, [f.t, p]); }));
+    const inZone = (p) => Math.abs(p.y - bench.y) <= SUB_LINE && Math.abs(p.x - L / 2) <= SUB_ZONE;
+    const add = (id, a, b) => { if (!subs.has(id)) subs.set(id, []); subs.get(id).push([a, b]); };
+    first.forEach(([t, p], id) => { if (t > span[0] + 1 && inZone(p)) add(id, t, t + SUB_WINDOW); });
+    last.forEach(([t, p], id) => { if (t < span[1] - 1 && inZone(p)) add(id, t - SUB_WINDOW, t); });
+    return subs;
+  }
 
   function detectEvents(nf, poss, L, W) {
     const events = [];
@@ -298,7 +334,9 @@
     opts = opts || {};
     const L = opts.L || 40, W = opts.W || 20;
     const sorted = (frames || []).filter((f) => f && isFinite(f.t)).slice().sort((a, b) => a.t - b.t);
-    const nf = normalize(sorted, L, W, opts.dirAt);
+    const span = opts.span || (sorted.length ? [sorted[0].t, sorted[sorted.length - 1].t] : [0, 0]);
+    const bench = sorted.length ? benchSide(Object.assign({}, opts, { W }), sorted[0].t) : null;
+    const nf = normalize(sorted, L, W, opts.dirAt, substitutions(sorted, L, bench, span));
     const poss = possessionSeries(nf);
     const ctx = C.analyzeContext(nf, { L, W, lost: opts.lost, span: opts.span });
     // toutes les erreurs reposent sur la possession, donc sur le ballon : sans ballon fiable, ou hors du jeu en cours
@@ -312,7 +350,7 @@
       else if (e.ballConf >= BALL_CONF_MIN) events.push(e);
       else uncertain.push({ t: e.t, type: e.type, ballConf: e.ballConf, reason: "ballon pas assez visible" });
     });
-    return { events, uncertain, context: { passages: ctx.passages, reliable: ctx.reliable }, stats: stats(nf, poss, L, W), normalized: nf };
+    return { events, uncertain, context: { passages: ctx.passages, reliable: ctx.reliable, bench: bench ? { side: bench.side, source: bench.source } : null }, stats: stats(nf, poss, L, W), normalized: nf };
   }
 
   /* Raison de ne pas suggérer une erreur à l'instant t : arrêt de jeu ou ballon non visible dans la seconde qui précède. */
@@ -331,5 +369,5 @@
     return win.length ? Math.round((win.filter((f) => f.ball).length / win.length) * 100) / 100 : 0;
   }
 
-  return { analyze, normalize, possessionSeries, ballConfidence, zoneOf, sideOf, POSSESSION_RADIUS, BALL_CONF_MIN };
+  return { analyze, normalize, possessionSeries, ballConfidence, benchSide, zoneOf, sideOf, POSSESSION_RADIUS, BALL_CONF_MIN };
 });
