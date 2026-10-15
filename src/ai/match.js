@@ -36,7 +36,13 @@
   function zoneOf(x, L) { return x < L / 3 ? "DEF" : x < (2 * L) / 3 ? "MED" : "ATT"; }
   function sideOf(y, W) { return y < W / 3 ? "G" : y > (2 * W) / 3 ? "D" : "C"; }
 
-  /* Possession image par image : "A", "B" ou null (ballon libre ou inconnu). */
+  const DUEL_MARGIN = 0.6;           // m : dans un duel, l'adversaire doit être nettement plus près pour prendre le ballon
+  const MIN_LOSS_DURATION = 1.0;     // s : une possession adverse plus courte est un duel gagné, pas une perte
+
+  /* Possession image par image : "A", "B" ou null (ballon libre ou inconnu).
+     Seules les images où le ballon est réellement détecté peuvent confirmer un changement : une position recopiée
+     (ballon gardé BALL_HOLD secondes) est neutre. Dans un duel, l'équipe en possession garde le ballon tant qu'un
+     de ses joueurs est à moins de POSSESSION_RADIUS et que l'adversaire n'est pas plus proche d'au moins DUEL_MARGIN. */
   function possessionSeries(nf) {
     const raw = [];
     let lastBall = null, lastBallT = -Infinity;
@@ -44,24 +50,33 @@
       let ball = f.ball;
       if (ball) { lastBall = ball; lastBallT = f.t; }
       else if (lastBall && f.t - lastBallT <= BALL_HOLD) ball = lastBall;
-      let best = null, bd = POSSESSION_RADIUS;
-      if (ball) {
-        f.A.concat(f.B).forEach((p) => {
-          const d = Math.hypot(p.x - ball.x, p.y - ball.y);
-          if (d < bd) { bd = d; best = p; }
-        });
-      }
-      raw.push(best ? { team: f.A.includes(best) ? "A" : "B", ball, holder: best } : { team: null, ball, holder: null });
+      if (!ball) { raw.push({ team: null, ball: null, holder: null, fresh: false }); return; }
+      const near = (list) => {
+        let p = null, d = Infinity;
+        list.forEach((q) => { const x = Math.hypot(q.x - ball.x, q.y - ball.y); if (x < d) { d = x; p = q; } });
+        return { p, d };
+      };
+      const nA = near(f.A), nB = near(f.B);
+      const best = nA.d <= nB.d ? { team: "A", n: nA } : { team: "B", n: nB };
+      raw.push(best.n.d < POSSESSION_RADIUS
+        ? { team: best.team, ball, holder: best.n.p, fresh: !!f.ball, dA: nA.d, dB: nB.d }
+        : { team: null, ball, holder: null, fresh: !!f.ball });
     });
-    // confirmation : un changement doit durer MIN_POSSESSION_FRAMES images
+    // confirmation : un changement doit durer MIN_POSSESSION_FRAMES images où le ballon est détecté
     const out = [];
     let cur = null, cand = null, count = 0;
     raw.forEach((r) => {
-      if (r.team && r.team !== cur) {
-        if (cand === r.team) count += 1; else { cand = r.team; count = 1; }
-        if (count >= MIN_POSSESSION_FRAMES || cur === null) { cur = r.team; cand = null; count = 0; }
-      } else if (r.team === cur) { cand = null; count = 0; }
-      out.push({ team: r.team ? cur : (cur && r.ball ? cur : null), ball: r.ball, holder: r.holder, raw: r.team });
+      if (!r.fresh && cur) { out.push({ team: cur, ball: r.ball, holder: r.holder, raw: r.team }); return; }
+      let team = r.team;
+      if (team && cur && team !== cur) {
+        const dCur = cur === "A" ? r.dA : r.dB, dNew = cur === "A" ? r.dB : r.dA;
+        if (dCur < POSSESSION_RADIUS && dCur - dNew < DUEL_MARGIN) team = cur;   // duel non tranché
+      }
+      if (team && team !== cur) {
+        if (cand === team) count += 1; else { cand = team; count = 1; }
+        if (count >= MIN_POSSESSION_FRAMES || cur === null) { cur = team; cand = null; count = 0; }
+      } else if (team === cur) { cand = null; count = 0; }
+      out.push({ team: team ? cur : (cur && r.ball ? cur : null), ball: r.ball, holder: r.holder, raw: r.team });
     });
     return out;
   }
@@ -101,6 +116,10 @@
     // 1. Pertes de balle et transitions défensives
     for (let i = 1; i < nf.length; i++) {
       if (!(poss[i - 1].team === "A" && poss[i].team === "B")) continue;
+      // une perte exige que l'adversaire garde le ballon au moins MIN_LOSS_DURATION (sinon duel gagné ou passe ratée reprise)
+      let k = i;
+      while (k + 1 < nf.length && poss[k + 1].team === "B") k++;
+      if (nf[k].t - nf[i].t < MIN_LOSS_DURATION) continue;
       const b0 = poss[i].ball || poss[i - 1].ball;
       if (!b0) continue;
       const zone = zoneOf(b0.x, L);

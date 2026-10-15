@@ -138,3 +138,44 @@ test("entrées vides ou invalides sans exception", () => {
   const noBall = M.analyze(seq(20, () => ({ players: base(), ball: null })), { L, W });
   assert.equal(noBall.events.length, 0);
 });
+
+/* Scène réelle (vidéo 1, 21-24 s, analyse 1.1.8) : relance du gardien vers le n°4, duel serré à 22,0 s puis ballon
+   non détecté (null) ; le n°4 garde le ballon. Distances relevées image par image. */
+test("duel serré et ballon non détecté : pas de fausse perte (scène réelle 21-24 s)", () => {
+  // [t, ballon détecté ?, distance du n°4 (A), distance du n°2 (B)]
+  const rows = [[20.8, 1, 3.0, 0.7], [21.0, 0, 3.0, 0.2], [21.2, 1, 1.5, 2.9], [21.4, 0, 1.3, 3.1], [21.6, 0, 1.2, 3.1],
+    [21.8, 1, 1.0, 3.1], [22.0, 1, 0.9, 0.7], [22.2, 0, 0.9, 0.4], [22.4, 0, 1.0, 0.3], [22.6, 1, 1.3, 1.9]];
+  for (let t = 22.8; t <= 24.01; t += 0.2) rows.push([Math.round(t * 10) / 10, 1, 0.8, 2.5]);
+  const fr = rows.map(([t, seen, dA, dB]) => {
+    const b = { x: 16, y: 4 };
+    return { t, ball: seen ? b : null, players: [P(5, "GKA", 2, 10), P(4, "A", b.x - dA, b.y), P(6, "A", 20, 8), P(2, "B", b.x + dB, b.y), P(3, "B", 24, 12)] };
+  });
+  const r = M.analyze(fr, { L, W });
+  assert.deepEqual(r.events.filter((e) => /perte/.test(e.type)), []);
+  const poss = M.possessionSeries(M.normalize(fr, L, W));
+  assert.ok(poss.filter((p, i) => fr[i].t >= 21.8).every((p) => p.team === "A"), "le n°4 garde le ballon de 21,8 à 24 s");
+});
+
+test("ballon repris par l'adversaire moins de 1 s puis récupéré : pas de perte", () => {
+  const fr = seq(30, (i, t) => {
+    const pl = base();
+    const bx = 12, by = 10;
+    pl[2] = P(3, "A", t >= 2 && t < 2.6 ? bx - 3 : bx - 0.5, by);   // le n°3 perd le contact 0,6 s
+    pl[7] = P(13, "B", t >= 2 && t < 2.6 ? bx + 0.4 : bx + 4, by);
+    return { players: pl, ball: { x: bx, y: by } };
+  });
+  const r = M.analyze(fr, { L, W });
+  assert.deepEqual(r.events.filter((e) => /perte/.test(e.type)).map((e) => e.t), []);
+});
+
+test("une image où le ballon n'est pas détecté ne confirme jamais un changement de possession", () => {
+  const fr = seq(20, (i, t) => {
+    const pl = base();
+    pl[7] = P(13, "B", 10.6, 6);                                   // adversaire collé au ballon dès 1 s
+    const seen = t < 1 || t === 1.2 || t >= 3;                     // détecté une seule fois près de lui, puis plus rien
+    if (t >= 1) pl[1] = P(2, "A", 13, 6);
+    return { players: pl, ball: seen ? { x: 10.2, y: 6 } : null };
+  });
+  const poss = M.possessionSeries(M.normalize(fr, L, W));
+  assert.ok(poss.slice(0, 15).every((p) => p.team === "A"), poss.slice(0, 15).map((p) => p.team).join());
+});
