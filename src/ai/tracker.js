@@ -84,5 +84,39 @@
     return teams;
   }
 
-  return { Tracker, finalTeams, MAX_SPEED };
+  /* Coupe une piste quand le suivi est passé d'une personne à une autre : MIN_RUN détections de suite (au moins) dont
+     l'équipe lue sur l'image contredit celle du morceau en cours (gardiens comptés avec leur équipe, arbitre et inconnus
+     ignorés). Le morceau suivant reçoit un nouvel identifiant ; chaque morceau est ensuite voté séparément.
+     Modifie les identifiants des joueurs de frames (images triées par temps). Renvoie le nombre de coupures. */
+  const MIN_RUN = 3;
+  // gardien reconnu sur l'image : son camp ; sinon l'équipe de champ la plus proche (f, tenues proches) ou l'équipe lue
+  const sideOf = (p) => (p.team === "GKA" ? "GA" : p.team === "GKB" ? "GB" : p.f === "A" || p.f === "B" ? p.f : p.team === "A" || p.team === "B" ? p.team : null);
+  function splitTracks(frames, minRun, firstFreeId) {
+    const run = minRun || MIN_RUN;
+    const byId = new Map();
+    let maxId = (firstFreeId || 1) - 1;
+    frames.forEach((f) => f.players.forEach((p) => { maxId = Math.max(maxId, p.id); if (!byId.has(p.id)) byId.set(p.id, []); byId.get(p.id).push(p); }));
+    let cuts = 0;
+    byId.forEach((list) => {
+      let votes = {}, pending = [], id = list[0].id;
+      list.forEach((p) => {
+        const s = sideOf(p);
+        let cur = null, best = 0;
+        Object.keys(votes).forEach((k) => { if (votes[k] > best) { best = votes[k]; cur = k; } else if (votes[k] === best) cur = null; });
+        if (s && cur && s !== cur) pending.push(p);
+        else if (s && s === cur) { pending.forEach((q) => { q.id = id; }); pending = []; votes[s] = (votes[s] || 0) + 1; }
+        if (pending.length >= run) {
+          id = ++maxId; cuts++;
+          pending.forEach((q) => { q.id = id; });
+          votes = {}; votes[s] = pending.length; pending = [];
+          return;
+        }
+        if (!pending.includes(p)) { p.id = id; if (s && !cur) votes[s] = (votes[s] || 0) + 1; }
+      });
+      pending.forEach((q) => { q.id = id; });
+    });
+    return cuts;
+  }
+
+  return { Tracker, finalTeams, splitTracks, MAX_SPEED };
 });

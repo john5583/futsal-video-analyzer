@@ -227,3 +227,25 @@ test("estimation de durée : correction apprise, jusqu'à 4 fois plus rapide et 
   assert.equal(P.learnFactor(0.6, 0, 50), 0.6);
   assert.equal(P.learnFactor(undefined, 100, NaN), 1);
 });
+
+test("piste passée d'un joueur à un autre : coupée et chaque morceau voté ; gardien non coupé", () => {
+  const T = require("../src/ai/tracker");
+  const fr = [];
+  for (let i = 0; i < 12; i++) {
+    fr.push({ t: i * 0.2, ball: null, players: [
+      { id: 1, team: i < 6 ? "A" : "B", x: 10, y: 5, b: [0, 0, 1, 1] },              // le suivi saute d'un fluo à un adversaire
+      { id: 2, team: i === 4 ? "B" : "A", x: 20, y: 9, b: [0, 0, 1, 1] },            // une seule image mal lue : pas de coupure
+      { id: 3, team: i % 3 ? "GKA" : "B", x: 1.5, y: 10, b: [0, 0, 1, 1] }           // gardien : rôle décidé sur toute la piste
+    ] });
+  }
+  const before = JSON.stringify(fr);
+  const out = P.finalizeFrames(JSON.parse(before));
+  const ids1 = new Set(out.flatMap((f) => f.players.filter((p) => p.x === 10).map((p) => p.id + p.team)));
+  assert.equal(ids1.size, 2, [...ids1].join());
+  assert.equal(out[0].players.find((p) => p.x === 10).team, "A");
+  assert.equal(out[11].players.find((p) => p.x === 10).team, "B");
+  assert.equal(new Set(out.flatMap((f) => f.players.filter((p) => p.x === 20).map((p) => p.id))).size, 1);
+  assert.equal(new Set(out.flatMap((f) => f.players.filter((p) => p.x === 1.5).map((p) => p.id))).size, 1);
+  assert.equal(new Set(P.finalizeFrames(JSON.parse(before), { split: false }).flatMap((f) => f.players.filter((p) => p.x === 10).map((p) => p.id))).size, 1, "réglage split: false -> comportement d'avant");
+  assert.equal(T.splitTracks([{ t: 0, players: [] }]), 0);
+});

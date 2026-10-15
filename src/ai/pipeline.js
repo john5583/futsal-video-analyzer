@@ -224,6 +224,21 @@
     if (BT) BT.apply(frames);
     let teams = T.finalTeams(frames);
     if (opts && opts.L && opts.W && (opts.roles || goalkeeperConflict(frames, teams))) teams = resolveRoles(frames, teams, opts);
+    // pistes de joueurs de champ passées d'une personne à une autre : coupées, puis chaque morceau est voté (A ou B) ;
+    // gardiens et arbitres (rôles décidés sur la piste entière) ne sont pas coupés
+    if (!opts || opts.split !== false) {
+      const field = new Set(Object.keys(teams).filter((id) => teams[id] === "A" || teams[id] === "B").map(Number));
+      const before = new Map();
+      frames.forEach((f) => f.players.forEach((p) => { if (field.has(p.id)) before.set(p, p.id); }));
+      const fieldFrames = frames.map((f) => ({ t: f.t, players: f.players.filter((p) => field.has(p.id)) }));
+      let maxId = 0;
+      frames.forEach((f) => f.players.forEach((p) => { if (p.id > maxId) maxId = p.id; }));
+      if (T.splitTracks(fieldFrames, null, maxId + 1)) {
+        const v = {};
+        before.forEach((_old, p) => { const s = p.f === "A" || p.f === "B" ? p.f : p.team === "A" || p.team === "B" ? p.team : null; if (s) (v[p.id] = v[p.id] || {})[s] = (v[p.id][s] || 0) + 1; });
+        before.forEach((old, p) => { if (p.id !== old && !(p.id in teams)) teams[p.id] = v[p.id] ? ((v[p.id].A || 0) >= (v[p.id].B || 0) ? "A" : "B") : teams[old]; });
+      }
+    }
     const counts = {};
     frames.forEach((f) => f.players.forEach((p) => { counts[p.id] = (counts[p.id] || 0) + 1; }));
     return frames.map((f) => {
