@@ -118,5 +118,45 @@
     return cuts;
   }
 
-  return { Tracker, finalTeams, splitTracks, MAX_SPEED };
+  /* Recolle les morceaux de piste d'une même personne : un morceau qui commence peu après la fin d'un autre (au plus
+     LINK_GAP s), de la même équipe, à une distance qu'un joueur peut parcourir (LINK_SPEED), sans chevauchement dans le
+     temps (chaque fin et chaque début ne servent qu'une fois). Les liaisons les plus proches d'abord.
+     teams : { id: équipe } ; linkable(équipe) : pistes concernées.
+     Renvoie le nombre de liaisons. */
+  const LINK_GAP = 1.0;
+  const LINK_SPEED = 6;      // m/s : vitesse plausible pendant une courte disparition
+  function relinkTracks(frames, teams, linkable) {
+    const span = new Map();
+    frames.forEach((f) => f.players.forEach((p) => {
+      const s = span.get(p.id);
+      if (!s) span.set(p.id, { first: { t: f.t, x: p.x, y: p.y }, last: { t: f.t, x: p.x, y: p.y } });
+      else s.last = { t: f.t, x: p.x, y: p.y };
+    }));
+    const ids = [...span.keys()].filter((id) => linkable(teams[id]));
+    const cand = [];
+    ids.forEach((a) => ids.forEach((b) => {
+      if (a === b || teams[a] !== teams[b]) return;
+      const e = span.get(a).last, s = span.get(b).first, dt = s.t - e.t;
+      if (dt <= 0 || dt > LINK_GAP) return;
+      const d = Math.hypot(s.x - e.x, s.y - e.y);
+      if (d > LINK_SPEED * dt + 0.5) return;
+      cand.push({ a, b, cost: d + dt });
+    }));
+    cand.sort((x, y) => x.cost - y.cost);
+    const root = new Map(), usedEnd = new Set(), usedStart = new Set();
+    const find = (id) => { while (root.has(id)) id = root.get(id); return id; };
+    let n = 0;
+    cand.forEach(({ a, b }) => {
+      if (usedEnd.has(a) || usedStart.has(b)) return;
+      const ra = find(a), rb = find(b);
+      if (ra === rb) return;
+      usedEnd.add(a); usedStart.add(b);
+      root.set(rb, ra);
+      n++;
+    });
+    if (n) frames.forEach((f) => f.players.forEach((p) => { if (root.has(p.id)) p.id = find(p.id); }));
+    return n;
+  }
+
+  return { Tracker, finalTeams, splitTracks, relinkTracks, MAX_SPEED };
 });

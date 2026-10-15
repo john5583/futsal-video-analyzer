@@ -238,6 +238,8 @@
         before.forEach((_old, p) => { const s = p.f === "A" || p.f === "B" ? p.f : p.team === "A" || p.team === "B" ? p.team : null; if (s) (v[p.id] = v[p.id] || {})[s] = (v[p.id][s] || 0) + 1; });
         before.forEach((old, p) => { if (p.id !== old && !(p.id in teams)) teams[p.id] = v[p.id] ? ((v[p.id].A || 0) >= (v[p.id].B || 0) ? "A" : "B") : teams[old]; });
       }
+      // morceaux d'un même joueur séparés par une courte disparition ou une coupure : recollés (même équipe, vitesse plausible)
+      T.relinkTracks(frames, teams, (tm) => tm === "A" || tm === "B");
     }
     const counts = {};
     frames.forEach((f) => f.players.forEach((p) => { counts[p.id] = (counts[p.id] || 0) + 1; }));

@@ -249,3 +249,21 @@ test("piste passée d'un joueur à un autre : coupée et chaque morceau voté ; 
   assert.equal(new Set(P.finalizeFrames(JSON.parse(before), { split: false }).flatMap((f) => f.players.filter((p) => p.x === 10).map((p) => p.id))).size, 1, "réglage split: false -> comportement d'avant");
   assert.equal(T.splitTracks([{ t: 0, players: [] }]), 0);
 });
+
+test("morceaux d'un même joueur recollés après une courte disparition ; pas d'un joueur à un autre trop loin", () => {
+  const T = require("../src/ai/tracker");
+  const fr = [];
+  for (let i = 0; i < 10; i++) {
+    const t = i * 0.2, players = [];
+    if (i < 4) players.push({ id: 1, team: "A", x: 10 + i * 0.5, y: 5 });          // disparaît à 0,6 s…
+    if (i >= 6) players.push({ id: 2, team: "A", x: 10 + i * 0.5, y: 5 });         // …réapparaît à 1,2 s, 3 m plus loin
+    if (i >= 6) players.push({ id: 3, team: "A", x: 30, y: 15 });                  // un autre joueur, loin : pas recollé
+    if (i >= 6) players.push({ id: 4, team: "B", x: 13, y: 5 });                   // autre équipe : jamais recollé
+    fr.push({ t, players });
+  }
+  const teams = { 1: "A", 2: "A", 3: "A", 4: "B" };
+  assert.equal(T.relinkTracks(fr, teams, (tm) => tm === "A" || tm === "B"), 1);
+  assert.ok(fr[8].players.find((p) => p.x === 14).id === 1);
+  assert.equal(fr[8].players.find((p) => p.x === 30).id, 3);
+  assert.equal(fr[8].players.find((p) => p.x === 13).id, 4);
+});
