@@ -83,7 +83,8 @@
     const out = [];
     let cur = null, cand = null, count = 0;
     raw.forEach((r) => {
-      if (!r.fresh && cur) { out.push({ team: cur, ball: r.ball, holder: r.holder, raw: r.team }); return; }
+      // image sans ballon détecté : ne confirme rien ; possession reportée seulement si une position récente est gardée
+      if (!r.fresh && cur) { out.push({ team: r.ball ? cur : null, ball: r.ball, holder: r.holder, raw: r.team }); return; }
       let team = r.team;
       if (team && cur && team !== cur) {
         const dCur = cur === "A" ? r.dA : r.dB, dNew = cur === "A" ? r.dB : r.dA;

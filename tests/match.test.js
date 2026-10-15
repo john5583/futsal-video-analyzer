@@ -177,7 +177,7 @@ test("une image où le ballon n'est pas détecté ne confirme jamais un changeme
     return { players: pl, ball: seen ? { x: 10.2, y: 6 } : null };
   });
   const poss = M.possessionSeries(M.normalize(fr, L, W));
-  assert.ok(poss.slice(0, 15).every((p) => p.team === "A"), poss.slice(0, 15).map((p) => p.team).join());
+  assert.ok(poss.slice(0, 15).every((p) => p.team !== "B"), poss.slice(0, 15).map((p) => p.team).join());
 });
 
 test("pas de ballon fiable, pas d'erreur : la situation est seulement notée comme incertaine", () => {
@@ -239,4 +239,11 @@ test("remplacement volant : le joueur qui entre par la zone de remplacement n'es
   const auto = M.analyze(fr, { L, W });
   assert.ok(!auto.normalized.some((f) => f.B.some((p) => p.sub)), "côté inconnu : rien n'est écarté");
   assert.equal(auto.context.bench, null);
+});
+
+test("ballon absent plus longtemps que la position gardée : possession inconnue, pas reportée", () => {
+  const fr = seq(20, (i, t) => ({ players: base(), ball: t < 1 ? { x: 10.2, y: 6 } : null }));
+  const poss = M.possessionSeries(M.normalize(fr, L, W));
+  assert.equal(poss[2].team, "A");
+  assert.equal(poss[15].team, null);
 });
