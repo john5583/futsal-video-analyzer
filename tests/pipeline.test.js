@@ -74,6 +74,23 @@ test("détections -> joueurs sur le terrain : projection, filtres, équipes, bal
   assert.ok(Math.abs(f.ball.x - 20) < 0.1 && Math.abs(f.ball.y - 10) < 0.1);
 });
 
+test("zone de banc marquée : personne assise ignorée, joueur debout au même endroit gardé", () => {
+  const src = [[0, 0], [1000, 0], [1000, 500], [0, 500]], dst = [[0, 0], [40, 0], [40, 20], [0, 20]];
+  const H = HG.solve(src, dst);
+  const img = solidImg(1000, 500, [40, 120, 60]);
+  const seated = { cls: 0, score: 0.9, x1: 600, y1: 420, x2: 650, y2: 470 };   // 50 x 50 px, pieds en (25 m, 18,8 m)
+  const standing = { cls: 0, score: 0.9, x1: 700, y1: 360, x2: 730, y2: 460 }; // 30 x 100 px, pieds en (28,6 m, 18,4 m)
+  const zones = [{ x1: 24, y1: 17, x2: 30, y2: 21 }];
+  const bench = { y0: 0, yW: 0 };
+  const run = (z) => P.processDetections([seated, standing], { frameW: 1000, frameH: 500, scale: 1, img, H, L: 40, W: 20, tracker: new T.Tracker(), t: 1, benchZones: z, bench });
+  assert.equal(run(undefined).players.length, 2, "sans zone marquée : comportement inchangé");
+  const f = run(zones);
+  assert.equal(f.players.length, 1);
+  assert.ok(Math.abs(f.players[0].x - 28.6) < 0.1);
+  assert.equal(bench.zone, 1);
+  assert.ok(P.inBenchZone([24.6, 17], zones) && !P.inBenchZone([23, 17], zones), "marge de 0,5 m");
+});
+
 test("finalisation : vote d'équipe, pistes éphémères et joueurs non identifiés retirés", () => {
   const mk = (t, players) => ({ t, ball: null, players });
   const frames = [];

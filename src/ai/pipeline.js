@@ -14,7 +14,9 @@
   const BALL_STRONG = 0.2;     // score d'une détection de ballon fiable seule
   const MAX_BALL_CANDS = 4;    // candidats gardés par image
   const BENCH_HALF_LEN = 12;   // m : zone des bancs de part et d'autre de la ligne médiane
-  const BENCH_DEPTH = 6;       // m : profondeur de la zone des bancs derrière la ligne de touche
+  const BENCH_DEPTH = 6;
+  const BENCH_SEATED = 2;      // silhouette assise : moins de 2 fois plus haute que large
+  const BENCH_MARGIN = 0.5;    // m autour d'une zone de banc marquée       // m : profondeur de la zone des bancs derrière la ligne de touche
   const CODE_TEAM = { A: "A", B: "B", a: "GKA", b: "GKB" };
 
   /* Rectangles de détection : 1 = image entière ; 2 = deux moitiés qui se recouvrent (joueurs lointains plus nets). */
@@ -152,6 +154,8 @@
       const fx = (d.x1 + d.x2) / 2 / ctx.scale, fy = d.y2 / ctx.scale;
       const p = HG.apply(ctx.H, fx, fy);
       if (!isFinite(p[0]) || !isFinite(p[1])) return;
+      // personne assise dans une zone de banc marquée : remplaçant, pas un joueur
+      if (inBenchZone(p, ctx.benchZones) && (d.y2 - d.y1) < BENCH_SEATED * (d.x2 - d.x1)) { if (ctx.bench) ctx.bench.zone = (ctx.bench.zone || 0) + 1; return; }
       if (p[0] < -margin || p[0] > ctx.L + margin || p[1] < -margin || p[1] > ctx.W + margin) {
         // personne assise ou debout le long d'une ligne de touche, près du milieu : remplaçants (côté des bancs)
         if (ctx.bench && Math.abs(p[0] - ctx.L / 2) <= BENCH_HALF_LEN) {
@@ -196,6 +200,11 @@
     const h = normalizedProjection(ctx.H, ctx.frameW / ctx.scale, ctx.frameH / ctx.scale);
     if (h) out.h = h;
     return out;
+  }
+
+  /* Pieds p = [x, y] (terrain) dans une des zones de banc (marge BENCH_MARGIN m) ? */
+  function inBenchZone(p, zones) {
+    return Array.isArray(zones) && zones.some((z) => p[0] >= z.x1 - BENCH_MARGIN && p[0] <= z.x2 + BENCH_MARGIN && p[1] >= z.y1 - BENCH_MARGIN && p[1] <= z.y2 + BENCH_MARGIN);
   }
 
   /* Projection image -> terrain de cette image, en coordonnées d'image normalisées (0..1), pour redessiner sur la vidéo
@@ -534,7 +543,7 @@
         continue;
       }
       if (lostStart != null) { lost.push([lostStart, t]); lostStart = null; }
-      frames.push(processDetections(dets, { frameW: cw, frameH: ch, scale, img, H, L: opts.L, W: opts.W, refs: opts.refs, reject: opts.tol, tracker, t, close: amb.close, bench }));
+      frames.push(processDetections(dets, { frameW: cw, frameH: ch, scale, img, H, L: opts.L, W: opts.W, refs: opts.refs, reject: opts.tol, tracker, t, close: amb.close, bench, benchZones: opts.benchZones }));
       if (opts.onProgress) {
         const elapsed = (Date.now() - started) / 1000;
         opts.onProgress({ done: i + 1, total: times.length, eta: (elapsed / (i + 1)) * (times.length - i - 1), frame: frames[frames.length - 1] });
@@ -580,5 +589,5 @@
     return { dets, scale, img: ctx.getImageData(0, 0, cw, ch), width: cw, height: ch };
   }
 
-  return { tileRects, courtRegion, zoomRects, tileToFrame, mergeTiles, isFloorMark, dropFloorMarks, calibrationAt, processDetections, finalizeFrames, compactFrames, expandFrames, frameNear, sampleTimes, startTime, estimateDuration, learnFactor, FACTOR_MIN, FACTOR_MAX, analyseVideo, detectAt, detectCanvas, captureFrames, TEAM_CODE };
+  return { inBenchZone, tileRects, courtRegion, zoomRects, tileToFrame, mergeTiles, isFloorMark, dropFloorMarks, calibrationAt, processDetections, finalizeFrames, compactFrames, expandFrames, frameNear, sampleTimes, startTime, estimateDuration, learnFactor, FACTOR_MIN, FACTOR_MAX, analyseVideo, detectAt, detectCanvas, captureFrames, TEAM_CODE };
 });

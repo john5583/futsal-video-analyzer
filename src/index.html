@@ -165,6 +165,11 @@
               <label title="En regardant le but que votre équipe attaque en première mi-temps. Sert à ne pas compter comme une erreur un joueur qui entre ou sort par la zone de remplacement.">Bancs des remplaçants
                 <select id="ai-bench"><option value="auto">À déduire</option><option value="left">À gauche</option><option value="right">À droite</option></select>
               </label>
+              <div class="row" title="Cliquez deux coins opposés autour d'un banc sur la vidéo (après le calibrage). Les personnes assises dans ces zones ne sont plus comptées comme des joueurs.">
+                <button id="ai-bench-mark" type="button">Marquer un banc (2 clics)</button>
+                <button id="ai-bench-clear" type="button">Effacer les bancs</button>
+                <span id="ai-bench-zones" class="muted"></span>
+              </div>
             </div>
             <div class="ai-run">
               <button id="ai-run" class="primary">Lancer l'analyse</button>
