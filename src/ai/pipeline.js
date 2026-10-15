@@ -2,14 +2,17 @@
    reconnaissance des équipes, suivi, et lecture de la vidéo image par image (navigateur). */
 (function (root, factory) {
   if (typeof module === "object" && module.exports) {
-    module.exports = factory(require("./yolox"), require("./homography"), require("./kit"), require("./tracker"), require("./camera"));
+    module.exports = factory(require("./yolox"), require("./homography"), require("./kit"), require("./tracker"), require("./camera"), require("./balltrack"));
   } else {
-    root.FutsalPipeline = factory(root.FutsalYolox, root.FutsalHomography, root.FutsalKit, root.FutsalTracker, root.FutsalCamera);
+    root.FutsalPipeline = factory(root.FutsalYolox, root.FutsalHomography, root.FutsalKit, root.FutsalTracker, root.FutsalCamera, root.FutsalBallTrack);
   }
-})(typeof self !== "undefined" ? self : this, function (Y, HG, K, T, Cam) {
+})(typeof self !== "undefined" ? self : this, function (Y, HG, K, T, Cam, BT) {
   "use strict";
 
   const TEAM_CODE = { A: "A", B: "B", GKA: "a", GKB: "b" };
+  const BALL_CAND = 0.05;      // score minimal d'un candidat ballon
+  const BALL_STRONG = 0.2;     // score d'une détection de ballon fiable seule
+  const MAX_BALL_CANDS = 4;    // candidats gardés par image
   const CODE_TEAM = { A: "A", B: "B", a: "GKA", b: "GKB" };
 
   /* Rectangles de détection : 1 = image entière ; 2 = deux moitiés qui se recouvrent (joueurs lointains plus nets). */
@@ -135,9 +138,10 @@
         if (ar < 0.8 || ar > 6) return;
         persons.push(d);
       } else if (d.cls === Y.CLASS_BALL) {
-        // un vrai ballon est à peu près carré, petit, et détecté avec une confiance suffisante (évite les marquages au sol)
+        // un vrai ballon est à peu près carré et petit (évite les marquages au sol) ; les détections faibles (dès BALL_CAND)
+        // restent candidates : le choix final se fait sur la trajectoire (balltrack.js)
         const ar = w / Math.max(1, h);
-        if (d.score >= 0.2 && ar >= 0.5 && ar <= 2 && h >= ctx.frameH * 0.004 && h <= ctx.frameH * 0.06) balls.push(d);
+        if (d.score >= BALL_CAND && ar >= 0.5 && ar <= 2 && h >= ctx.frameH * 0.004 && h <= ctx.frameH * 0.06) balls.push(d);
       }
     });
     const margin = 1.5;
@@ -158,13 +162,15 @@
       list.push(item);
     });
     ctx.tracker.update(ctx.t, list);
-    let ball = null;
-    balls.sort((a, b) => b.score - a.score).some((d) => {
+    const bc = [];
+    balls.sort((a, b) => b.score - a.score).forEach((d) => {
+      if (bc.length >= MAX_BALL_CANDS) return;
       const p = HG.apply(ctx.H, ((d.x1 + d.x2) / 2) / ctx.scale, ((d.y1 + d.y2) / 2) / ctx.scale);
-      if (!isFinite(p[0]) || !isFinite(p[1]) || p[0] < -2 || p[0] > ctx.L + 2 || p[1] < -2 || p[1] > ctx.W + 2) return false;
-      ball = { x: Math.round(p[0] * 100) / 100, y: Math.round(p[1] * 100) / 100 };
-      return true;
+      if (!isFinite(p[0]) || !isFinite(p[1]) || p[0] < -2 || p[0] > ctx.L + 2 || p[1] < -2 || p[1] > ctx.W + 2) return;
+      bc.push([Math.round(p[0] * 100) / 100, Math.round(p[1] * 100) / 100, Math.round(d.score * 1000) / 1000]);
     });
+    // aperçu en direct : meilleure détection fiable ; le ballon définitif est choisi en fin d'analyse
+    const ball = bc.length && bc[0][2] >= BALL_STRONG ? { x: bc[0][0], y: bc[0][1] } : null;
     const out = {
       t: ctx.t,
       players: list.map((p) => {
@@ -175,7 +181,8 @@
         if (p.f) o.f = p.f;
         return o;
       }),
-      ball
+      ball,
+      bc
     };
     const h = normalizedProjection(ctx.H, ctx.frameW / ctx.scale, ctx.frameH / ctx.scale);
     if (h) out.h = h;
@@ -196,6 +203,7 @@
      confondables) }. Les rôles ne sont revus par la position que si le cas est ambigu (opts.roles, ou une même équipe
      a souvent deux gardiens à la fois) ; sinon le résultat est celui du simple vote. */
   function finalizeFrames(frames, opts) {
+    if (BT) BT.apply(frames);
     let teams = T.finalTeams(frames);
     if (opts && opts.L && opts.W && (opts.roles || goalkeeperConflict(frames, teams))) teams = resolveRoles(frames, teams, opts);
     const counts = {};
@@ -482,18 +490,18 @@
       if (zoom) {
         const Hprev = mobile && trk.anchor === calib ? HG.mul3(trk.anchor.H, trk.M) : calib.H;
         const crop = courtRegion(Hprev, opts.L, opts.W, scale, cw, ch);
-        dets = dropFloorMarks(await detectCanvas(canvas, 1, opts.api, { minPerson: 0.35, minBall: 0.12 }, crop ? zoomRects(crop) : tileRects(cw, ch, 2)), img, opts.floorMarks);
+        dets = dropFloorMarks(await detectCanvas(canvas, 1, opts.api, { minPerson: 0.35, minBall: BALL_CAND }, crop ? zoomRects(crop) : tileRects(cw, ch, 2)), img, opts.floorMarks);
         // ballon non vu : recherche en gros plan autour de sa dernière position connue
-        if (!dets.some((d) => d.cls === Y.CLASS_BALL) && lastBall && t - lastBall.t <= 1.0) {
+        if (!dets.some((d) => d.cls === Y.CLASS_BALL && d.score >= BALL_STRONG) && lastBall && t - lastBall.t <= 1.0) {
           const half = Math.round(Math.max(90, Math.min(cw, ch) * 0.17));
           const rx = Math.max(0, Math.min(cw - 2 * half, Math.round(lastBall.x - half))), ry = Math.max(0, Math.min(ch - 2 * half, Math.round(lastBall.y - half)));
-          const roi = dropFloorMarks(await detectCanvas(canvas, 1, opts.api, { minPerson: 2, minBall: 0.07 }, [{ x: rx, y: ry, w: Math.min(cw, 2 * half), h: Math.min(ch, 2 * half) }]), img, opts.floorMarks);
+          const roi = dropFloorMarks(await detectCanvas(canvas, 1, opts.api, { minPerson: 2, minBall: BALL_CAND }, [{ x: rx, y: ry, w: Math.min(cw, 2 * half), h: Math.min(ch, 2 * half) }]), img, opts.floorMarks);
           const best = roi.filter((d) => d.cls === Y.CLASS_BALL).sort((a, b) => b.score - a.score)[0];
           if (best) dets.push(best);
         }
-        const bd = dets.filter((d) => d.cls === Y.CLASS_BALL).sort((a, b) => b.score - a.score)[0];
+        const bd = dets.filter((d) => d.cls === Y.CLASS_BALL && d.score >= BALL_STRONG).sort((a, b) => b.score - a.score)[0];
         if (bd) lastBall = { x: (bd.x1 + bd.x2) / 2, y: (bd.y1 + bd.y2) / 2, t };
-      } else dets = dropFloorMarks(await detectCanvas(canvas, opts.tiles, opts.api, { minPerson: 0.35, minBall: 0.12 }), img, opts.floorMarks);
+      } else dets = dropFloorMarks(await detectCanvas(canvas, opts.tiles, opts.api, { minPerson: 0.35, minBall: BALL_CAND }), img, opts.floorMarks);
       let H = calib.H, reliable = true;
       if (mobile) {
         const boxes = dets.filter((d) => d.cls === Y.CLASS_PERSON).map((d) => [d.x1 * (gw / cw), d.y1 * (gh / ch), d.x2 * (gw / cw), d.y2 * (gh / ch)]);
