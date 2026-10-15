@@ -17,6 +17,7 @@
   const HOLD_SPEED = 2.0;      // m/s : joueur qui bouge peu pendant qu'il le tient
   const HOLD_BACK = 2.0;       // m : ballon revu près de ce même joueur
   const AREA = 6;              // m : surface de réparation (futsal)
+  const GK_DIST = 2.5;         // m : ballon arrêté ou pris par le gardien
   const CONF_MIN = 0.6;        // confiance minimale d'une déduction pour être utilisée
 
   const all = (f) => f.A.concat(f.B);
@@ -115,6 +116,16 @@
     if (!b) return null;
     let best = null, bd = HOLD_DIST;
     all(nf[i - 1]).forEach((p) => { const d = Math.hypot(p.x - b.x, p.y - b.y); if (d < bd) { bd = d; best = p; } });
+    // gardien : ballon vu en dernier à moins de GK_DIST m de lui, dans sa surface (+1 m), et allant vers lui (arrêt,
+    // prise en main) ; prioritaire sur un joueur de champ proche (tir arrêté)
+    const prevB = i > 1 ? nf[i - 2].ball : null;
+    all(nf[i - 1]).forEach((p) => {
+      if (!p.gk) return;
+      const own = nf[i - 1].A.includes(p) ? p.x <= AREA + 1 : p.x >= L - AREA - 1;
+      const d = Math.hypot(p.x - b.x, p.y - b.y);
+      const toward = !prevB || Math.hypot(p.x - prevB.x, p.y - prevB.y) > d;
+      if (own && toward && d < GK_DIST) best = p;
+    });
     if (!best) return null;
     const team = nf[i - 1].A.includes(best) ? "A" : "B";
     const track = [];
@@ -125,9 +136,11 @@
     if (sp > HOLD_SPEED * 2) return null;
     const last = track[track.length - 1][1];
     const back = j + 1 < nf.length ? nf[j + 1].ball : null;
-    const inArea = best.gk && (team === "A" ? last.x <= AREA : last.x >= L - AREA);
+    // le gardien prend le ballon dans sa surface (il peut ensuite avancer avant de relancer)
+    const inArea = best.gk && (team === "A" ? best.x <= AREA + 1 : best.x >= L - AREA - 1);
     let conf = 0.3;
     if (back && Math.hypot(back.x - last.x, back.y - last.y) <= HOLD_BACK) conf += 0.4;
+    else if (best.gk && inArea && back && (team === "A" ? back.x > last.x : back.x < last.x)) conf += 0.2;   // relance vers l'avant
     if (inArea) conf += 0.2;
     if (sp <= HOLD_SPEED) conf += 0.1;
     return { id: best.id, team, gk: !!best.gk, conf: Math.round(Math.min(1, conf) * 100) / 100 };

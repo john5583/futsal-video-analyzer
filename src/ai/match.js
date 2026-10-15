@@ -351,7 +351,13 @@
       else if (e.ballConf >= BALL_CONF_MIN) events.push(e);
       else uncertain.push({ t: e.t, type: e.type, ballConf: e.ballConf, reason: "ballon pas assez visible" });
     });
-    return { events, uncertain, context: { passages: ctx.passages, reliable: ctx.reliable, bench: bench ? { side: bench.side, source: bench.source } : null }, stats: stats(nf, poss, L, W), normalized: nf };
+    // possession affichée : un ballon tenu (déduit, confiance suffisante) compte pour l'équipe du joueur qui le tient ;
+    // cette déduction ne sert jamais à déclarer une perte (les erreurs ci-dessus reposent sur le ballon vu)
+    const shown = poss.map((r, i) => {
+      const h = ctx.states[i] && ctx.states[i].held;
+      return !r.team && h && h.conf >= C.CONF_MIN ? Object.assign({}, r, { team: h.team, held: h }) : r;
+    });
+    return { events, uncertain, possession: shown, context: { passages: ctx.passages, reliable: ctx.reliable, bench: bench ? { side: bench.side, source: bench.source } : null }, stats: stats(nf, shown, L, W), normalized: nf };
   }
 
   /* Raison de ne pas suggérer une erreur à l'instant t : arrêt de jeu ou ballon non visible dans la seconde qui précède. */

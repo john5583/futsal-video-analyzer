@@ -74,3 +74,22 @@ test("analyse : une perte pendant un arrêt de jeu n'est pas suggérée, elle es
   assert.ok(r.uncertain.some((u) => /perte/.test(u.type) && /sorti/.test(u.reason)), JSON.stringify(r.uncertain));
   assert.ok(r.context && r.context.reliable.ratio < 1);
 });
+
+test("gardien : ballon arrêté puis relancé vers l'avant -> « tenu par le gardien », compté dans la possession, jamais une perte", () => {
+  // tir adverse vers notre but (x = 0) ; le gardien (A) le prend à 1,8 m, avance de 4 m et relance loin devant
+  const nf = range(0, 7, (t) => {
+    const gx = t < 2 ? 2 : Math.min(6, 2 + (t - 2) * 1.2);
+    const ball = t < 1.2 ? { x: 9 - t * 5, y: 10 } : t > 5 ? { x: 14 + (t - 5) * 4, y: 9 } : null;
+    return frame(t, ball, [pl(1, gx, 10, true), pl(2, 14, 4), pl(3, 15, 16)], [pl(11, 38, 10, true), pl(12, 9, 13), pl(13, 28, 12)]);
+  });
+  const c = C.analyzeContext(nf, { L, W });
+  const s = c.states[nf.findIndex((f) => f.t === 3)];
+  assert.ok(s.held && s.held.gk && s.held.team === "A" && s.held.conf >= C.CONF_MIN, JSON.stringify(s));
+  assert.ok(c.passages.some((p) => p.kind === "tenu" && /gardien/.test(p.text)));
+  // même scène dans l'analyse complète : possession de mon équipe pendant la prise, aucune perte
+  const P = (id, team, x, y) => ({ id, team, x, y });
+  const fr = nf.map((f) => ({ t: f.t, ball: f.ball, players: [P(1, "GKA", f.A[0].x, 10), P(2, "A", 14, 4), P(3, "A", 15, 16), P(11, "GKB", 38, 10), P(12, "B", 9, 13), P(13, "B", 28, 12)] }));
+  const r = M.analyze(fr, { L, W });
+  assert.equal(r.possession[nf.findIndex((f) => f.t === 3)].team, "A");
+  assert.ok(!r.events.some((e) => /perte/.test(e.type)));
+});
