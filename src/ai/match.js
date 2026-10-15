@@ -38,6 +38,8 @@
 
   const DUEL_MARGIN = 0.6;           // m : dans un duel, l'adversaire doit être nettement plus près pour prendre le ballon
   const MIN_LOSS_DURATION = 1.0;     // s : une possession adverse plus courte est un duel gagné, pas une perte
+  const BALL_CONF_MIN = 0.6;         // part minimale d'images avec ballon détecté autour d'une erreur pour la suggérer
+  const CONF_BEFORE = 1.5, CONF_AFTER = 0.5;   // s : fenêtre de cette mesure autour de l'erreur
 
   /* Possession image par image : "A", "B" ou null (ballon libre ou inconnu).
      Seules les images où le ballon est réellement détecté peuvent confirmer un changement : une position recopiée
@@ -275,8 +277,21 @@
     const sorted = (frames || []).filter((f) => f && isFinite(f.t)).slice().sort((a, b) => a.t - b.t);
     const nf = normalize(sorted, L, W, opts.dirAt);
     const poss = possessionSeries(nf);
-    return { events: detectEvents(nf, poss, L, W), stats: stats(nf, poss, L, W), normalized: nf };
+    // toutes les erreurs reposent sur la possession, donc sur le ballon : sans ballon fiable, pas d'erreur suggérée
+    const events = [], uncertain = [];
+    detectEvents(nf, poss, L, W).forEach((e) => {
+      e.ballConf = ballConfidence(nf, e.t);
+      if (e.ballConf >= BALL_CONF_MIN) events.push(e);
+      else uncertain.push({ t: e.t, type: e.type, ballConf: e.ballConf, reason: "ballon pas assez visible" });
+    });
+    return { events, uncertain, stats: stats(nf, poss, L, W), normalized: nf };
   }
 
-  return { analyze, normalize, possessionSeries, zoneOf, sideOf, POSSESSION_RADIUS };
+  /* Part des images où le ballon est réellement détecté juste avant et pendant l'instant t (0 à 1, arrondi à 0,01). */
+  function ballConfidence(nf, t) {
+    const win = nf.filter((f) => f.t >= t - CONF_BEFORE - 1e-6 && f.t <= t + CONF_AFTER + 1e-6);
+    return win.length ? Math.round((win.filter((f) => f.ball).length / win.length) * 100) / 100 : 0;
+  }
+
+  return { analyze, normalize, possessionSeries, ballConfidence, zoneOf, sideOf, POSSESSION_RADIUS, BALL_CONF_MIN };
 });

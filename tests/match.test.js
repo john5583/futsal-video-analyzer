@@ -179,3 +179,20 @@ test("une image où le ballon n'est pas détecté ne confirme jamais un changeme
   const poss = M.possessionSeries(M.normalize(fr, L, W));
   assert.ok(poss.slice(0, 15).every((p) => p.team === "A"), poss.slice(0, 15).map((p) => p.team).join());
 });
+
+test("pas de ballon fiable, pas d'erreur : la situation est seulement notée comme incertaine", () => {
+  // même perte franche qu'au-dessus, mais le ballon n'est détecté que sur 1 image sur 3 autour de la perte
+  const make = (sparse) => seq(40, (i, t) => {
+    const pl = base();
+    let ball;
+    if (t < 2) ball = { x: 9.5, y: 6 };
+    else { const bx = Math.max(3, 9 - (t - 2) * 3); pl[8] = P(14, "B", bx - 0.5, 8); ball = { x: bx, y: 8 }; }
+    return { players: pl, ball: sparse && t > 0.6 && t < 3 && i % 3 ? null : ball };
+  });
+  const ok = M.analyze(make(false), { L, W });
+  assert.ok(ok.events.some((e) => e.type === "perte_zone_def" && e.ballConf === 1));
+  const r = M.analyze(make(true), { L, W });
+  assert.ok(!r.events.some((e) => e.type === "perte_zone_def"), r.events.map((e) => e.type).join());
+  const u = r.uncertain.find((x) => x.type === "perte_zone_def");
+  assert.ok(u && u.ballConf < M.BALL_CONF_MIN && u.reason === "ballon pas assez visible");
+});
