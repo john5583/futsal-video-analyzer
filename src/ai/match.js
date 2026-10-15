@@ -40,6 +40,14 @@
   const MIN_LOSS_DURATION = 1.0;     // s : une possession adverse plus courte est un duel gagné, pas une perte
   const BALL_CONF_MIN = 0.6;         // part minimale d'images avec ballon détecté autour d'une erreur pour la suggérer
   const CONF_BEFORE = 1.5, CONF_AFTER = 0.5;   // s : fenêtre de cette mesure autour de l'erreur
+  const PRESS_DIST = 3;              // m : adversaire qui presse le porteur
+  const LONG_POSSESSION = 8;         // s : au-delà, attaque placée
+  const MIN_PROGRESS = 4;            // m : avancée adverse minimale pour parler de repli tardif
+  const LOSS_NOTE = {
+    pressing: (n) => "Perte sous le pressing adverse (" + n + " adversaires à moins de 3 m) : chercher une solution courte, un appui ou jouer en un temps",
+    attaque_placee: (_n, d) => "Perte en attaque placée après " + Math.round(d) + " s de possession : garder l'équilibre défensif derrière le ballon (couverture du fixo)",
+    transition: () => "Perte en transition : sécuriser la première passe et soutenir le porteur"
+  };
   const CONF_CTX = 1.0;              // s : l'erreur est écartée si le jeu est arrêté ou incertain dans la seconde qui précède
 
   /* Possession image par image : "A", "B" ou null (ballon libre ou inconnu).
@@ -123,11 +131,23 @@
       let k = i;
       while (k + 1 < nf.length && poss[k + 1].team === "B") k++;
       if (nf[k].t - nf[i].t < MIN_LOSS_DURATION) continue;
+      // …et que mon équipe ait vraiment eu le ballon avant (sinon c'est un duel, pas une perte de possession)
+      let s = i - 1;
+      while (s > 0 && poss[s - 1].team === "A") s--;
+      const ownDur = nf[i - 1].t - nf[s].t;
+      const unknownStart = s === 0;                              // possession commencée avant le début de l'analyse
+      if (ownDur < MIN_LOSS_DURATION && !unknownStart) continue;
       const b0 = poss[i].ball || poss[i - 1].ball;
       if (!b0) continue;
+      // rythme au moment de la perte : pressing adverse, attaque placée (possession longue) ou transition
+      const h = poss[i - 1].holder;
+      const pressers = h ? fieldOf(nf[i - 1].B).filter((p) => Math.hypot(p.x - h.x, p.y - h.y) < PRESS_DIST).length : 0;
+      const phase = pressers >= 2 ? "pressing" : ownDur >= LONG_POSSESSION ? "attaque_placee" : "transition";
       const zone = zoneOf(b0.x, L);
       if (zone !== "ATT" && accept(zone === "DEF" ? "perte_zone_def" : "perte_zone_mediane", nf[i].t)) {
-        push(mk(zone === "DEF" ? "perte_zone_def" : "perte_zone_mediane", i, { outcome: "PERTE", note: "Possession perdue (détection automatique)", conf: 0.6 }));
+        const e = mk(zone === "DEF" ? "perte_zone_def" : "perte_zone_mediane", i, { outcome: "PERTE", phase, note: LOSS_NOTE[phase](pressers, ownDur) + " (détection automatique)", conf: 0.6 });
+        if (ownDur < MIN_LOSS_DURATION) e.blocked = "possession précédente inconnue (début de l'analyse)";
+        push(e);
       }
       // fenêtre d'observation de 4 s
       let j = i;
@@ -143,8 +163,9 @@
       const dangerous = minX < 0.25 * L;
       if (maxProgress >= 0.2 * L && attackers >= goalSide + 1 && accept("contre_attaque_subie", nf[i].t)) {
         push(mk("contre_attaque_subie", mid, { outcome: dangerous ? "OCC_CONTRE" : "PERTE", note: attackers + " attaquants contre " + goalSide + " défenseur(s) côté but (détection automatique)", conf: 0.65 }));
-      } else if (goalSide <= 1 && bm.x < 0.55 * L && accept("repli_tardif", nf[i].t)) {
-        push(mk("repli_tardif", mid, { outcome: dangerous ? "OCC_CONTRE" : "PERTE", note: "Seulement " + goalSide + " joueur(s) de champ entre le ballon et notre but (détection automatique)", conf: 0.6 }));
+      } else if (goalSide <= 1 && bm.x < 0.55 * L && maxProgress >= MIN_PROGRESS && accept("repli_tardif", nf[i].t)) {
+        // un repli n'a de sens que si l'adversaire avance vraiment après la perte (transition en cours)
+        push(mk("repli_tardif", mid, { outcome: dangerous ? "OCC_CONTRE" : "PERTE", phase: "transition", note: "Transition adverse après la perte (+" + Math.round(maxProgress) + " m) : seulement " + goalSide + " joueur(s) de champ entre le ballon et notre but, repli à accélérer (détection automatique)", conf: 0.6 }));
       }
     }
 
@@ -285,7 +306,8 @@
     const events = [], uncertain = [];
     detectEvents(nf, poss, L, W).forEach((e) => {
       e.ballConf = ballConfidence(nf, e.t);
-      const blocked = contextAt(nf, ctx.states, e.t);
+      const blocked = e.blocked || contextAt(nf, ctx.states, e.t);
+      delete e.blocked;
       if (blocked) uncertain.push({ t: e.t, type: e.type, ballConf: e.ballConf, reason: blocked });
       else if (e.ballConf >= BALL_CONF_MIN) events.push(e);
       else uncertain.push({ t: e.t, type: e.type, ballConf: e.ballConf, reason: "ballon pas assez visible" });

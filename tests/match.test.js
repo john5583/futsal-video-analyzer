@@ -196,3 +196,21 @@ test("pas de ballon fiable, pas d'erreur : la situation est seulement notée com
   const u = r.uncertain.find((x) => x.type === "perte_zone_def");
   assert.ok(u && u.ballConf < M.BALL_CONF_MIN && u.reason === "ballon pas assez visible");
 });
+
+test("rythme : perte sous pressing -> conseil adapté ; ballon touché moins de 1 s -> duel, pas une perte", () => {
+  const make = (aFrom, pressing) => seq(40, (i, t) => {
+    const pl = base();
+    pl[6] = P(12, "B", pressing ? 11.5 : 28, pressing ? 6.5 : 6);   // deux adversaires collés au porteur (n°2)
+    pl[7] = P(13, "B", pressing ? 9.5 : 30, pressing ? 7 : 14);
+    let ball = null;
+    if (t >= aFrom && t < 3) ball = { x: 10.3, y: 6 };              // n°2 (A) a le ballon
+    else if (t >= 3) { pl[8] = P(14, "B", 9, 8); pl[1] = P(2, "A", 13, 4); ball = { x: 9.4, y: 8 }; }
+    else { pl[8] = P(14, "B", 20.5, 10); ball = { x: 20.2, y: 10 }; }
+    return { players: pl, ball };
+  });
+  const r = M.analyze(make(1, true), { L, W });
+  const loss = r.events.find((e) => /perte/.test(e.type));
+  assert.ok(loss && loss.phase === "pressing" && /pressing adverse/.test(loss.note), JSON.stringify(r.events));
+  const duel = M.analyze(make(2.4, false), { L, W });
+  assert.ok(!duel.events.some((e) => /perte/.test(e.type)) && !duel.uncertain.some((e) => /perte/.test(e.type)), JSON.stringify(duel.events));
+});
