@@ -196,6 +196,9 @@
             <h3 class="ai-h">Erreurs suggérées <span id="ai-sugg-count" class="muted"></span></h3>
             <div class="ai-run"><button id="ai-accept-all">Tout accepter</button><button id="ai-clear-sugg" class="ghost">Tout écarter</button></div>
             <div id="ai-sugg" class="events"></div>
+            <h3 class="ai-h">Questions du programme <span id="ai-q-count" class="muted"></span></h3>
+            <p class="muted" style="padding:0 4px">Ce que le programme ne peut pas trancher seul : il vous le demande au lieu de le deviner. Vos réponses sont retenues dans ce projet. Sans réponse, le cas reste « non analysé ».</p>
+            <div id="ai-q" class="events"></div>
           </details>
         </div>
       </div>
@@ -341,6 +344,7 @@
 <script src="ai/homography.js"></script>
 <script src="ai/kit.js"></script>
 <script src="ai/tracker.js"></script>
+<script src="ai/doubt.js"></script>
 <script src="ai/camera.js"></script>
 <script src="ai/context.js"></script>
 <script src="ai/match.js"></script>

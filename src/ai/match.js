@@ -348,9 +348,10 @@
       e.ballConf = ballConfidence(nf, e.t);
       const blocked = e.blocked || contextAt(nf, ctx.states, e.t);
       delete e.blocked;
-      if (blocked) uncertain.push({ t: e.t, type: e.type, ballConf: e.ballConf, reason: blocked });
+      // l'erreur écartée est gardée avec la question qu'elle soulève : le coach peut la confirmer ou l'écarter
+      if (blocked) uncertain.push({ t: e.t, type: e.type, ballConf: e.ballConf, reason: blocked, event: Object.assign({}, e) });
       else if (e.ballConf >= BALL_CONF_MIN) events.push(e);
-      else uncertain.push({ t: e.t, type: e.type, ballConf: e.ballConf, reason: "ballon pas assez visible" });
+      else uncertain.push({ t: e.t, type: e.type, ballConf: e.ballConf, reason: "ballon pas assez visible", event: Object.assign({}, e) });
     });
     // possession affichée : un ballon tenu (déduit, confiance suffisante) compte pour l'équipe du joueur qui le tient ;
     // cette déduction ne sert jamais à déclarer une perte (les erreurs ci-dessus reposent sur le ballon vu)

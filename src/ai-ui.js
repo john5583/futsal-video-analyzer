@@ -2,7 +2,7 @@
 (function () {
   "use strict";
   const App = window.FSApp;
-  const KB = window.FutsalKB, HG = window.FutsalHomography, K = window.FutsalKit, P = window.FutsalPipeline, M = window.FutsalMatch, E = window.FutsalAnim;
+  const KB = window.FutsalKB, HG = window.FutsalHomography, K = window.FutsalKit, P = window.FutsalPipeline, M = window.FutsalMatch, E = window.FutsalAnim, D = window.FutsalDoubt;
   const $ = (id) => document.getElementById(id);
   const esc = App.esc;
   const video = App.video, api = App.api, state = App.state;
@@ -350,16 +350,17 @@
           : "Côté des bancs non déduit (trop peu de remplaçants visibles) : choisissez-le dans les réglages ; en attendant, les remplacements volants ne sont pas distingués.");
       }
     };
-    if (!items.length) { list.innerHTML = "<p class=\"muted\" style=\"padding:6px\">Aucune erreur en attente.</p>"; uncNote(); return; }
+    if (!items.length) { list.innerHTML = "<p class=\"muted\" style=\"padding:6px\">Aucune erreur en attente.</p>"; uncNote(); renderQuestions(); return; }
     items.forEach((e) => {
       const row = document.createElement("div"); row.className = "ev";
       row.innerHTML = "<button class=\"t\">" + App.fmt(e.t) + "</button><div><div class=\"lbl\"><span class=\"dot\" style=\"background:" + App.phaseColor(e.type) + "\"></span>" + esc(App.labelOf(e.type)) + "</div><div class=\"chips\">" + esc(e.note || "") + (typeof e.ballConf === "number" ? " · ballon vu sur " + Math.round(e.ballConf * 100) + " % des images" : "") + "</div></div><div class=\"btns\"><button data-a=\"ok\" title=\"Ajouter aux événements\">✔</button><button data-a=\"no\" title=\"Écarter\">✖</button></div>";
       row.querySelector(".t").addEventListener("click", () => App.seek(Math.max(0, e.t - 3)));
       row.querySelector("[data-a=ok]").addEventListener("click", () => acceptSuggestion(e));
-      row.querySelector("[data-a=no]").addEventListener("click", () => { a.suggestedEvents = a.suggestedEvents.filter((x) => x.sid !== e.sid); a.suggested = a.suggestedEvents.length; renderSuggestions(); App.changed(); });
+      row.querySelector("[data-a=no]").addEventListener("click", () => { D.reject(memory(), e); a.suggestedEvents = a.suggestedEvents.filter((x) => x.sid !== e.sid); a.suggested = a.suggestedEvents.length; renderSuggestions(); App.changed(); });
       list.appendChild(row);
     });
     uncNote();
+    renderQuestions();
   }
 
   /* Ajoute des suggestions aux événements du projet, avec une vignette de la vidéo à l'instant de l'erreur. */
@@ -546,13 +547,89 @@
     renderBenchZones(); updateOverlayMode(); App.changed();
   }
 
+  /* La mémoire du projet filtre un résultat d'analyse : les erreurs que le coach a écartées ne reviennent pas. */
+  function applyMemory(res) {
+    const mem = memory();
+    res.events = D.filterRejected(res.events, mem);
+    res.uncertain = (res.uncertain || []).filter((u) => !D.isRejected(mem, u));
+    return res;
+  }
+
+  /* ---------- questions du programme ---------- */
+  const qThumbs = new Map();
+  const markBox = (url, b) => new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const c = document.createElement("canvas"); c.width = img.width; c.height = img.height;
+      const g = c.getContext("2d"); g.drawImage(img, 0, 0);
+      if (b) { g.strokeStyle = "#f97316"; g.lineWidth = 3; g.strokeRect((b[0] / 1000) * c.width, (b[1] / 1000) * c.height, ((b[2] - b[0]) / 1000) * c.width, ((b[3] - b[1]) / 1000) * c.height); }
+      resolve(c.toDataURL("image/jpeg", 0.7));
+    };
+    img.onerror = () => resolve(url);
+    img.src = url;
+  });
+  async function loadQuestionThumbs(qs) {
+    const todo = qs.filter((q) => !qThumbs.has(q.key));
+    if (!todo.length || !App.getVideoUrl() || !App.isVideoReady()) return;
+    let shots = [];
+    try { shots = await P.captureFrames(App.getVideoUrl(), todo.map((q) => q.t), 480); } catch (_e) { return; }
+    for (let i = 0; i < todo.length; i++) if (shots[i]) qThumbs.set(todo[i].key, await markBox(shots[i], todo[i].kind === "team" ? todo[i].b : null));
+    document.querySelectorAll("#ai-q img[data-k]").forEach((im) => { const u = qThumbs.get(im.dataset.k); if (u) im.src = u; });
+  }
+  function renderQuestions() {
+    const box = $("ai-q");
+    if (!box) return;
+    const a = state.project.ai;
+    const qs = a ? D.openQuestions({ doubts: a.doubts || [], uncertain: a.uncertain || [], memory: memory() }) : [];
+    $("ai-q-count").textContent = "(" + qs.length + ")";
+    box.innerHTML = "";
+    if (!qs.length) { const p = document.createElement("p"); p.className = "muted"; p.style.padding = "6px"; p.textContent = "Aucune question en attente."; box.appendChild(p); return; }
+    qs.forEach((q) => {
+      const row = document.createElement("div"); row.className = "q";
+      const im = document.createElement("img"); im.dataset.k = q.key; im.alt = ""; if (qThumbs.has(q.key)) im.src = qThumbs.get(q.key);
+      im.addEventListener("click", () => App.seek(Math.max(0, q.t - 1)));
+      const col = document.createElement("div");
+      const tx = document.createElement("div"); tx.className = "qt";
+      const bt = document.createElement("div"); bt.className = "qb";
+      const add = (label, fn) => { const b = document.createElement("button"); b.textContent = label; b.addEventListener("click", fn); bt.appendChild(b); };
+      if (q.kind === "team") {
+        tx.textContent = App.fmt(q.t) + " — Qui est la personne dans le cadre orange ? (" + q.why + ")";
+        add("Mon équipe", () => answerTeam(q, "A")); add("Adversaire", () => answerTeam(q, "B"));
+        add("Gardien (nous)", () => answerTeam(q, "GKA")); add("Gardien adverse", () => answerTeam(q, "GKB"));
+        add("Ni joueur ni gardien", () => answerTeam(q, "NONE"));
+      } else {
+        tx.textContent = App.fmt(q.t) + " — « " + App.labelOf(q.type) + " » a-t-elle eu lieu ? Je n'ai pas pu le confirmer (" + (q.reason || "ballon pas assez visible") + ").";
+        add("Oui, c'est arrivé", () => answerEvent(q, "oui")); add("Non", () => answerEvent(q, "non"));
+      }
+      col.appendChild(tx); col.appendChild(bt);
+      row.appendChild(im); row.appendChild(col); box.appendChild(row);
+    });
+    loadQuestionThumbs(qs);
+  }
+  function answerTeam(q, team) {
+    const a = state.project.ai;
+    D.answerTeam(memory(), q, team);
+    D.applyAnswers(frames, [{ kind: "team", t: q.t, x: q.x, y: q.y, team }]);
+    a.frames = P.compactFrames(frames);
+    a.doubts = (a.doubts || []).filter((d) => d.key !== q.key && !(d.kind === "team" && d.id === q.id));
+    reanalyzeSuggestions(); refreshLive(); App.changed(true);
+  }
+  async function answerEvent(q, verdict) {
+    const a = state.project.ai, mem = memory();
+    D.answerEvent(mem, q, verdict);
+    a.uncertain = (a.uncertain || []).filter((u) => !(u.type === q.type && Math.abs(u.t - q.t) < 2));
+    if (verdict === "oui") await acceptSuggestions([Object.assign({ sid: "q" + Date.now().toString(36) }, q.event, { note: ((q.event && q.event.note) || "") + " — confirmé par vous" })]);
+    renderSuggestions(); App.changed();
+  }
+
   /* Recalcule les erreurs suggérées à partir des images déjà analysées (après un changement de réglage qui ne demande
      pas de nouvelle détection, comme le côté des bancs). */
   function reanalyzeSuggestions() {
     const a = state.project.ai;
     if (!a || !frames.length) return;
     const s = a.settings || {};
-    const res = M.analyze(frames, { L: L(), W: W(), dirAt, lost: a.lost || [], span: [s.t0 || frames[0].t, s.t1 || frames[frames.length - 1].t], bench: benchSetting(), benchSeen: a.benchSeen || null });
+    const res = applyMemory(M.analyze(frames, { L: L(), W: W(), dirAt, lost: a.lost || [], span: [s.t0 || frames[0].t, s.t1 || frames[frames.length - 1].t], bench: benchSetting(), benchSeen: a.benchSeen || null }));
+    a.stats = Object.assign({}, res.stats); renderStats();
     a.suggestedEvents = res.events.filter((e) => !state.project.events.some((x) => x.type === e.type && Math.abs(x.t - e.t) < 2)).map((e, i) => Object.assign({ sid: "s" + Date.now().toString(36) + i }, e));
     a.suggested = a.suggestedEvents.length; a.uncertain = res.uncertain; a.context = res.context;
     renderSuggestions(); App.changed();
@@ -653,10 +730,12 @@
       live = null; preview = null;
       const out = result.frames;
       frames = out;
+      a.doubts = result.doubts || [];
+      D.applyAnswers(frames, memory().answers);
       a.camera = camera; a.lost = result.lost; a.notes = result.notes;
       a.frames = P.compactFrames(frames);
       a.benchSeen = result.bench || null;
-      const res = M.analyze(frames, { L: L(), W: W(), dirAt, lost: result.lost, span: range, bench: benchSetting(), benchSeen: a.benchSeen });
+      const res = applyMemory(M.analyze(frames, { L: L(), W: W(), dirAt, lost: result.lost, span: range, bench: benchSetting(), benchSeen: a.benchSeen }));
       a.stats = Object.assign({}, res.stats);
       a.suggestedEvents = res.events.map((e, i) => Object.assign({ sid: "s" + Date.now().toString(36) + i }, e));
       a.suggested = a.suggestedEvents.length;
@@ -775,7 +854,7 @@
       const a = state.project.ai; if (!a || !a.suggestedEvents.length) return;
       acceptSuggestions(a.suggestedEvents.slice());
     });
-    $("ai-clear-sugg").addEventListener("click", () => { const a = state.project.ai; if (!a) return; a.suggestedEvents = []; a.suggested = 0; renderSuggestions(); App.changed(); });
+    $("ai-clear-sugg").addEventListener("click", () => { const a = state.project.ai; if (!a) return; a.suggestedEvents.forEach((e) => D.reject(memory(), e)); a.suggestedEvents = []; a.suggested = 0; renderSuggestions(); App.changed(); });
     const inVideo = (e) => { const [ix, iy] = toVideo(e.offsetX, e.offsetY); return { ix, iy, ok: ix >= 0 && iy >= 0 && ix <= video.videoWidth && iy <= video.videoHeight }; };
     ["down", "move", "up"].forEach((n) => $("overlay").addEventListener("pointer" + n, (e) => {
       if (!pointer || !pointer[n]) return;

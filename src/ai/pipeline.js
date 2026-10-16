@@ -2,11 +2,11 @@
    reconnaissance des équipes, suivi, et lecture de la vidéo image par image (navigateur). */
 (function (root, factory) {
   if (typeof module === "object" && module.exports) {
-    module.exports = factory(require("./yolox"), require("./homography"), require("./kit"), require("./tracker"), require("./camera"), require("./balltrack"));
+    module.exports = factory(require("./yolox"), require("./homography"), require("./kit"), require("./tracker"), require("./camera"), require("./balltrack"), require("./doubt"));
   } else {
-    root.FutsalPipeline = factory(root.FutsalYolox, root.FutsalHomography, root.FutsalKit, root.FutsalTracker, root.FutsalCamera, root.FutsalBallTrack);
+    root.FutsalPipeline = factory(root.FutsalYolox, root.FutsalHomography, root.FutsalKit, root.FutsalTracker, root.FutsalCamera, root.FutsalBallTrack, root.FutsalDoubt);
   }
-})(typeof self !== "undefined" ? self : this, function (Y, HG, K, T, Cam, BT) {
+})(typeof self !== "undefined" ? self : this, function (Y, HG, K, T, Cam, BT, D) {
   "use strict";
 
   const TEAM_CODE = { A: "A", B: "B", GKA: "a", GKB: "b" };
@@ -270,6 +270,7 @@
       // morceaux d'un même joueur séparés par une courte disparition ou une coupure : recollés (même équipe, vitesse plausible)
       T.relinkTracks(frames, teams, (tm) => tm === "A" || tm === "B");
     }
+    if (opts && Array.isArray(opts.doubts) && D) D.trackDoubts(frames, teams).forEach((q) => opts.doubts.push(q));
     const counts = {};
     frames.forEach((f) => f.players.forEach((p) => { counts[p.id] = (counts[p.id] || 0) + 1; }));
     return frames.map((f) => {
@@ -503,6 +504,7 @@
     const tracker = new T.Tracker(amb.close ? { soft: 2 } : undefined);
     const frames = [], lost = [];
     let lostStart = null, lastBall = null;
+    const doubts = [];                   // pistes dont l'équipe est douteuse (questions au coach)
     const bench = { y0: 0, yW: 0 };      // personnes vues le long de chaque ligne de touche (côté des bancs)
     const benchDrift = [];               // décalage de chaque zone de banc (suivi de la dérive de la caméra)
     const trk = { anchor: null, M: IDENTITY, prev: null, t: 0, boxes: [], keys: [], failCount: 0 };
@@ -599,7 +601,7 @@
     if (lostStart != null) lost.push([lostStart, times[times.length - 1]]);
     video.removeAttribute("src"); video.load();
     if (lost.length) notes.push("Suivi de la caméra perdu sur " + lost.length + " passage(s) : ces images sont ignorées. Ajoutez un calibrage dans ces passages (flou, caméra trop rapide ou sol sans détails).");
-    return { frames: finalizeFrames(frames, { L: opts.L, W: opts.W, dirAt: opts.dirAt, roles: amb.close || amb.roles }), lost, notes, bench };
+    return { frames: finalizeFrames(frames, { L: opts.L, W: opts.W, dirAt: opts.dirAt, roles: amb.close || amb.roles, doubts }), lost, notes, bench, doubts };
   }
 
   /* Vignettes JPEG de la vidéo à des instants donnés (illustrations des erreurs acceptées). */
