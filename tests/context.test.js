@@ -91,5 +91,7 @@ test("gardien : ballon arrêté puis relancé vers l'avant -> « tenu par le gar
   const fr = nf.map((f) => ({ t: f.t, ball: f.ball, players: [P(1, "GKA", f.A[0].x, 10), P(2, "A", 14, 4), P(3, "A", 15, 16), P(11, "GKB", 38, 10), P(12, "B", 9, 13), P(13, "B", 28, 12)] }));
   const r = M.analyze(fr, { L, W });
   assert.equal(r.possession[nf.findIndex((f) => f.t === 3)].team, "A");
+  assert.ok(r.possession[nf.findIndex((f) => f.t === 3)].held, "possession marquée comme déduite");
+  assert.ok(r.stats.possession.deduced > 0 && r.stats.possession.deduced < 100, "part déduite signalée : " + r.stats.possession.deduced);
   assert.ok(!r.events.some((e) => /perte/.test(e.type)));
 });

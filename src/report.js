@@ -35,7 +35,7 @@
     const st = ai.stats;
     let h = "<h2>Analyse vidéo par IA</h2>";
     h += "<div class=\"cards\">" +
-      (st.possession && st.possession.known ? card("Possession (mon équipe)", st.possession.A + " %") + card("Possession (adversaire)", st.possession.B + " %") : "") +
+      (st.possession && st.possession.known ? card("Possession (mon équipe)", st.possession.A + " %") + card("Possession (adversaire)", st.possession.B + " %") + (st.possession.deduced ? card("Dont ballon tenu déduit (non vu)", st.possession.deduced + " %") : "") : "") +
       (st.shape ? card("Profondeur moyenne", st.shape.depth + " m") + card("Largeur moyenne", st.shape.width + " m") : "") +
       card("Erreurs suggérées (à valider)", (ai.suggestedEvents || []).length) + "</div>";
     if ((ai.suggestedEvents || []).length) h += "<p class=\"note\"><b>" + ai.suggestedEvents.length + " erreur(s) détectée(s) par l'IA attendent votre validation</b> : elles ne sont pas encore comptées dans le diagnostic ni dans les corrections. Retournez dans « Analyse vidéo → 4. Résultats » et cliquez sur « Tout accepter » (ou validez-les une par une).</p>";

@@ -14,12 +14,12 @@
   const BALL_STRONG = 0.2;     // score d'une détection de ballon fiable seule
   const MAX_BALL_CANDS = 4;    // candidats gardés par image
   const BENCH_HALF_LEN = 12;   // m : zone des bancs de part et d'autre de la ligne médiane
-  const BENCH_DEPTH = 6;
+  const BENCH_DEPTH = 6;       // m : profondeur de la zone des bancs derrière la ligne de touche
   const BENCH_SEATED = 2;      // silhouette assise : moins de 2 fois plus haute que large
   const BENCH_MARGIN = 0.5;    // m autour d'une zone de banc marquée
   const BENCH_FOLLOW = 2.5;    // m : personnes assises prises en compte autour de la zone pour suivre la dérive
   const BENCH_FOLLOW_RATE = 0.15;   // part de l'écart rattrapée à chaque image (lissage)
-  const BENCH_MAX_DRIFT = 6;   // m : décalage maximal d'une zone       // m : profondeur de la zone des bancs derrière la ligne de touche
+  const BENCH_MAX_DRIFT = 6;   // m : décalage maximal d'une zone
   const CODE_TEAM = { A: "A", B: "B", a: "GKA", b: "GKB" };
 
   /* Rectangles de détection : 1 = image entière ; 2 = deux moitiés qui se recouvrent (joueurs lointains plus nets). */
@@ -503,8 +503,8 @@
     const tracker = new T.Tracker(amb.close ? { soft: 2 } : undefined);
     const frames = [], lost = [];
     let lostStart = null, lastBall = null;
-    const bench = { y0: 0, yW: 0 };
-    const benchDrift = [];               // décalage de chaque zone de banc (suivi de la dérive de la caméra)      // personnes vues le long de chaque ligne de touche (côté des bancs)
+    const bench = { y0: 0, yW: 0 };      // personnes vues le long de chaque ligne de touche (côté des bancs)
+    const benchDrift = [];               // décalage de chaque zone de banc (suivi de la dérive de la caméra)
     const trk = { anchor: null, M: IDENTITY, prev: null, t: 0, boxes: [], keys: [], failCount: 0 };
     const STEP = 0.1;
     const grabSmall = (boxes) => { gctx.drawImage(video, 0, 0, gw, gh); return Cam.prepare(gctx.getImageData(0, 0, gw, gh).data, gw, gh, boxes, 4); };

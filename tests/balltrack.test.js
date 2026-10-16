@@ -53,3 +53,20 @@ test("fin d'analyse : le ballon vient du choix cohérent ; anciennes analyses (s
   const old = P.finalizeFrames([0, 1, 2].map((i) => ({ t: i, players, ball: { x: 3, y: 4 } })));
   assert.ok(old.every((f) => f.ball && f.ball.x === 3));
 });
+
+test("faux ballon fixe et faible (score 0,06 à 0,1) sur 60 images : jamais retenu", () => {
+  for (const score of [0.06, 0.08, 0.1]) {
+    const fr = Array.from({ length: 60 }, (_v, i) => ({ t: i * 0.2, bc: [[30, 5, score]] }));
+    assert.equal(BT.select(fr).filter(Boolean).length, 0, "score " + score);
+  }
+  // à côté d'un vrai ballon fiable : le vrai est gardé, le faux fixe toujours écarté
+  const fr = Array.from({ length: 60 }, (_v, i) => ({ t: i * 0.2, bc: [[30, 5, 0.08], [10 + i * 0.4, 8, 0.6]] }));
+  const pick = BT.select(fr);
+  assert.ok(pick.every((p) => p && p[2] === 0.6));
+});
+
+test("détections faibles : gardées quand elles prolongent une détection fiable, avant comme après", () => {
+  const fr = Array.from({ length: 10 }, (_v, i) => ({ t: i * 0.2, bc: [[10 + i, 8, i === 5 ? 0.5 : 0.08]] }));
+  const pick = BT.select(fr);
+  assert.ok(pick.every(Boolean), pick.map((p) => (p ? p[2] : "-")).join());
+});

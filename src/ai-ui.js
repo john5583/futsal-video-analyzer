@@ -319,6 +319,7 @@
     const cells = [
       ["Possession (moi)", st.possession && st.possession.known ? st.possession.A + " %" : "n.d."],
       ["Possession (adv.)", st.possession && st.possession.known ? st.possession.B + " %" : "n.d."],
+      ["Ballon tenu déduit", st.possession && st.possession.known ? (st.possession.deduced || 0) + " % de la possession" : "n.d."],
       ["Durée analysée", App.fmt(st.duration)],
       ["Profondeur moy.", st.shape ? st.shape.depth + " m" : "n.d."],
       ["Largeur moy.", st.shape ? st.shape.width + " m" : "n.d."],

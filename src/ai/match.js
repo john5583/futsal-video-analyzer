@@ -280,8 +280,8 @@
 
   function stats(nf, poss, L, W) {
     const dt = nf.length > 1 ? (nf[nf.length - 1].t - nf[0].t) / (nf.length - 1) : 0.2;
-    let a = 0, b = 0;
-    poss.forEach((p) => { if (p.team === "A") a++; else if (p.team === "B") b++; });
+    let a = 0, b = 0, held = 0;
+    poss.forEach((p) => { if (p.team === "A") a++; else if (p.team === "B") b++; if (p.held && (p.team === "A" || p.team === "B")) held++; });
     const known = a + b;
     // distances et vitesses par joueur
     const players = {};
@@ -323,7 +323,8 @@
     return {
       duration: nf.length ? +(nf[nf.length - 1].t - nf[0].t).toFixed(1) : 0,
       sampleStep: +dt.toFixed(3),
-      possession: { A: known ? Math.round((a / known) * 100) : null, B: known ? Math.round((b / known) * 100) : null, known: known > 0 },
+      // deduced : part (%) de la possession connue qui vient d'un ballon tenu déduit (non vu), à signaler à l'utilisateur
+      possession: { A: known ? Math.round((a / known) * 100) : null, B: known ? Math.round((b / known) * 100) : null, known: known > 0, deduced: known ? Math.round((held / known) * 100) : 0 },
       players: list, heat: heatPct,
       shape: n ? { width: +(w / n).toFixed(1), depth: +(d / n).toFixed(1) } : null
     };
