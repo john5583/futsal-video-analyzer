@@ -16,7 +16,10 @@
   const BENCH_HALF_LEN = 12;   // m : zone des bancs de part et d'autre de la ligne médiane
   const BENCH_DEPTH = 6;
   const BENCH_SEATED = 2;      // silhouette assise : moins de 2 fois plus haute que large
-  const BENCH_MARGIN = 0.5;    // m autour d'une zone de banc marquée       // m : profondeur de la zone des bancs derrière la ligne de touche
+  const BENCH_MARGIN = 0.5;    // m autour d'une zone de banc marquée
+  const BENCH_FOLLOW = 2.5;    // m : personnes assises prises en compte autour de la zone pour suivre la dérive
+  const BENCH_FOLLOW_RATE = 0.15;   // part de l'écart rattrapée à chaque image (lissage)
+  const BENCH_MAX_DRIFT = 6;   // m : décalage maximal d'une zone       // m : profondeur de la zone des bancs derrière la ligne de touche
   const CODE_TEAM = { A: "A", B: "B", a: "GKA", b: "GKB" };
 
   /* Rectangles de détection : 1 = image entière ; 2 = deux moitiés qui se recouvrent (joueurs lointains plus nets). */
@@ -150,12 +153,17 @@
     });
     const margin = 1.5;
     const list = [];
+    // zones des bancs, décalées pour suivre la dérive du suivi de la caméra (voir followBenches)
+    const zones = shiftedZones(ctx.benchZones, ctx.benchDrift);
+    const seatedIn = zones ? zones.map(() => []) : null;
     persons.forEach((d) => {
       const fx = (d.x1 + d.x2) / 2 / ctx.scale, fy = d.y2 / ctx.scale;
       const p = HG.apply(ctx.H, fx, fy);
       if (!isFinite(p[0]) || !isFinite(p[1])) return;
       // personne assise dans une zone de banc marquée : remplaçant, pas un joueur
-      if (inBenchZone(p, ctx.benchZones) && (d.y2 - d.y1) < BENCH_SEATED * (d.x2 - d.x1)) { if (ctx.bench) ctx.bench.zone = (ctx.bench.zone || 0) + 1; return; }
+      const seated = (d.y2 - d.y1) < BENCH_SEATED * (d.x2 - d.x1);
+      if (seated && zones) zones.forEach((z, i) => { if (inBenchZone(p, [z], BENCH_FOLLOW)) seatedIn[i].push(p); });
+      if (seated && inBenchZone(p, zones)) { if (ctx.bench) ctx.bench.zone = (ctx.bench.zone || 0) + 1; return; }
       if (p[0] < -margin || p[0] > ctx.L + margin || p[1] < -margin || p[1] > ctx.W + margin) {
         // personne assise ou debout le long d'une ligne de touche, près du milieu : remplaçants (côté des bancs)
         if (ctx.bench && Math.abs(p[0] - ctx.L / 2) <= BENCH_HALF_LEN) {
@@ -174,6 +182,7 @@
       if (ctx.refs && ctx.refs.A && ctx.refs.B) item.f = K.classify(feat, { A: ctx.refs.A, B: ctx.refs.B }, close ? { reject: ctx.reject, close } : { reject: ctx.reject }).team;
       list.push(item);
     });
+    if (zones && ctx.benchDrift) followBenches(ctx.benchDrift, seatedIn);
     ctx.tracker.update(ctx.t, list);
     const bc = [];
     balls.sort((a, b) => b.score - a.score).forEach((d) => {
@@ -202,9 +211,29 @@
     return out;
   }
 
-  /* Pieds p = [x, y] (terrain) dans une des zones de banc (marge BENCH_MARGIN m) ? */
-  function inBenchZone(p, zones) {
-    return Array.isArray(zones) && zones.some((z) => p[0] >= z.x1 - BENCH_MARGIN && p[0] <= z.x2 + BENCH_MARGIN && p[1] >= z.y1 - BENCH_MARGIN && p[1] <= z.y2 + BENCH_MARGIN);
+  /* Pieds p = [x, y] (terrain) dans une des zones de banc (marge BENCH_MARGIN m par défaut) ? */
+  function inBenchZone(p, zones, margin) {
+    const m = margin == null ? BENCH_MARGIN : margin;
+    return Array.isArray(zones) && zones.some((z) => p[0] >= z.x1 - m && p[0] <= z.x2 + m && p[1] >= z.y1 - m && p[1] <= z.y2 + m);
+  }
+
+  /* Le suivi de la caméra dérive lentement (plusieurs mètres sur un match) : une zone de banc fixe sur le terrain finit par
+     ne plus couvrir le banc. drift = [{ ref, dx, dy }] par zone : ref = position moyenne des personnes assises la première
+     fois qu'elles sont vues dans la zone ; ensuite la zone suit doucement leur position moyenne (au plus BENCH_MAX_DRIFT m). */
+  function shiftedZones(zones, drift) {
+    if (!Array.isArray(zones) || !zones.length) return null;
+    return zones.map((z, i) => { const d = drift && drift[i] ? drift[i] : { dx: 0, dy: 0 }; return { x1: z.x1 + d.dx, y1: z.y1 + d.dy, x2: z.x2 + d.dx, y2: z.y2 + d.dy }; });
+  }
+  function followBenches(drift, seatedIn) {
+    seatedIn.forEach((list, i) => {
+      if (!list.length) return;
+      const d = drift[i] || (drift[i] = { ref: null, dx: 0, dy: 0 });
+      const mx = list.reduce((s, p) => s + p[0], 0) / list.length, my = list.reduce((s, p) => s + p[1], 0) / list.length;
+      if (!d.ref) { d.ref = [mx - d.dx, my - d.dy]; return; }
+      const clamp = (v) => Math.max(-BENCH_MAX_DRIFT, Math.min(BENCH_MAX_DRIFT, v));
+      d.dx = clamp(d.dx + BENCH_FOLLOW_RATE * (mx - d.ref[0] - d.dx));
+      d.dy = clamp(d.dy + BENCH_FOLLOW_RATE * (my - d.ref[1] - d.dy));
+    });
   }
 
   /* Projection image -> terrain de cette image, en coordonnées d'image normalisées (0..1), pour redessiner sur la vidéo
@@ -474,7 +503,8 @@
     const tracker = new T.Tracker(amb.close ? { soft: 2 } : undefined);
     const frames = [], lost = [];
     let lostStart = null, lastBall = null;
-    const bench = { y0: 0, yW: 0 };      // personnes vues le long de chaque ligne de touche (côté des bancs)
+    const bench = { y0: 0, yW: 0 };
+    const benchDrift = [];               // décalage de chaque zone de banc (suivi de la dérive de la caméra)      // personnes vues le long de chaque ligne de touche (côté des bancs)
     const trk = { anchor: null, M: IDENTITY, prev: null, t: 0, boxes: [], keys: [], failCount: 0 };
     const STEP = 0.1;
     const grabSmall = (boxes) => { gctx.drawImage(video, 0, 0, gw, gh); return Cam.prepare(gctx.getImageData(0, 0, gw, gh).data, gw, gh, boxes, 4); };
@@ -560,7 +590,7 @@
         continue;
       }
       if (lostStart != null) { lost.push([lostStart, t]); lostStart = null; }
-      frames.push(processDetections(dets, { frameW: cw, frameH: ch, scale, img, H, L: opts.L, W: opts.W, refs: opts.refs, reject: opts.tol, tracker, t, close: amb.close, bench, benchZones: opts.benchZones }));
+      frames.push(processDetections(dets, { frameW: cw, frameH: ch, scale, img, H, L: opts.L, W: opts.W, refs: opts.refs, reject: opts.tol, tracker, t, close: amb.close, bench, benchZones: opts.benchZones, benchDrift }));
       if (opts.onProgress) {
         const elapsed = (Date.now() - started) / 1000;
         opts.onProgress({ done: i + 1, total: times.length, eta: (elapsed / (i + 1)) * (times.length - i - 1), frame: frames[frames.length - 1] });
@@ -606,5 +636,5 @@
     return { dets, scale, img: ctx.getImageData(0, 0, cw, ch), width: cw, height: ch };
   }
 
-  return { inBenchZone, tileRects, courtRegion, zoomRects, tileToFrame, mergeTiles, isFloorMark, dropFloorMarks, calibrationAt, processDetections, finalizeFrames, compactFrames, expandFrames, frameNear, sampleTimes, startTime, estimateDuration, learnFactor, FACTOR_MIN, FACTOR_MAX, analyseVideo, detectAt, detectCanvas, captureFrames, TEAM_CODE };
+  return { inBenchZone, shiftedZones, followBenches, tileRects, courtRegion, zoomRects, tileToFrame, mergeTiles, isFloorMark, dropFloorMarks, calibrationAt, processDetections, finalizeFrames, compactFrames, expandFrames, frameNear, sampleTimes, startTime, estimateDuration, learnFactor, FACTOR_MIN, FACTOR_MAX, analyseVideo, detectAt, detectCanvas, captureFrames, TEAM_CODE };
 });

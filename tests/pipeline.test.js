@@ -267,3 +267,21 @@ test("morceaux d'un même joueur recollés après une courte disparition ; pas d
   assert.equal(fr[8].players.find((p) => p.x === 30).id, 3);
   assert.equal(fr[8].players.find((p) => p.x === 13).id, 4);
 });
+
+test("zone de banc : suit la dérive lente du suivi de la caméra (personnes assises), bornée à 6 m", () => {
+  const zones = [{ x1: 10, y1: 18, x2: 14, y2: 21 }];
+  const drift = [];
+  // les remplaçants assis glissent de 3 m vers le bas (y) au fil des images, comme quand le suivi dérive
+  for (let i = 0; i <= 60; i++) {
+    const shift = 3 * i / 60;
+    const z = P.shiftedZones(zones, drift);
+    const seated = [[11, 19.5 - shift], [13, 19.6 - shift]].filter((p) => P.inBenchZone(p, z, 2.5));
+    P.followBenches(drift, [seated]);
+  }
+  assert.ok(Math.abs(drift[0].dy + 3) < 0.6 && Math.abs(drift[0].dx) < 0.2, JSON.stringify(drift));
+  assert.ok(P.inBenchZone([12, 16.5], P.shiftedZones(zones, drift)), "le banc déplacé reste couvert");
+  const far = [{ ref: [0, 0], dx: 0, dy: 0 }];
+  for (let i = 0; i < 200; i++) P.followBenches(far, [[[20, 0]]]);
+  assert.equal(far[0].dx, 6, "décalage plafonné");
+  assert.equal(P.shiftedZones([], []), null);
+});
