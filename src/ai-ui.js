@@ -848,9 +848,18 @@
     return { canvas: c, img: ctx.getImageData(0, 0, w, h), w, h, k, t: video.currentTime, id: "f" + Date.now().toString(36) };
   }
 
+  /* Mémoire du projet : ce que le coach a montré ou répondu (couleurs de but apprises, erreurs écartées, réponses aux questions).
+     Elle vit dans le projet seulement ; rien n'est réutilisé d'un autre projet. */
+  function memory() {
+    const a = ai();
+    if (!a.memory) a.memory = { goalPalettes: [], rejected: [], answers: [] };
+    ["goalPalettes", "rejected", "answers"].forEach((k) => { if (!Array.isArray(a.memory[k])) a.memory[k] = []; });
+    return a.memory;
+  }
+
   const FSAI = window.FSAI = {
     hooks: {}, segmentImpl: null,
-    ai, refs, kitWarnings, grabSam, renderKits, renderStats, renderCalibs, renderPoints, validateCalibration, runAnalysis, updateEstimate,
+    ai, memory, refs, kitWarnings, grabSam, renderKits, renderStats, renderCalibs, renderPoints, validateCalibration, runAnalysis, updateEstimate,
     addLayer: (fn) => { layers.push(fn); }, setPointer: (p) => { pointer = p; updateOverlayMode(); }, redraw: refreshLive,
     beginPlacing: (id) => { if (!App.isVideoReady()) return false; video.pause(); pickRole = null; pip = null; renderPipette(); placing = id; $("ai-landmark").value = id; updateOverlayMode(); return true; },
     cancelPlacing: () => { placing = null; updateOverlayMode(); },

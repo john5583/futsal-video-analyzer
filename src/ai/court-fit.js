@@ -1,4 +1,4 @@
-/* Repérage assisté du terrain : le but (poteaux rayés rouge/blanc) est détecté automatiquement, l'utilisateur désigne la ligne des 6 m
+/* Repérage assisté du terrain : le but (poteaux à bandes de couleur, ou couleur montrée par le coach) est détecté automatiquement, l'utilisateur désigne la ligne des 6 m
    en face du but, et on en déduit la position de la caméra (hauteur, inclinaison, zoom, cap) puis la transformation image → terrain. */
 (function (root, factory) {
   if (typeof module === "object" && module.exports) module.exports = factory(require("./kit"), require("./homography"));
