@@ -84,5 +84,79 @@
     return teams;
   }
 
-  return { Tracker, finalTeams, MAX_SPEED };
+  /* Coupe une piste quand le suivi est passé d'une personne à une autre : MIN_RUN détections de suite (au moins) dont
+     l'équipe lue sur l'image contredit celle du morceau en cours (gardiens comptés avec leur équipe, arbitre et inconnus
+     ignorés). Le morceau suivant reçoit un nouvel identifiant ; chaque morceau est ensuite voté séparément.
+     Modifie les identifiants des joueurs de frames (images triées par temps). Renvoie le nombre de coupures. */
+  const MIN_RUN = 3;
+  // gardien reconnu sur l'image : son camp ; sinon l'équipe de champ la plus proche (f, tenues proches) ou l'équipe lue
+  const sideOf = (p) => (p.team === "GKA" ? "GA" : p.team === "GKB" ? "GB" : p.f === "A" || p.f === "B" ? p.f : p.team === "A" || p.team === "B" ? p.team : null);
+  function splitTracks(frames, minRun, firstFreeId) {
+    const run = minRun || MIN_RUN;
+    const byId = new Map();
+    let maxId = (firstFreeId || 1) - 1;
+    frames.forEach((f) => f.players.forEach((p) => { maxId = Math.max(maxId, p.id); if (!byId.has(p.id)) byId.set(p.id, []); byId.get(p.id).push(p); }));
+    let cuts = 0;
+    byId.forEach((list) => {
+      let votes = {}, pending = [], id = list[0].id;
+      list.forEach((p) => {
+        const s = sideOf(p);
+        let cur = null, best = 0;
+        Object.keys(votes).forEach((k) => { if (votes[k] > best) { best = votes[k]; cur = k; } else if (votes[k] === best) cur = null; });
+        if (s && cur && s !== cur) pending.push(p);
+        else if (s && s === cur) { pending.forEach((q) => { q.id = id; }); pending = []; votes[s] = (votes[s] || 0) + 1; }
+        if (pending.length >= run) {
+          id = ++maxId; cuts++;
+          pending.forEach((q) => { q.id = id; });
+          votes = {}; votes[s] = pending.length; pending = [];
+          return;
+        }
+        if (!pending.includes(p)) { p.id = id; if (s && !cur) votes[s] = (votes[s] || 0) + 1; }
+      });
+      pending.forEach((q) => { q.id = id; });
+    });
+    return cuts;
+  }
+
+  /* Recolle les morceaux de piste d'une même personne : un morceau qui commence peu après la fin d'un autre (au plus
+     LINK_GAP s), de la même équipe, à une distance qu'un joueur peut parcourir (LINK_SPEED), sans chevauchement dans le
+     temps (chaque fin et chaque début ne servent qu'une fois). Les liaisons les plus proches d'abord.
+     teams : { id: équipe } ; linkable(équipe) : pistes concernées.
+     Renvoie le nombre de liaisons. */
+  const LINK_GAP = 1.0;
+  const LINK_SPEED = 6;      // m/s : vitesse plausible pendant une courte disparition
+  function relinkTracks(frames, teams, linkable) {
+    const span = new Map();
+    frames.forEach((f) => f.players.forEach((p) => {
+      const s = span.get(p.id);
+      if (!s) span.set(p.id, { first: { t: f.t, x: p.x, y: p.y }, last: { t: f.t, x: p.x, y: p.y } });
+      else s.last = { t: f.t, x: p.x, y: p.y };
+    }));
+    const ids = [...span.keys()].filter((id) => linkable(teams[id]));
+    const cand = [];
+    ids.forEach((a) => ids.forEach((b) => {
+      if (a === b || teams[a] !== teams[b]) return;
+      const e = span.get(a).last, s = span.get(b).first, dt = s.t - e.t;
+      if (dt <= 0 || dt > LINK_GAP) return;
+      const d = Math.hypot(s.x - e.x, s.y - e.y);
+      if (d > LINK_SPEED * dt + 0.5) return;
+      cand.push({ a, b, cost: d + dt });
+    }));
+    cand.sort((x, y) => x.cost - y.cost);
+    const root = new Map(), usedEnd = new Set(), usedStart = new Set();
+    const find = (id) => { while (root.has(id)) id = root.get(id); return id; };
+    let n = 0;
+    cand.forEach(({ a, b }) => {
+      if (usedEnd.has(a) || usedStart.has(b)) return;
+      const ra = find(a), rb = find(b);
+      if (ra === rb) return;
+      usedEnd.add(a); usedStart.add(b);
+      root.set(rb, ra);
+      n++;
+    });
+    if (n) frames.forEach((f) => f.players.forEach((p) => { if (root.has(p.id)) p.id = find(p.id); }));
+    return n;
+  }
+
+  return { Tracker, finalTeams, splitTracks, relinkTracks, MAX_SPEED };
 });

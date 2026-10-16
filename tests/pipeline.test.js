@@ -74,6 +74,23 @@ test("détections -> joueurs sur le terrain : projection, filtres, équipes, bal
   assert.ok(Math.abs(f.ball.x - 20) < 0.1 && Math.abs(f.ball.y - 10) < 0.1);
 });
 
+test("zone de banc marquée : personne assise ignorée, joueur debout au même endroit gardé", () => {
+  const src = [[0, 0], [1000, 0], [1000, 500], [0, 500]], dst = [[0, 0], [40, 0], [40, 20], [0, 20]];
+  const H = HG.solve(src, dst);
+  const img = solidImg(1000, 500, [40, 120, 60]);
+  const seated = { cls: 0, score: 0.9, x1: 600, y1: 420, x2: 650, y2: 470 };   // 50 x 50 px, pieds en (25 m, 18,8 m)
+  const standing = { cls: 0, score: 0.9, x1: 700, y1: 360, x2: 730, y2: 460 }; // 30 x 100 px, pieds en (28,6 m, 18,4 m)
+  const zones = [{ x1: 24, y1: 17, x2: 30, y2: 21 }];
+  const bench = { y0: 0, yW: 0 };
+  const run = (z) => P.processDetections([seated, standing], { frameW: 1000, frameH: 500, scale: 1, img, H, L: 40, W: 20, tracker: new T.Tracker(), t: 1, benchZones: z, bench });
+  assert.equal(run(undefined).players.length, 2, "sans zone marquée : comportement inchangé");
+  const f = run(zones);
+  assert.equal(f.players.length, 1);
+  assert.ok(Math.abs(f.players[0].x - 28.6) < 0.1);
+  assert.equal(bench.zone, 1);
+  assert.ok(P.inBenchZone([24.6, 17], zones) && !P.inBenchZone([23, 17], zones), "marge de 0,5 m");
+});
+
 test("finalisation : vote d'équipe, pistes éphémères et joueurs non identifiés retirés", () => {
   const mk = (t, players) => ({ t, ball: null, players });
   const frames = [];
@@ -209,4 +226,62 @@ test("estimation de durée : correction apprise, jusqu'à 4 fois plus rapide et 
   // données inutilisables : on garde la correction connue
   assert.equal(P.learnFactor(0.6, 0, 50), 0.6);
   assert.equal(P.learnFactor(undefined, 100, NaN), 1);
+});
+
+test("piste passée d'un joueur à un autre : coupée et chaque morceau voté ; gardien non coupé", () => {
+  const T = require("../src/ai/tracker");
+  const fr = [];
+  for (let i = 0; i < 12; i++) {
+    fr.push({ t: i * 0.2, ball: null, players: [
+      { id: 1, team: i < 6 ? "A" : "B", x: 10, y: 5, b: [0, 0, 1, 1] },              // le suivi saute d'un fluo à un adversaire
+      { id: 2, team: i === 4 ? "B" : "A", x: 20, y: 9, b: [0, 0, 1, 1] },            // une seule image mal lue : pas de coupure
+      { id: 3, team: i % 3 ? "GKA" : "B", x: 1.5, y: 10, b: [0, 0, 1, 1] }           // gardien : rôle décidé sur toute la piste
+    ] });
+  }
+  const before = JSON.stringify(fr);
+  const out = P.finalizeFrames(JSON.parse(before));
+  const ids1 = new Set(out.flatMap((f) => f.players.filter((p) => p.x === 10).map((p) => p.id + p.team)));
+  assert.equal(ids1.size, 2, [...ids1].join());
+  assert.equal(out[0].players.find((p) => p.x === 10).team, "A");
+  assert.equal(out[11].players.find((p) => p.x === 10).team, "B");
+  assert.equal(new Set(out.flatMap((f) => f.players.filter((p) => p.x === 20).map((p) => p.id))).size, 1);
+  assert.equal(new Set(out.flatMap((f) => f.players.filter((p) => p.x === 1.5).map((p) => p.id))).size, 1);
+  assert.equal(new Set(P.finalizeFrames(JSON.parse(before), { split: false }).flatMap((f) => f.players.filter((p) => p.x === 10).map((p) => p.id))).size, 1, "réglage split: false -> comportement d'avant");
+  assert.equal(T.splitTracks([{ t: 0, players: [] }]), 0);
+});
+
+test("morceaux d'un même joueur recollés après une courte disparition ; pas d'un joueur à un autre trop loin", () => {
+  const T = require("../src/ai/tracker");
+  const fr = [];
+  for (let i = 0; i < 10; i++) {
+    const t = i * 0.2, players = [];
+    if (i < 4) players.push({ id: 1, team: "A", x: 10 + i * 0.5, y: 5 });          // disparaît à 0,6 s…
+    if (i >= 6) players.push({ id: 2, team: "A", x: 10 + i * 0.5, y: 5 });         // …réapparaît à 1,2 s, 3 m plus loin
+    if (i >= 6) players.push({ id: 3, team: "A", x: 30, y: 15 });                  // un autre joueur, loin : pas recollé
+    if (i >= 6) players.push({ id: 4, team: "B", x: 13, y: 5 });                   // autre équipe : jamais recollé
+    fr.push({ t, players });
+  }
+  const teams = { 1: "A", 2: "A", 3: "A", 4: "B" };
+  assert.equal(T.relinkTracks(fr, teams, (tm) => tm === "A" || tm === "B"), 1);
+  assert.ok(fr[8].players.find((p) => p.x === 14).id === 1);
+  assert.equal(fr[8].players.find((p) => p.x === 30).id, 3);
+  assert.equal(fr[8].players.find((p) => p.x === 13).id, 4);
+});
+
+test("zone de banc : suit la dérive lente du suivi de la caméra (personnes assises), bornée à 6 m", () => {
+  const zones = [{ x1: 10, y1: 18, x2: 14, y2: 21 }];
+  const drift = [];
+  // les remplaçants assis glissent de 3 m vers le bas (y) au fil des images, comme quand le suivi dérive
+  for (let i = 0; i <= 60; i++) {
+    const shift = 3 * i / 60;
+    const z = P.shiftedZones(zones, drift);
+    const seated = [[11, 19.5 - shift], [13, 19.6 - shift]].filter((p) => P.inBenchZone(p, z, 2.5));
+    P.followBenches(drift, [seated]);
+  }
+  assert.ok(Math.abs(drift[0].dy + 3) < 0.6 && Math.abs(drift[0].dx) < 0.2, JSON.stringify(drift));
+  assert.ok(P.inBenchZone([12, 16.5], P.shiftedZones(zones, drift)), "le banc déplacé reste couvert");
+  const far = [{ ref: [0, 0], dx: 0, dy: 0 }];
+  for (let i = 0; i < 200; i++) P.followBenches(far, [[[20, 0]]]);
+  assert.equal(far[0].dx, 6, "décalage plafonné");
+  assert.equal(P.shiftedZones([], []), null);
 });

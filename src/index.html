@@ -162,6 +162,14 @@
                 <select id="ai-device"><option value="auto">Automatique (carte graphique si plus rapide)</option><option value="cpu">Processeur uniquement</option></select>
               </label>
               <label class="row"><input id="ai-marks" type="checkbox" checked> Ignorer le marquage jaune du sol (à décocher uniquement si votre ballon est jaune)</label>
+              <label title="En regardant le but que votre équipe attaque en première mi-temps. Sert à ne pas compter comme une erreur un joueur qui entre ou sort par la zone de remplacement.">Bancs des remplaçants
+                <select id="ai-bench"><option value="auto">À déduire</option><option value="left">À gauche</option><option value="right">À droite</option></select>
+              </label>
+              <div class="row" title="Cliquez deux coins opposés autour d'un banc sur la vidéo (après le calibrage). Les personnes assises dans ces zones ne sont plus comptées comme des joueurs.">
+                <button id="ai-bench-mark" type="button">Marquer un banc (2 clics)</button>
+                <button id="ai-bench-clear" type="button">Effacer les bancs</button>
+                <span id="ai-bench-zones" class="muted"></span>
+              </div>
             </div>
             <div class="ai-run">
               <button id="ai-run" class="primary">Lancer l'analyse</button>
@@ -218,7 +226,23 @@
             <video id="corr-pip-video" muted playsinline preload="auto"></video>
             <div class="pip-bar"><button id="pip-prev" title="Situation précédente">◀</button><span id="pip-label"></span><button id="pip-next" title="Situation suivante">▶</button></div>
           </div>
+          <!-- Correction animée sur la vraie vidéo (erreur confirmée de ce match, avec analyse) -->
+          <div id="corr-real" class="corr-real" hidden>
+            <video id="cr-video" muted playsinline preload="auto"></video>
+            <canvas id="cr-overlay" class="cr-overlay"></canvas>
+            <canvas id="cr-map" class="cr-map" title="Vue de dessus : la même scène"></canvas>
+            <div id="cr-msg" class="cr-msg" hidden></div>
+          </div>
         </div>
+        <div class="corr-controls" id="cr-bar" hidden>
+          <button id="cr-fixed" title="La vidéo s'arrête sur l'erreur, les dessins apparaissent un par un">Figé</button>
+          <button id="cr-seq" title="Quelques secondes réelles autour de l'erreur, dessins collés au sol">Séquencé</button>
+          <button id="cr-replay">⏮ Rejouer</button>
+          <button id="cr-prev" title="Occurrence précédente">◀</button><span id="cr-label" class="time"></span><button id="cr-next" title="Occurrence suivante">▶</button>
+          <button id="cr-map-pos" title="Déplacer ou masquer la petite carte">Carte : bas droite</button>
+          <button id="cr-catalog" class="ghost" title="Animation type, vue de dessus">Animation du catalogue</button>
+        </div>
+        <p id="cr-text" class="cr-text" hidden></p>
         <div class="corr-controls">
           <button id="cp-play" class="primary">▶ Lecture</button>
           <button id="cp-restart">⏮ Début</button>
@@ -318,14 +342,18 @@
 <script src="ai/kit.js"></script>
 <script src="ai/tracker.js"></script>
 <script src="ai/camera.js"></script>
+<script src="ai/context.js"></script>
 <script src="ai/match.js"></script>
+<script src="ai/balltrack.js"></script>
 <script src="ai/pipeline.js"></script>
+<script src="ai/overlay.js"></script>
 <script src="report.js"></script>
 <script src="app.js"></script>
 <script src="ai-ui.js"></script>
 <script src="ai/goal.js"></script>
 <script src="ai/court-fit.js"></script>
 <script src="wizard.js"></script>
+<script src="anim/realview.js"></script>
 <script src="corrections-ui.js"></script>
 </body>
 </html>

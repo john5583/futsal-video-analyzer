@@ -108,12 +108,74 @@
     const d = describe(kind, id), seq = seqFor(kind, id);
     if (!d || !seq) { App.toast("Animation indisponible.", true); return; }
     ensurePlayer();
+    if (!current || current.kind !== kind || current.id !== id) real.catalog = false;   // nouvelle erreur : vraie vidéo d'abord
     current = { kind, id, title: d.title, desc: d.desc, seq };
     $("cp-desc").textContent = d.title + " — " + d.desc;
+    real.events = realEvents(kind, id);
+    real.idx = 0;
+    if (real.events.length && !real.catalog) { player.setSequence(seq); showReal(); markActive(); return; }
+    showScene();
     player.setSequence(seq);
     setupPip(kind, id);
     markActive();
     if (autoplay !== false) player.play();
+  }
+
+  /* ---------- correction animée sur la vraie vidéo ---------- */
+  const real = { view: null, events: [], idx: 0, mode: "fixed", catalog: false };
+  /* Occurrences confirmées de cette erreur dans le match, quand le projet a une analyse vidéo et la vidéo est chargée. */
+  function realEvents(kind, id) {
+    const a = state.project.ai;
+    if (kind !== "error" || !window.FutsalRealView || !window.FutsalOverlay || !App.getVideoUrl() || !a || !Array.isArray(a.frames) || !a.frames.length) return [];
+    return state.project.events.filter((e) => e.type === id && isFinite(Number(e.t))).sort((x, y) => x.t - y.t);
+  }
+  function analysisFrames() {
+    const live = App.ai && App.ai.getFrames ? App.ai.getFrames() : null;
+    return live && live.length ? live : window.FutsalPipeline.expandFrames(state.project.ai.frames);
+  }
+  function showScene() {
+    if (real.view) real.view.close();
+    $("corr-real").hidden = true; $("corr-canvas").hidden = false; $("cr-text").hidden = true;
+    sceneControls().hidden = false;
+    $("cr-bar").hidden = !(real.catalog && real.events.length);
+    ["cr-fixed", "cr-seq", "cr-replay", "cr-prev", "cr-next", "cr-label", "cr-map-pos"].forEach((x) => { $(x).hidden = true; });
+    $("cr-catalog").textContent = "Vraie vidéo";
+  }
+  /* Petite carte : coin choisi (ou masquée), mémorisé pour ce poste. */
+  const MAP_POS = ["br", "bl", "tl", "tr", "off"];
+  const MAP_LABEL = { br: "bas droite", bl: "bas gauche", tl: "haut gauche", tr: "haut droite", off: "masquée" };
+  function mapPos() { try { const v = localStorage.getItem("fsal.corrMap"); return MAP_POS.includes(v) ? v : "br"; } catch (_e) { return "br"; } }
+  function setMapPos(p) {
+    const r = $("corr-real");
+    MAP_POS.forEach((x) => r.classList.toggle("map-" + x, x === p));
+    $("cr-map-pos").textContent = "Carte : " + MAP_LABEL[p];
+    try { localStorage.setItem("fsal.corrMap", p); } catch (_e) { /* stockage indisponible */ }
+  }
+  function sceneControls() { return document.querySelector(".corr-main .corr-controls:not(#cr-bar)"); }
+  function showReal() {
+    if (!real.view) real.view = new window.FutsalRealView.RealView({ root: $("corr-real"), video: $("cr-video"), overlay: $("cr-overlay"), map: $("cr-map"), msg: $("cr-msg") });
+    if (player) player.pause();
+    $("corr-pip").hidden = true; $("corr-pip-video").pause();
+    $("corr-canvas").hidden = true; $("corr-real").hidden = false; $("cr-bar").hidden = false; $("cr-text").hidden = false;
+    sceneControls().hidden = true;
+    ["cr-fixed", "cr-seq", "cr-replay", "cr-prev", "cr-next", "cr-label", "cr-map-pos"].forEach((x) => { $(x).hidden = false; });
+    $("cr-catalog").textContent = "Animation du catalogue";
+    openReal();
+  }
+  function openReal() {
+    const e = real.events[real.idx], a = state.project.ai, err = KB.ERRORS.find((x) => x.id === e.type);
+    $("cr-label").textContent = App.fmt(e.t) + " (" + (real.idx + 1) + "/" + real.events.length + ")";
+    $("cr-prev").disabled = $("cr-next").disabled = real.events.length < 2;
+    $("cr-fixed").classList.toggle("active", real.mode === "fixed"); $("cr-seq").classList.toggle("active", real.mode === "seq");
+    const sol = err && err.solutions && err.solutions.length ? err.solutions[0] : "";
+    $("cr-text").innerHTML = "<b class=\"err\">Erreur · " + esc(err ? err.label : e.type) + "</b> — " + esc(err ? err.description : "") +
+      (e.note ? " <span class=\"muted\">(" + esc(e.note) + ")</span>" : "") +
+      (sol ? "<br><b class=\"ok\">Correction conseillée</b> — " + esc(sol) + ". <span class=\"muted\">Conseil tiré du catalogue, à adapter à votre équipe : la position du joueur vert est indicative.</span>" : "");
+    real.view.open({
+      url: App.getVideoUrl(), frames: analysisFrames(), lost: a.lost || [], L: a.L || 40, W: a.W || 20,
+      dirAt: App.ai && App.ai.dirAt ? App.ai.dirAt : null, event: e, mode: real.mode, catalogSeq: current ? current.seq : null,
+      segment: window.FSAI && window.FSAI.segment && api ? (req) => window.FSAI.segment(req) : null
+    }).catch(() => { /* la vue affiche elle-même le repli */ });
   }
 
   /* ---------- export ---------- */
@@ -164,6 +226,18 @@
   }
 
   function bind() {
+    $("cr-fixed").addEventListener("click", () => { real.mode = "fixed"; if (real.view && real.events.length) openReal(); });
+    $("cr-seq").addEventListener("click", () => { real.mode = "seq"; if (real.view && real.events.length) openReal(); });
+    $("cr-replay").addEventListener("click", () => { if (real.view) real.view.restart(); });
+    $("cr-map-pos").addEventListener("click", () => { setMapPos(MAP_POS[(MAP_POS.indexOf(mapPos()) + 1) % MAP_POS.length]); });
+    setMapPos(mapPos());
+    $("cr-prev").addEventListener("click", () => { real.idx = (real.idx + real.events.length - 1) % real.events.length; openReal(); });
+    $("cr-next").addEventListener("click", () => { real.idx = (real.idx + 1) % real.events.length; openReal(); });
+    $("cr-catalog").addEventListener("click", () => {
+      if (!current) return;
+      real.catalog = !real.catalog;
+      select(current.kind, current.id, real.catalog);
+    });
     $("corr-pip-video").addEventListener("timeupdate", () => { const v = $("corr-pip-video"); if (pip.events.length && v.currentTime >= pip.t1) v.currentTime = pip.t0; });
     $("pip-prev").addEventListener("click", () => { pip.idx = (pip.idx + pip.events.length - 1) % pip.events.length; showPipEvent(); });
     $("pip-next").addEventListener("click", () => { pip.idx = (pip.idx + 1) % pip.events.length; showPipEvent(); });
@@ -184,6 +258,8 @@
     buildLists();
     ensurePlayer();
     if (!current) { const first = $("corr-mine").querySelector("button.item") ; if (first) select(first.dataset.kind, first.dataset.id, false); else select("error", KB.ERRORS[0].id, false); }
+    // retour sur l'onglet (projet peut-être changé) : on réévalue l'erreur affichée ; la vue réelle s'arrête quand l'onglet est caché
+    else if (real.events.length || realEvents(current.kind, current.id).length) select(current.kind, current.id, false);
     else if (player) player.render();
   };
   App.openAnimation = (kind, id) => { App.showTab("corrections"); select(kind, id, true); };

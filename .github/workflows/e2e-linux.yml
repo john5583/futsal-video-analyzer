@@ -24,3 +24,7 @@ jobs:
         run: xvfb-run -a node tests/e2e/wizard-goal.js
         env:
           CI: "true"
+      - name: Correction animée sur la vraie vidéo (dessins, repli caméra perdue, modes)
+        run: xvfb-run -a node tests/e2e/correction-video.js
+        env:
+          CI: "true"

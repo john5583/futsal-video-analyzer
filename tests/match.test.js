@@ -138,3 +138,112 @@ test("entrées vides ou invalides sans exception", () => {
   const noBall = M.analyze(seq(20, () => ({ players: base(), ball: null })), { L, W });
   assert.equal(noBall.events.length, 0);
 });
+
+/* Scène réelle (vidéo 1, 21-24 s, analyse 1.1.8) : relance du gardien vers le n°4, duel serré à 22,0 s puis ballon
+   non détecté (null) ; le n°4 garde le ballon. Distances relevées image par image. */
+test("duel serré et ballon non détecté : pas de fausse perte (scène réelle 21-24 s)", () => {
+  // [t, ballon détecté ?, distance du n°4 (A), distance du n°2 (B)]
+  const rows = [[20.8, 1, 3.0, 0.7], [21.0, 0, 3.0, 0.2], [21.2, 1, 1.5, 2.9], [21.4, 0, 1.3, 3.1], [21.6, 0, 1.2, 3.1],
+    [21.8, 1, 1.0, 3.1], [22.0, 1, 0.9, 0.7], [22.2, 0, 0.9, 0.4], [22.4, 0, 1.0, 0.3], [22.6, 1, 1.3, 1.9]];
+  for (let t = 22.8; t <= 24.01; t += 0.2) rows.push([Math.round(t * 10) / 10, 1, 0.8, 2.5]);
+  const fr = rows.map(([t, seen, dA, dB]) => {
+    const b = { x: 16, y: 4 };
+    return { t, ball: seen ? b : null, players: [P(5, "GKA", 2, 10), P(4, "A", b.x - dA, b.y), P(6, "A", 20, 8), P(2, "B", b.x + dB, b.y), P(3, "B", 24, 12)] };
+  });
+  const r = M.analyze(fr, { L, W });
+  assert.deepEqual(r.events.filter((e) => /perte/.test(e.type)), []);
+  const poss = M.possessionSeries(M.normalize(fr, L, W));
+  assert.ok(poss.filter((p, i) => fr[i].t >= 21.8).every((p) => p.team === "A"), "le n°4 garde le ballon de 21,8 à 24 s");
+});
+
+test("ballon repris par l'adversaire moins de 1 s puis récupéré : pas de perte", () => {
+  const fr = seq(30, (i, t) => {
+    const pl = base();
+    const bx = 12, by = 10;
+    pl[2] = P(3, "A", t >= 2 && t < 2.6 ? bx - 3 : bx - 0.5, by);   // le n°3 perd le contact 0,6 s
+    pl[7] = P(13, "B", t >= 2 && t < 2.6 ? bx + 0.4 : bx + 4, by);
+    return { players: pl, ball: { x: bx, y: by } };
+  });
+  const r = M.analyze(fr, { L, W });
+  assert.deepEqual(r.events.filter((e) => /perte/.test(e.type)).map((e) => e.t), []);
+});
+
+test("une image où le ballon n'est pas détecté ne confirme jamais un changement de possession", () => {
+  const fr = seq(20, (i, t) => {
+    const pl = base();
+    pl[7] = P(13, "B", 10.6, 6);                                   // adversaire collé au ballon dès 1 s
+    const seen = t < 1 || t === 1.2 || t >= 3;                     // détecté une seule fois près de lui, puis plus rien
+    if (t >= 1) pl[1] = P(2, "A", 13, 6);
+    return { players: pl, ball: seen ? { x: 10.2, y: 6 } : null };
+  });
+  const poss = M.possessionSeries(M.normalize(fr, L, W));
+  assert.ok(poss.slice(0, 15).every((p) => p.team !== "B"), poss.slice(0, 15).map((p) => p.team).join());
+});
+
+test("pas de ballon fiable, pas d'erreur : la situation est seulement notée comme incertaine", () => {
+  // même perte franche qu'au-dessus, mais le ballon n'est détecté que sur 1 image sur 3 autour de la perte
+  const make = (sparse) => seq(40, (i, t) => {
+    const pl = base();
+    let ball;
+    if (t < 2) ball = { x: 9.5, y: 6 };
+    else { const bx = Math.max(3, 9 - (t - 2) * 3); pl[8] = P(14, "B", bx - 0.5, 8); ball = { x: bx, y: 8 }; }
+    return { players: pl, ball: sparse && t > 0.6 && t < 3 && i % 3 ? null : ball };
+  });
+  const ok = M.analyze(make(false), { L, W });
+  assert.ok(ok.events.some((e) => e.type === "perte_zone_def" && e.ballConf === 1));
+  const r = M.analyze(make(true), { L, W });
+  assert.ok(!r.events.some((e) => e.type === "perte_zone_def"), r.events.map((e) => e.type).join());
+  const u = r.uncertain.find((x) => x.type === "perte_zone_def");
+  assert.ok(u && u.ballConf < M.BALL_CONF_MIN && u.reason === "ballon pas assez visible");
+});
+
+test("rythme : perte sous pressing -> conseil adapté ; ballon touché moins de 1 s -> duel, pas une perte", () => {
+  const make = (aFrom, pressing) => seq(40, (i, t) => {
+    const pl = base();
+    pl[6] = P(12, "B", pressing ? 11.5 : 28, pressing ? 6.5 : 6);   // deux adversaires collés au porteur (n°2)
+    pl[7] = P(13, "B", pressing ? 9.5 : 30, pressing ? 7 : 14);
+    let ball = null;
+    if (t >= aFrom && t < 3) ball = { x: 10.3, y: 6 };              // n°2 (A) a le ballon
+    else if (t >= 3) { pl[8] = P(14, "B", 9, 8); pl[1] = P(2, "A", 13, 4); ball = { x: 9.4, y: 8 }; }
+    else { pl[8] = P(14, "B", 20.5, 10); ball = { x: 20.2, y: 10 }; }
+    return { players: pl, ball };
+  });
+  const r = M.analyze(make(1, true), { L, W });
+  const loss = r.events.find((e) => /perte/.test(e.type));
+  assert.ok(loss && loss.phase === "pressing" && /pressing adverse/.test(loss.note), JSON.stringify(r.events));
+  const duel = M.analyze(make(2.4, false), { L, W });
+  assert.ok(!duel.events.some((e) => /perte/.test(e.type)) && !duel.uncertain.some((e) => /perte/.test(e.type)), JSON.stringify(duel.events));
+});
+
+test("bancs : réglage gauche/droite, déduction seulement si les remplaçants sont nombreux et d'un seul côté", () => {
+  assert.equal(M.benchSide({ W, bench: "left" }, 0).y, 0);
+  assert.equal(M.benchSide({ W, bench: "right" }, 0).y, W);
+  assert.equal(M.benchSide({ W, bench: "left", dirAt: () => -1 }, 0).y, W, "mon équipe attaque vers x décroissant : la gauche est de l'autre côté");
+  assert.equal(M.benchSide({ W, benchSeen: { y0: 0, yW: 7 } }, 0), null, "trop peu de remplaçants vus : pas de déduction");
+  assert.equal(M.benchSide({ W, benchSeen: { y0: 12, yW: 25 } }, 0), null, "pas nettement d'un seul côté");
+  const d = M.benchSide({ W, benchSeen: { y0: 2, yW: 40 } }, 0);
+  assert.ok(d && d.y === W && d.side === "right" && d.source === "déduit");
+});
+
+test("remplacement volant : le joueur qui entre par la zone de remplacement n'est pas compté pendant 3 s", () => {
+  const fr = seq(40, (i, t) => {
+    const pl = base();
+    if (t >= 3) pl.push(P(16, "B", 21, Math.max(14, W - 0.5 - (t - 3) * 1.5)));   // entre près du banc (y = W) au milieu
+    return { players: pl, ball: { x: 10.2, y: 6 } };
+  });
+  const r = M.analyze(fr, { L, W, bench: "right" });
+  const at = (t) => r.normalized.find((f) => Math.abs(f.t - t) < 0.01).B.find((p) => p.id === 16);
+  assert.equal(at(4).sub, true);
+  assert.ok(!at(7).sub, "compté normalement après 3 s");
+  assert.equal(r.context.bench.source, "réglage");
+  const auto = M.analyze(fr, { L, W });
+  assert.ok(!auto.normalized.some((f) => f.B.some((p) => p.sub)), "côté inconnu : rien n'est écarté");
+  assert.equal(auto.context.bench, null);
+});
+
+test("ballon absent plus longtemps que la position gardée : possession inconnue, pas reportée", () => {
+  const fr = seq(20, (i, t) => ({ players: base(), ball: t < 1 ? { x: 10.2, y: 6 } : null }));
+  const poss = M.possessionSeries(M.normalize(fr, L, W));
+  assert.equal(poss[2].team, "A");
+  assert.equal(poss[15].team, null);
+});

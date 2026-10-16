@@ -2,14 +2,24 @@
    reconnaissance des équipes, suivi, et lecture de la vidéo image par image (navigateur). */
 (function (root, factory) {
   if (typeof module === "object" && module.exports) {
-    module.exports = factory(require("./yolox"), require("./homography"), require("./kit"), require("./tracker"), require("./camera"));
+    module.exports = factory(require("./yolox"), require("./homography"), require("./kit"), require("./tracker"), require("./camera"), require("./balltrack"));
   } else {
-    root.FutsalPipeline = factory(root.FutsalYolox, root.FutsalHomography, root.FutsalKit, root.FutsalTracker, root.FutsalCamera);
+    root.FutsalPipeline = factory(root.FutsalYolox, root.FutsalHomography, root.FutsalKit, root.FutsalTracker, root.FutsalCamera, root.FutsalBallTrack);
   }
-})(typeof self !== "undefined" ? self : this, function (Y, HG, K, T, Cam) {
+})(typeof self !== "undefined" ? self : this, function (Y, HG, K, T, Cam, BT) {
   "use strict";
 
   const TEAM_CODE = { A: "A", B: "B", GKA: "a", GKB: "b" };
+  const BALL_CAND = 0.05;      // score minimal d'un candidat ballon
+  const BALL_STRONG = 0.2;     // score d'une détection de ballon fiable seule
+  const MAX_BALL_CANDS = 4;    // candidats gardés par image
+  const BENCH_HALF_LEN = 12;   // m : zone des bancs de part et d'autre de la ligne médiane
+  const BENCH_DEPTH = 6;       // m : profondeur de la zone des bancs derrière la ligne de touche
+  const BENCH_SEATED = 2;      // silhouette assise : moins de 2 fois plus haute que large
+  const BENCH_MARGIN = 0.5;    // m autour d'une zone de banc marquée
+  const BENCH_FOLLOW = 2.5;    // m : personnes assises prises en compte autour de la zone pour suivre la dérive
+  const BENCH_FOLLOW_RATE = 0.15;   // part de l'écart rattrapée à chaque image (lissage)
+  const BENCH_MAX_DRIFT = 6;   // m : décalage maximal d'une zone
   const CODE_TEAM = { A: "A", B: "B", a: "GKA", b: "GKB" };
 
   /* Rectangles de détection : 1 = image entière ; 2 = deux moitiés qui se recouvrent (joueurs lointains plus nets). */
@@ -135,18 +145,33 @@
         if (ar < 0.8 || ar > 6) return;
         persons.push(d);
       } else if (d.cls === Y.CLASS_BALL) {
-        // un vrai ballon est à peu près carré, petit, et détecté avec une confiance suffisante (évite les marquages au sol)
+        // un vrai ballon est à peu près carré et petit (évite les marquages au sol) ; les détections faibles (dès BALL_CAND)
+        // restent candidates : le choix final se fait sur la trajectoire (balltrack.js)
         const ar = w / Math.max(1, h);
-        if (d.score >= 0.2 && ar >= 0.5 && ar <= 2 && h >= ctx.frameH * 0.004 && h <= ctx.frameH * 0.06) balls.push(d);
+        if (d.score >= BALL_CAND && ar >= 0.5 && ar <= 2 && h >= ctx.frameH * 0.004 && h <= ctx.frameH * 0.06) balls.push(d);
       }
     });
     const margin = 1.5;
     const list = [];
+    // zones des bancs, décalées pour suivre la dérive du suivi de la caméra (voir followBenches)
+    const zones = shiftedZones(ctx.benchZones, ctx.benchDrift);
+    const seatedIn = zones ? zones.map(() => []) : null;
     persons.forEach((d) => {
       const fx = (d.x1 + d.x2) / 2 / ctx.scale, fy = d.y2 / ctx.scale;
       const p = HG.apply(ctx.H, fx, fy);
       if (!isFinite(p[0]) || !isFinite(p[1])) return;
-      if (p[0] < -margin || p[0] > ctx.L + margin || p[1] < -margin || p[1] > ctx.W + margin) return;
+      // personne assise dans une zone de banc marquée : remplaçant, pas un joueur
+      const seated = (d.y2 - d.y1) < BENCH_SEATED * (d.x2 - d.x1);
+      if (seated && zones) zones.forEach((z, i) => { if (inBenchZone(p, [z], BENCH_FOLLOW)) seatedIn[i].push(p); });
+      if (seated && inBenchZone(p, zones)) { if (ctx.bench) ctx.bench.zone = (ctx.bench.zone || 0) + 1; return; }
+      if (p[0] < -margin || p[0] > ctx.L + margin || p[1] < -margin || p[1] > ctx.W + margin) {
+        // personne assise ou debout le long d'une ligne de touche, près du milieu : remplaçants (côté des bancs)
+        if (ctx.bench && Math.abs(p[0] - ctx.L / 2) <= BENCH_HALF_LEN) {
+          if (p[1] < -margin && p[1] >= -BENCH_DEPTH) ctx.bench.y0++;
+          else if (p[1] > ctx.W + margin && p[1] <= ctx.W + BENCH_DEPTH) ctx.bench.yW++;
+        }
+        return;
+      }
       const feat = ctx.img ? K.sample(ctx.img, [d.x1, d.y1, d.x2, d.y2]) : null;
       const close = !!ctx.close;
       if (feat && ctx.refs) K.addAccents(feat, ctx.img, [d.x1, d.y1, d.x2, d.y2], ctx.refs, close ? { close } : undefined);
@@ -157,15 +182,18 @@
       if (ctx.refs && ctx.refs.A && ctx.refs.B) item.f = K.classify(feat, { A: ctx.refs.A, B: ctx.refs.B }, close ? { reject: ctx.reject, close } : { reject: ctx.reject }).team;
       list.push(item);
     });
+    if (zones && ctx.benchDrift) followBenches(ctx.benchDrift, seatedIn);
     ctx.tracker.update(ctx.t, list);
-    let ball = null;
-    balls.sort((a, b) => b.score - a.score).some((d) => {
+    const bc = [];
+    balls.sort((a, b) => b.score - a.score).forEach((d) => {
+      if (bc.length >= MAX_BALL_CANDS) return;
       const p = HG.apply(ctx.H, ((d.x1 + d.x2) / 2) / ctx.scale, ((d.y1 + d.y2) / 2) / ctx.scale);
-      if (!isFinite(p[0]) || !isFinite(p[1]) || p[0] < -2 || p[0] > ctx.L + 2 || p[1] < -2 || p[1] > ctx.W + 2) return false;
-      ball = { x: Math.round(p[0] * 100) / 100, y: Math.round(p[1] * 100) / 100 };
-      return true;
+      if (!isFinite(p[0]) || !isFinite(p[1]) || p[0] < -2 || p[0] > ctx.L + 2 || p[1] < -2 || p[1] > ctx.W + 2) return;
+      bc.push([Math.round(p[0] * 100) / 100, Math.round(p[1] * 100) / 100, Math.round(d.score * 1000) / 1000]);
     });
-    return {
+    // aperçu en direct : meilleure détection fiable ; le ballon définitif est choisi en fin d'analyse
+    const ball = bc.length && bc[0][2] >= BALL_STRONG ? { x: bc[0][0], y: bc[0][1] } : null;
+    const out = {
       t: ctx.t,
       players: list.map((p) => {
         const o = {
@@ -175,8 +203,46 @@
         if (p.f) o.f = p.f;
         return o;
       }),
-      ball
+      ball,
+      bc
     };
+    const h = normalizedProjection(ctx.H, ctx.frameW / ctx.scale, ctx.frameH / ctx.scale);
+    if (h) out.h = h;
+    return out;
+  }
+
+  /* Pieds p = [x, y] (terrain) dans une des zones de banc (marge BENCH_MARGIN m par défaut) ? */
+  function inBenchZone(p, zones, margin) {
+    const m = margin == null ? BENCH_MARGIN : margin;
+    return Array.isArray(zones) && zones.some((z) => p[0] >= z.x1 - m && p[0] <= z.x2 + m && p[1] >= z.y1 - m && p[1] <= z.y2 + m);
+  }
+
+  /* Le suivi de la caméra dérive lentement (plusieurs mètres sur un match) : une zone de banc fixe sur le terrain finit par
+     ne plus couvrir le banc. drift = [{ ref, dx, dy }] par zone : ref = position moyenne des personnes assises la première
+     fois qu'elles sont vues dans la zone ; ensuite la zone suit doucement leur position moyenne (au plus BENCH_MAX_DRIFT m). */
+  function shiftedZones(zones, drift) {
+    if (!Array.isArray(zones) || !zones.length) return null;
+    return zones.map((z, i) => { const d = drift && drift[i] ? drift[i] : { dx: 0, dy: 0 }; return { x1: z.x1 + d.dx, y1: z.y1 + d.dy, x2: z.x2 + d.dx, y2: z.y2 + d.dy }; });
+  }
+  function followBenches(drift, seatedIn) {
+    seatedIn.forEach((list, i) => {
+      if (!list.length) return;
+      const d = drift[i] || (drift[i] = { ref: null, dx: 0, dy: 0 });
+      const mx = list.reduce((s, p) => s + p[0], 0) / list.length, my = list.reduce((s, p) => s + p[1], 0) / list.length;
+      if (!d.ref) { d.ref = [mx - d.dx, my - d.dy]; return; }
+      const clamp = (v) => Math.max(-BENCH_MAX_DRIFT, Math.min(BENCH_MAX_DRIFT, v));
+      d.dx = clamp(d.dx + BENCH_FOLLOW_RATE * (mx - d.ref[0] - d.dx));
+      d.dy = clamp(d.dy + BENCH_FOLLOW_RATE * (my - d.ref[1] - d.dy));
+    });
+  }
+
+  /* Projection image -> terrain de cette image, en coordonnées d'image normalisées (0..1), pour redessiner sur la vidéo
+     (correction animée). H : pixels vidéo -> terrain ; vw, vh : taille de la vidéo. */
+  function normalizedProjection(H, vw, vh) {
+    if (!Array.isArray(H) || H.length !== 9 || !(vw > 0) || !(vh > 0)) return null;
+    const h = HG.mul3(H, [vw, 0, 0, 0, vh, 0, 0, 0, 1]);
+    if (!h.every(Number.isFinite) || Math.abs(h[8]) < 1e-12) return null;
+    return h.map((v) => Number((v / h[8]).toPrecision(7)));
   }
 
   /* Fin d'analyse : équipe de chaque piste par vote, suppression des pistes éphémères et des joueurs non identifiés.
@@ -184,18 +250,40 @@
      confondables) }. Les rôles ne sont revus par la position que si le cas est ambigu (opts.roles, ou une même équipe
      a souvent deux gardiens à la fois) ; sinon le résultat est celui du simple vote. */
   function finalizeFrames(frames, opts) {
+    if (BT) BT.apply(frames);
     let teams = T.finalTeams(frames);
     if (opts && opts.L && opts.W && (opts.roles || goalkeeperConflict(frames, teams))) teams = resolveRoles(frames, teams, opts);
+    // pistes de joueurs de champ passées d'une personne à une autre : coupées, puis chaque morceau est voté (A ou B) ;
+    // gardiens et arbitres (rôles décidés sur la piste entière) ne sont pas coupés
+    if (!opts || opts.split !== false) {
+      const field = new Set(Object.keys(teams).filter((id) => teams[id] === "A" || teams[id] === "B").map(Number));
+      const before = new Map();
+      frames.forEach((f) => f.players.forEach((p) => { if (field.has(p.id)) before.set(p, p.id); }));
+      const fieldFrames = frames.map((f) => ({ t: f.t, players: f.players.filter((p) => field.has(p.id)) }));
+      let maxId = 0;
+      frames.forEach((f) => f.players.forEach((p) => { if (p.id > maxId) maxId = p.id; }));
+      if (T.splitTracks(fieldFrames, null, maxId + 1)) {
+        const v = {};
+        before.forEach((_old, p) => { const s = p.f === "A" || p.f === "B" ? p.f : p.team === "A" || p.team === "B" ? p.team : null; if (s) (v[p.id] = v[p.id] || {})[s] = (v[p.id][s] || 0) + 1; });
+        before.forEach((old, p) => { if (p.id !== old && !(p.id in teams)) teams[p.id] = v[p.id] ? ((v[p.id].A || 0) >= (v[p.id].B || 0) ? "A" : "B") : teams[old]; });
+      }
+      // morceaux d'un même joueur séparés par une courte disparition ou une coupure : recollés (même équipe, vitesse plausible)
+      T.relinkTracks(frames, teams, (tm) => tm === "A" || tm === "B");
+    }
     const counts = {};
     frames.forEach((f) => f.players.forEach((p) => { counts[p.id] = (counts[p.id] || 0) + 1; }));
-    return frames.map((f) => ({
-      t: f.t, ball: f.ball,
-      players: f.players.filter((p) => counts[p.id] >= 3 && CODE_TEAM_OK(teams[p.id])).map((p) => {
-        const o = Object.assign({}, p, { team: teams[p.id] });
-        delete o.f;
-        return o;
-      })
-    }));
+    return frames.map((f) => {
+      const o = {
+        t: f.t, ball: f.ball,
+        players: f.players.filter((p) => counts[p.id] >= 3 && CODE_TEAM_OK(teams[p.id])).map((p) => {
+          const q = Object.assign({}, p, { team: teams[p.id] });
+          delete q.f;
+          return q;
+        })
+      };
+      if (f.h) o.h = f.h;
+      return o;
+    });
   }
 
   /* Ambiguïté révélée par l'analyse : sur au moins 10 % des images, une même équipe a deux « gardiens » (ou plus). */
@@ -266,15 +354,24 @@
   function CODE_TEAM_OK(team) { return team === "A" || team === "B" || team === "GKA" || team === "GKB"; }
 
   /* Stockage compact (projet / sauvegarde) et retour au format d'analyse. */
+  /* 4e élément facultatif : projection de l'image (h), absente des analyses faites avant la 1.2.0. */
   function compactFrames(frames) {
-    return frames.map((f) => [Math.round(f.t * 100) / 100, f.players.map((p) => [p.id, TEAM_CODE[p.team], p.x, p.y].concat(p.b || [])), f.ball ? [f.ball.x, f.ball.y] : null]);
+    return frames.map((f) => {
+      const c = [Math.round(f.t * 100) / 100, f.players.map((p) => [p.id, TEAM_CODE[p.team], p.x, p.y].concat(p.b || [])), f.ball ? [f.ball.x, f.ball.y] : null];
+      if (Array.isArray(f.h) && f.h.length === 9) c.push(f.h);
+      return c;
+    });
   }
   function expandFrames(compact) {
     if (!Array.isArray(compact)) return [];
-    return compact.map((c) => ({
-      t: c[0], ball: c[2] ? { x: c[2][0], y: c[2][1] } : null,
-      players: c[1].map((p) => ({ id: p[0], team: CODE_TEAM[p[1]], x: p[2], y: p[3], b: p.slice(4, 8) }))
-    }));
+    return compact.map((c) => {
+      const f = {
+        t: c[0], ball: c[2] ? { x: c[2][0], y: c[2][1] } : null,
+        players: c[1].map((p) => ({ id: p[0], team: CODE_TEAM[p[1]], x: p[2], y: p[3], b: p.slice(4, 8) }))
+      };
+      if (Array.isArray(c[3]) && c[3].length === 9 && c[3].every(Number.isFinite)) f.h = c[3];
+      return f;
+    });
   }
 
   /* Image la plus proche d'un instant (recherche dichotomique) ; null si trop éloignée. */
@@ -406,6 +503,8 @@
     const tracker = new T.Tracker(amb.close ? { soft: 2 } : undefined);
     const frames = [], lost = [];
     let lostStart = null, lastBall = null;
+    const bench = { y0: 0, yW: 0 };      // personnes vues le long de chaque ligne de touche (côté des bancs)
+    const benchDrift = [];               // décalage de chaque zone de banc (suivi de la dérive de la caméra)
     const trk = { anchor: null, M: IDENTITY, prev: null, t: 0, boxes: [], keys: [], failCount: 0 };
     const STEP = 0.1;
     const grabSmall = (boxes) => { gctx.drawImage(video, 0, 0, gw, gh); return Cam.prepare(gctx.getImageData(0, 0, gw, gh).data, gw, gh, boxes, 4); };
@@ -457,18 +556,18 @@
       if (zoom) {
         const Hprev = mobile && trk.anchor === calib ? HG.mul3(trk.anchor.H, trk.M) : calib.H;
         const crop = courtRegion(Hprev, opts.L, opts.W, scale, cw, ch);
-        dets = dropFloorMarks(await detectCanvas(canvas, 1, opts.api, { minPerson: 0.35, minBall: 0.12 }, crop ? zoomRects(crop) : tileRects(cw, ch, 2)), img, opts.floorMarks);
+        dets = dropFloorMarks(await detectCanvas(canvas, 1, opts.api, { minPerson: 0.35, minBall: BALL_CAND }, crop ? zoomRects(crop) : tileRects(cw, ch, 2)), img, opts.floorMarks);
         // ballon non vu : recherche en gros plan autour de sa dernière position connue
-        if (!dets.some((d) => d.cls === Y.CLASS_BALL) && lastBall && t - lastBall.t <= 1.0) {
+        if (!dets.some((d) => d.cls === Y.CLASS_BALL && d.score >= BALL_STRONG) && lastBall && t - lastBall.t <= 1.0) {
           const half = Math.round(Math.max(90, Math.min(cw, ch) * 0.17));
           const rx = Math.max(0, Math.min(cw - 2 * half, Math.round(lastBall.x - half))), ry = Math.max(0, Math.min(ch - 2 * half, Math.round(lastBall.y - half)));
-          const roi = dropFloorMarks(await detectCanvas(canvas, 1, opts.api, { minPerson: 2, minBall: 0.07 }, [{ x: rx, y: ry, w: Math.min(cw, 2 * half), h: Math.min(ch, 2 * half) }]), img, opts.floorMarks);
+          const roi = dropFloorMarks(await detectCanvas(canvas, 1, opts.api, { minPerson: 2, minBall: BALL_CAND }, [{ x: rx, y: ry, w: Math.min(cw, 2 * half), h: Math.min(ch, 2 * half) }]), img, opts.floorMarks);
           const best = roi.filter((d) => d.cls === Y.CLASS_BALL).sort((a, b) => b.score - a.score)[0];
           if (best) dets.push(best);
         }
-        const bd = dets.filter((d) => d.cls === Y.CLASS_BALL).sort((a, b) => b.score - a.score)[0];
+        const bd = dets.filter((d) => d.cls === Y.CLASS_BALL && d.score >= BALL_STRONG).sort((a, b) => b.score - a.score)[0];
         if (bd) lastBall = { x: (bd.x1 + bd.x2) / 2, y: (bd.y1 + bd.y2) / 2, t };
-      } else dets = dropFloorMarks(await detectCanvas(canvas, opts.tiles, opts.api, { minPerson: 0.35, minBall: 0.12 }), img, opts.floorMarks);
+      } else dets = dropFloorMarks(await detectCanvas(canvas, opts.tiles, opts.api, { minPerson: 0.35, minBall: BALL_CAND }), img, opts.floorMarks);
       let H = calib.H, reliable = true;
       if (mobile) {
         const boxes = dets.filter((d) => d.cls === Y.CLASS_PERSON).map((d) => [d.x1 * (gw / cw), d.y1 * (gh / ch), d.x2 * (gw / cw), d.y2 * (gh / ch)]);
@@ -491,7 +590,7 @@
         continue;
       }
       if (lostStart != null) { lost.push([lostStart, t]); lostStart = null; }
-      frames.push(processDetections(dets, { frameW: cw, frameH: ch, scale, img, H, L: opts.L, W: opts.W, refs: opts.refs, reject: opts.tol, tracker, t, close: amb.close }));
+      frames.push(processDetections(dets, { frameW: cw, frameH: ch, scale, img, H, L: opts.L, W: opts.W, refs: opts.refs, reject: opts.tol, tracker, t, close: amb.close, bench, benchZones: opts.benchZones, benchDrift }));
       if (opts.onProgress) {
         const elapsed = (Date.now() - started) / 1000;
         opts.onProgress({ done: i + 1, total: times.length, eta: (elapsed / (i + 1)) * (times.length - i - 1), frame: frames[frames.length - 1] });
@@ -500,7 +599,7 @@
     if (lostStart != null) lost.push([lostStart, times[times.length - 1]]);
     video.removeAttribute("src"); video.load();
     if (lost.length) notes.push("Suivi de la caméra perdu sur " + lost.length + " passage(s) : ces images sont ignorées. Ajoutez un calibrage dans ces passages (flou, caméra trop rapide ou sol sans détails).");
-    return { frames: finalizeFrames(frames, { L: opts.L, W: opts.W, dirAt: opts.dirAt, roles: amb.close || amb.roles }), lost, notes };
+    return { frames: finalizeFrames(frames, { L: opts.L, W: opts.W, dirAt: opts.dirAt, roles: amb.close || amb.roles }), lost, notes, bench };
   }
 
   /* Vignettes JPEG de la vidéo à des instants donnés (illustrations des erreurs acceptées). */
@@ -537,5 +636,5 @@
     return { dets, scale, img: ctx.getImageData(0, 0, cw, ch), width: cw, height: ch };
   }
 
-  return { tileRects, courtRegion, zoomRects, tileToFrame, mergeTiles, isFloorMark, dropFloorMarks, calibrationAt, processDetections, finalizeFrames, compactFrames, expandFrames, frameNear, sampleTimes, startTime, estimateDuration, learnFactor, FACTOR_MIN, FACTOR_MAX, analyseVideo, detectAt, detectCanvas, captureFrames, TEAM_CODE };
+  return { inBenchZone, shiftedZones, followBenches, tileRects, courtRegion, zoomRects, tileToFrame, mergeTiles, isFloorMark, dropFloorMarks, calibrationAt, processDetections, finalizeFrames, compactFrames, expandFrames, frameNear, sampleTimes, startTime, estimateDuration, learnFactor, FACTOR_MIN, FACTOR_MAX, analyseVideo, detectAt, detectCanvas, captureFrames, TEAM_CODE };
 });
