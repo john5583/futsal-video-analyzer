@@ -2,7 +2,7 @@
 (function () {
   "use strict";
   const App = window.FSApp;
-  const KB = window.FutsalKB, HG = window.FutsalHomography, K = window.FutsalKit, P = window.FutsalPipeline, M = window.FutsalMatch, E = window.FutsalAnim, D = window.FutsalDoubt;
+  const KB = window.FutsalKB, HG = window.FutsalHomography, K = window.FutsalKit, P = window.FutsalPipeline, M = window.FutsalMatch, E = window.FutsalAnim, D = window.FutsalDoubt, Q = window.FutsalQuality;
   const $ = (id) => document.getElementById(id);
   const esc = App.esc;
   const video = App.video, api = App.api, state = App.state;
@@ -342,9 +342,45 @@
     renderNext();
   }
 
+  /* ---------- contrôle qualité : ce qui rend l'analyse fragile, mesuré, avec le remède ---------- */
+  function updateQuality(res) {
+    const a = state.project.ai;
+    if (!a || !Q) return;
+    try {
+      const oq = D.openQuestions({ doubts: a.doubts || [], subs: a.subs || [], uncertain: a.uncertain || [], memory: memory() }).length;
+      a.quality = Q.evaluate({ res, ai: a, project: state.project, L: L(), videoWidth: video.videoWidth, openQuestions: oq, kitWarnings: kitWarnings(refs()) });
+    } catch (_e) { /* le contrôle qualité ne doit jamais bloquer l'analyse */ }
+  }
+  function renderQuality() {
+    const box = $("ai-quality"), a = state.project.ai;
+    if (!box) return;
+    if (!a || !Q || !a.stats) { box.hidden = true; return; }
+    if (!a.quality && frames.length) {                              // ancien projet : le contrôle est calculé une fois
+      try {
+        const s = a.settings || {};
+        updateQuality(M.analyze(frames, { L: L(), W: W(), dirAt, lost: a.lost || [], span: [s.t0 || frames[0].t, s.t1 || frames[frames.length - 1].t], bench: benchSetting(), benchSeen: a.benchSeen || null, subAnswers: subAnswers() }));
+      } catch (_e) { /* ignoré */ }
+    }
+    const q = a.quality;
+    if (!q) { box.hidden = true; return; }
+    box.hidden = false; box.innerHTML = "";
+    const h = document.createElement("div"); h.className = "q-head " + q.level;
+    h.textContent = q.level === "bon" ? "✔ Qualité de l'analyse : aucun problème repéré" : "⚠ Qualité de l'analyse : " + q.items.filter((i) => i.level === "attention").length + " point(s) à améliorer";
+    box.appendChild(h);
+    q.items.forEach((it) => {
+      const row = document.createElement("div"); row.className = "q-item " + it.level;
+      const t = document.createElement("b"); t.textContent = it.title; row.appendChild(t);
+      const d = document.createElement("div"); d.textContent = it.detail; row.appendChild(d);
+      const f = document.createElement("div"); f.className = "muted"; f.textContent = "À faire : " + it.fix; row.appendChild(f);
+      box.appendChild(row);
+    });
+    if (q.good.length) { const g = document.createElement("div"); g.className = "muted q-good"; g.textContent = "Contrôles réussis : " + q.good.join(" · "); box.appendChild(g); }
+  }
+
   function renderStats() {
     const a = state.project.ai, box = $("ai-stats");
     box.innerHTML = "";
+    renderQuality();
     if (!a || !a.stats) { setChip("ai-s4-state", "Pas encore d'analyse", ""); renderNext(); return; }
     const st = a.stats;
     const cells = [
@@ -834,6 +870,7 @@
     a.stats = Object.assign({}, res.stats); renderStats();
     a.suggestedEvents = res.events.filter((e) => !state.project.events.some((x) => x.type === e.type && Math.abs(x.t - e.t) < 2)).map((e, i) => Object.assign({ sid: "s" + Date.now().toString(36) + i }, e));
     a.suggested = a.suggestedEvents.length; a.uncertain = res.uncertain; a.context = res.context;
+    updateQuality(res); renderQuality();
     renderSuggestions(); App.changed();
   }
 
@@ -948,6 +985,7 @@
       const lostTxt = result.lost.length ? " Caméra perdue : " + result.lost.map((l) => App.fmt(l[0]) + "–" + App.fmt(l[1])).join(", ") + "." : "";
       msg.textContent = (out.length ? "Analyse terminée : " + out.length + " images, " + a.suggestedEvents.length + " erreur(s) suggérée(s)" + (res.uncertain.length ? ", " + res.uncertain.length + " non signalée(s) (contexte incertain)" : "") + ". Temps de jeu analysé de façon fiable : " + Math.round(res.context.reliable.ratio * 100) + " %." : "Analyse terminée, mais aucun joueur n'a été retenu : vérifiez le calibrage et les tenues.") + (result.notes.length ? " " + result.notes.join(" ") : "") + lostTxt;
       if (out.length) learnDuration(range, { fps, tiles, camera }, (Date.now() - startedAt) / 1000);
+      updateQuality(res);
       renderStats(); renderSuggestions(); refreshLive(); updateEstimate(); App.changed(true);
       okRun = out.length > 0;
     } catch (e) {
@@ -1145,7 +1183,7 @@
 
   const FSAI = window.FSAI = {
     hooks: {}, segmentImpl: null,
-    ai, memory, refs, kitWarnings, grabSam, renderKits, renderStats, renderCalibs, renderPoints, validateCalibration, runAnalysis, updateEstimate,
+    ai, memory, refs, kitWarnings, quality: () => (state.project.ai ? state.project.ai.quality : null), grabSam, renderKits, renderStats, renderCalibs, renderPoints, validateCalibration, runAnalysis, updateEstimate,
     addLayer: (fn) => { layers.push(fn); }, setPointer: (p) => { pointer = p; updateOverlayMode(); }, redraw: refreshLive,
     beginPlacing: (id) => { if (!App.isVideoReady()) return false; video.pause(); pickRole = null; pip = null; renderPipette(); placing = id; $("ai-landmark").value = id; updateOverlayMode(); return true; },
     cancelPlacing: () => { placing = null; updateOverlayMode(); },

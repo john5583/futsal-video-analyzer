@@ -84,6 +84,8 @@
     const o = r.out;
     if (!o.ok) { box.innerHTML = "<p class=\"muted\">" + esc(o.reason || "Rien à comparer.") + "</p>"; return; }
     let h = "<p class=\"plan-head\">Temps de jeu comparé à ton plan : <b>" + Math.round(o.analysed.sec) + " s</b> sur " + Math.round(o.analysed.total) + " s analysées (" + pct(o.analysed.ratio) + "). <span class=\"muted\">Seules les images où le jeu est en cours, le ballon visible et les quatre joueurs de champ identifiés sont jugées.</span></p>";
+    const qq = window.FSAI && window.FSAI.quality ? window.FSAI.quality() : null;
+    if (qq && qq.level === "attention") h += "<div class=\"plan-qual\"><b>⚠ Qualité de l'analyse (voir l'onglet Analyse vidéo)</b><ul>" + qq.items.filter((i) => i.level === "attention").map((i) => "<li>" + esc(i.title) + " — " + esc(i.detail) + "</li>").join("") + "</ul></div>";
     h += "<h3>Respect de mon plan</h3>";
     if (!o.rules.length) h += "<p class=\"muted\">Aucune consigne vérifiable avec tes réponses actuelles (ou aucune image exploitable).</p>";
     o.rules.forEach((x) => {

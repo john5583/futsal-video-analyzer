@@ -119,6 +119,12 @@ fabricants, non des règles : ce catalogue n'est **pas exhaustif**.
 - Une déduction est toujours étiquetée comme telle ; un résultat sur peu d'images est dit « indicatif ».
 - Les résultats d'un seul match ne sont pas généralisés à un autre.
 
+## 5 quater. Le programme se contrôle lui-même
+
+- **Contrôle qualité** (panneau « Qualité de l'analyse », sous les résultats, et page « Mon plan tactique ») : après chaque analyse, le programme mesure les situations qui la rendent fragile et les dit avec le chiffre et le remède : terrain peu visible (les quatre joueurs de champ ne sont pas tous vus), ballon peu visible, caméra souvent perdue, remplaçants visibles sans zone de banc, gardien vu du mauvais côté (camp inversé), 2e période non marquée, faible résolution, tenues proches, questions en attente. Il ne corrige rien en cachette.
+- **Avant de lancer l'analyse** : une liste « prêt / manque » (terrain, tenues, banc, 2e période).
+- **Règles verrouillées par des tests** (`tests/invariants.test.js`) : un indice ne décide jamais seul ; poser une question ne modifie rien ; un trou n'est jamais comblé ; pas de ballon fiable = pas d'erreur liée au ballon ; une déduction est étiquetée ; peu d'images = « indicatif » et le score n'est jamais lu ; une réponse ambiguë n'est appliquée à personne ; la mémoire est celle d'un seul projet ; aucune couleur de but inventée ; aucun appel réseau ; aucune promesse de « 100 % ». Si un changement futur viole l'une d'elles, la suite de tests échoue.
+
 ## 6. Limites assumées
 
 - Le détecteur est généraliste et ne s'améliore pas avec vos réponses. Un détecteur entraîné (ballon, gardien, buts) demanderait

@@ -261,3 +261,16 @@ fieldset.plan-q label.plan-opt{display:flex;flex-direction:row;gap:8px;align-ite
 .person-menu{position:fixed;z-index:60;display:flex;flex-direction:column;gap:4px;min-width:240px;max-width:320px;padding:8px;background:#0b1220;border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 28px #000b}
 .person-menu .pm-title{font-weight:600;font-size:13px;padding:2px 4px 6px;color:#fff}
 .person-menu button{text-align:left}
+.ai-quality{border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin:8px 0;background:#0f1a2b}
+.ai-quality .q-head{font-weight:700;margin-bottom:4px}
+.ai-quality .q-head.bon{color:#86efac}
+.ai-quality .q-head.attention{color:#fcd34d}
+.ai-quality .q-item{padding:6px 0 6px 10px;border-left:4px solid #64748b;margin:6px 0;font-size:13px}
+.ai-quality .q-item.attention{border-left-color:#f59e0b}
+.ai-quality .q-good{margin-top:6px;font-size:12px}
+.wiz-pre{list-style:none;margin:6px 0;padding:0;font-size:13px}
+.wiz-pre li{padding:2px 0}
+.wiz-pre li.ko{color:#fcd34d}
+.wiz-pre li.ok{color:#86efac}
+.plan-qual{border:1px solid #f59e0b;border-radius:8px;padding:8px 12px;margin:8px 0;background:#1f1a0b;font-size:13px}
+.plan-qual ul{margin:4px 0 0 18px;padding:0}
