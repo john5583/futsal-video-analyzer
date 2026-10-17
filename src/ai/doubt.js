@@ -36,6 +36,9 @@
     A: "de votre équipe", B: "de l'équipe adverse", GKA: "le gardien de votre équipe", GKB: "le gardien adverse",
     NONE: "ni joueur ni gardien (arbitre, public, remplaçant)"
   };
+  /* Rôle précis d'une personne écartée du jeu : retenu dans la réponse (« Mes réponses »), sans effet sur les statistiques :
+     toutes ces personnes sont retirées du comptage des joueurs comme « NONE ». */
+  const ROLE_LABEL = { COACH: "entraîneur", DELEGATE: "délégué", MEDIC: "soigneur ou médecin", REF: "arbitre", SUBST: "remplaçant", PUBLIC: "public ou autre" };
   const r2 = (t) => Math.round(t * 100) / 100;
 
   const median = (v) => { const a = v.slice().sort((x, y) => x - y); return a.length ? a[a.length >> 1] : null; };
@@ -288,9 +291,10 @@
   }
 
   /* Enregistre une réponse dans la mémoire. Renvoie l'entrée retenue. */
-  function answerTeam(mem, q, team, via) {
+  function answerTeam(mem, q, team, via, role) {
     const a = { kind: "team", t: q.t, x: q.x, y: q.y, team };
     if (via) a.via = via;
+    if (team === "NONE" && ROLE_LABEL[role]) a.role = role;           // rôle précis facultatif : jamais deviné, seulement celui que le coach a choisi
     if (Array.isArray(q.pts)) a.pts = q.pts;
     mem.answers = mem.answers.filter((o) => !(o.kind === "team" && sameSpot(o, q))).concat([a]);
     return a;
@@ -331,7 +335,7 @@
 
   /* Texte d'une réponse pour l'écran « Mes réponses ». fmt(t) -> "mm:ss" ; labelOf(type) -> libellé d'une erreur. */
   function describeAnswer(a, fmt, labelOf) {
-    if (a.kind === "team") return fmt(a.t) + " — personne désignée : " + (TEAM_LABEL[a.team] || a.team) + (a.via ? " (même réponse appliquée sur votre accord : " + a.via + ")" : "");
+    if (a.kind === "team") return fmt(a.t) + " — personne désignée : " + (a.team === "NONE" && ROLE_LABEL[a.role] ? ROLE_LABEL[a.role] + " (ne compte pas comme joueur)" : TEAM_LABEL[a.team] || a.team) + (a.via ? " (même réponse appliquée sur votre accord : " + a.via + ")" : "");
     if (a.kind === "ball") return fmt(a.t) + " — le ballon est ici (position confirmée par vous sur cette image)";
     if (a.kind === "event") return fmt(a.t) + " — « " + labelOf(a.type) + " » : " + (a.verdict === "oui" ? "oui, c'est arrivé (ajoutée aux événements)" : "non, écartée");
     if (a.kind === "sub") return fmt(a.t) + " — passage par la zone de remplacement : " + (a.verdict === "joueur" ? "joueur sur le terrain" : "remplaçant qui entre ou sort");
@@ -339,5 +343,5 @@
     return "Réponse";
   }
 
-  return { trackDoubts, sameTrackHint, sameLookHint, answerBall, applyOne, applyAnswers, undoOne, openQuestions, answerTeam, answerEvent, answerSub, answerBench, removeAnswer, describeAnswer, isRejected, filterRejected, reject, unreject, TEAM_LABEL, MIN_DETECTIONS, SHARE_OK, T_TOL, D_TOL };
+  return { trackDoubts, sameTrackHint, sameLookHint, answerBall, applyOne, applyAnswers, undoOne, openQuestions, answerTeam, answerEvent, answerSub, answerBench, removeAnswer, describeAnswer, isRejected, filterRejected, reject, unreject, TEAM_LABEL, ROLE_LABEL, MIN_DETECTIONS, SHARE_OK, T_TOL, D_TOL };
 });
