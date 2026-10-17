@@ -45,6 +45,11 @@
           </div>
           <video id="video" crossorigin="anonymous" preload="metadata" hidden></video>
           <canvas id="overlay" class="overlay" hidden></canvas>
+          <div id="zoom-ctl" class="zoom-ctl" title="Molette de la souris : zoom ; glisser : déplacer l'image">
+            <button id="zm-in" title="Agrandir (ou molette de la souris)">＋</button>
+            <button id="zm-out" title="Réduire">－</button>
+            <button id="zm-reset" title="Revenir à la vue entière">1×</button>
+          </div>
         </div>
         <div class="controls" id="controls">
           <button id="c-prev" title="Retour 5 s (←)">⏪ 5 s</button>
@@ -397,6 +402,7 @@
 <script src="ai/tracker.js"></script>
 <script src="ai/doubt.js"></script>
 <script src="ai/ballLabels.js"></script>
+<script src="ai/zoom.js"></script>
 <script src="ai/camera.js"></script>
 <script src="ai/context.js"></script>
 <script src="ai/match.js"></script>

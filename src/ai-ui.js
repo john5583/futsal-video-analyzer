@@ -2,7 +2,7 @@
 (function () {
   "use strict";
   const App = window.FSApp;
-  const KB = window.FutsalKB, HG = window.FutsalHomography, K = window.FutsalKit, P = window.FutsalPipeline, M = window.FutsalMatch, E = window.FutsalAnim, D = window.FutsalDoubt, BL = window.FutsalBallLabels, Q = window.FutsalQuality;
+  const KB = window.FutsalKB, HG = window.FutsalHomography, K = window.FutsalKit, P = window.FutsalPipeline, M = window.FutsalMatch, E = window.FutsalAnim, D = window.FutsalDoubt, BL = window.FutsalBallLabels, Z = window.FutsalZoom, Q = window.FutsalQuality;
   const $ = (id) => document.getElementById(id);
   const esc = App.esc;
   const video = App.video, api = App.api, state = App.state;
@@ -48,11 +48,52 @@
 
   /* ---------- géométrie de l'affichage ---------- */
   function boxSize() { const b = $("video-box"); return { w: b.clientWidth, h: b.clientHeight }; }
-  function videoRect() {
+  /* Zoom de la vidéo : { k, tx, ty } ; la vidéo ajustée à la boîte est agrandie de k puis déplacée de (tx, ty). Les coordonnées en pixels de
+     la vidéo ne changent pas : tous les clics et repères passent par videoRect(), donc restent exacts à n'importe quel zoom. */
+  let zm = { k: 1, tx: 0, ty: 0 };
+  function baseRect() {
     const { w, h } = boxSize();
     const vw = video.videoWidth || 1, vh = video.videoHeight || 1;
     const s = Math.min(w / vw, h / vh);
     return { s, x: (w - vw * s) / 2, y: (h - vh * s) / 2, vw, vh };
+  }
+  function videoRect() { return Z.apply(baseRect(), zm); }
+  function setZoom(z) {
+    const { w, h } = boxSize();
+    zm = Z.clampPan(z.k, z.tx, z.ty, w, h);
+    video.style.transformOrigin = "0 0";
+    video.style.transform = zm.k === 1 ? "" : "translate(" + zm.tx + "px," + zm.ty + "px) scale(" + zm.k + ")";
+    $("video-box").classList.toggle("zoomed", zm.k > 1);
+    const rs = $("zm-reset"); if (rs) rs.textContent = zm.k === 1 ? "1×" : (Math.round(zm.k * 10) / 10) + "×";
+    drawOverlay();
+  }
+  function zoomBy(factor, mx, my) { const { w, h } = boxSize(); setZoom(Z.zoomAt(zm, mx == null ? w / 2 : mx, my == null ? h / 2 : my, factor, w, h)); }
+  function zoomOnPoint(u, v, k) { const { w, h } = boxSize(); setZoom(Z.centerOn(baseRect(), u, v, k, w, h)); }
+  function bindZoom() {
+    const box = $("video-box");
+    box.addEventListener("wheel", (e) => {
+      if (!video.videoWidth || video.hidden) return;
+      e.preventDefault();
+      const r = box.getBoundingClientRect();
+      zoomBy(e.deltaY < 0 ? 1.25 : 0.8, e.clientX - r.left, e.clientY - r.top);
+    }, { passive: false });
+    $("zm-in").addEventListener("click", () => zoomBy(1.5)); $("zm-out").addEventListener("click", () => zoomBy(1 / 1.5)); $("zm-reset").addEventListener("click", () => setZoom({ k: 1, tx: 0, ty: 0 }));
+    // glisser pour déplacer l'image agrandie (désactivé pendant un outil qui utilise déjà le glisser) ; un glisser n'est jamais pris pour un clic
+    let drag = null, moved = false;
+    box.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0 || zm.k <= 1 || pointer || (e.target && e.target.closest && e.target.closest(".zoom-ctl"))) return;
+      drag = { x: e.clientX, y: e.clientY, tx: zm.tx, ty: zm.ty }; moved = false;
+    });
+    document.addEventListener("pointermove", (e) => {
+      if (!drag) return;
+      const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+      if (!moved && Math.hypot(dx, dy) < 5) return;
+      moved = true; box.classList.add("panning");
+      setZoom({ k: zm.k, tx: drag.tx + dx, ty: drag.ty + dy });
+    });
+    document.addEventListener("pointerup", () => { if (!drag) return; drag = null; box.classList.remove("panning"); if (moved) setTimeout(() => { moved = false; }, 0); });
+    box.addEventListener("click", (e) => { if (moved) { e.stopPropagation(); e.preventDefault(); moved = false; } }, true);
+    window.addEventListener("resize", () => { if (zm.k > 1) setZoom(zm); });
   }
   function toVideo(ox, oy) { const r = videoRect(); return [(ox - r.x) / r.s, (oy - r.y) / r.s]; }
   function toView(ix, iy) { const r = videoRect(); return [ix * r.s + r.x, iy * r.s + r.y]; }
@@ -814,7 +855,7 @@
     bs = { list, i: 0 }; bsBox(true); bsShow();
     try { $("ai-bs-box").scrollIntoView({ block: "nearest" }); } catch (_e) { /* défilement indisponible */ }
   }
-  function bsEnd(msg) { bs = null; qHighlight = null; bsBox(false); drawOverlay(); if (msg) App.toast(msg); }
+  function bsEnd(msg) { bs = null; qHighlight = null; bsBox(false); setZoom({ k: 1, tx: 0, ty: 0 }); if (msg) App.toast(msg); }
   function bsMove(d) {
     if (!bs) return;
     const j = bs.i + d;
@@ -832,7 +873,8 @@
     qHighlight = { t, ballPt: pt, label: "Ballon proposé" };
     $("ai-bs-text").textContent = "Image " + (bs.i + 1) + " sur " + bs.list.length + " (" + App.fmt(t) + ") — " + (pt ? "le programme propose le ballon dans le cercle orange. Est-ce bien le ballon ?" : "le programme ne propose aucun ballon. Vois-tu le ballon ?") + "  [Entrée = oui, N = aucun ballon, S = passer]";
     $("ai-bs-ok").disabled = !pt;
-    App.seek(t); drawOverlay();
+    App.seek(t);
+    if (pt) zoomOnPoint(pt.u, pt.v, 5); else setZoom({ k: 1, tx: 0, ty: 0 });      // agrandissement automatique autour du ballon proposé
   }
   function bsOk() { if (bs && bs.pt) saveBallLabel(bs.list[bs.i], bs.pt.u, bs.pt.v, bs.H); }
   function bsNone() { if (bs) saveBallLabel(bs.list[bs.i], null, null, null); }
@@ -1144,6 +1186,7 @@
     $("ai-bench").addEventListener("change", () => { upd(); reanalyzeSuggestions(); });
     $("ai-bench-mark").addEventListener("click", startBenchMark);
     $("ai-bl-export").addEventListener("click", exportBallLabels);
+    bindZoom();
     $("ai-bs-start").addEventListener("click", startBallSession);
     $("ai-bs-ok").addEventListener("click", bsOk); $("ai-bs-none").addEventListener("click", bsNone);
     $("ai-bs-skip").addEventListener("click", () => bsMove(1)); $("ai-bs-prev").addEventListener("click", () => bsMove(-1));
@@ -1215,6 +1258,7 @@
     document.addEventListener("mousedown", (e) => { if (menuEl && !menuEl.contains(e.target)) closeMenu(); });
     document.addEventListener("keydown", (e) => { if (e.key === "Escape" && benchMark) { benchMark = null; updateOverlayMode(); return; } if (e.key === "Escape" && (placing || pickRole || pip)) { placing = null; pickRole = null; if (pip) cancelPipette(); else updateOverlayMode(); } });
     ["loadedmetadata", "seeked", "pause", "timeupdate", "emptied"].forEach((ev) => video.addEventListener(ev, () => {
+      if (ev === "emptied") setZoom({ k: 1, tx: 0, ty: 0 });
       if (preview && ev === "seeked" && lastTest && Math.abs(video.currentTime - preview.t) > 0.2) { preview = null; lastTest = null; $("ai-test-msg").textContent = ""; }
       if (ev === "loadedmetadata" || ev === "emptied") updateOverlayMode(); else refreshLive();
     }));
