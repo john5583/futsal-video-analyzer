@@ -615,7 +615,7 @@
   }
 
   /* La mémoire du projet filtre un résultat d'analyse : les erreurs que le coach a écartées ne reviennent pas. */
-  const subAnswers = () => memory().answers.filter((x) => x.kind === "sub");
+  const subAnswers = () => memory().answers.filter((x) => x.kind === "sub" || x.kind === "team");
   function applyMemory(res) {
     const mem = memory();
     if (state.project.ai) state.project.ai.subs = res.subs || [];

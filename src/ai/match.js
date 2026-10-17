@@ -149,11 +149,13 @@
     const near = (x, pt) => pt && Math.abs(x.t - pt[0]) <= 1.0 && Math.hypot(x.x - pt[1].x, x.y - pt[1].y) <= 1.5;
     const idsOf = (x) => [...first.keys()].filter((id) => near(x, first.get(id)) || near(x, last.get(id)));
     // une réponse qui correspond à deux personnes (l'entrant et le sortant d'un même échange) n'est appliquée à aucune : on ne devine pas
-    const ansOf = (id) => (answers || []).find((x) => x && x.kind === "sub" && (near(x, first.get(id)) || near(x, last.get(id))) && idsOf(x).length === 1);
+    // Dire qui est la personne (mon équipe, adversaire, gardien) répond aussi à la question : c'est un joueur sur le terrain ; « ni joueur ni gardien » = écartée.
+    const ansOf = (id) => (answers || []).find((x) => x && (x.kind === "sub" || x.kind === "team") && (near(x, first.get(id)) || near(x, last.get(id))) && idsOf(x).length === 1);
+    const verdictOf = (a) => (a.kind === "team" ? (a.team === "NONE" ? "remplacant" : "joueur") : a.verdict);
     const add = (id, a, b, t, p) => {
       const ans = ansOf(id);
       if (!subs.list.some((q) => q.id === id) && last.get(id)[0] - first.get(id)[0] >= SUB_ASK_MIN) subs.list.push({ id, t, x: p.x, y: p.y, b: Array.isArray(p.b) ? p.b : null, answered: !!ans });
-      if (ans && ans.verdict === "joueur") return;
+      if (ans && verdictOf(ans) === "joueur") return;
       if (!subs.has(id)) subs.set(id, []);
       subs.get(id).push([a, b]);
     };
