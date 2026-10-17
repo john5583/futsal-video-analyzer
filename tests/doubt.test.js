@@ -422,3 +422,17 @@ test("rôle précis d'une personne écartée : retenu dans la réponse, retirée
   assert.ok(r.ok);
   assert.deepEqual(frames[0].players.map((p) => p.id), [8]);
 });
+
+test("remplaçants : dire qui est la personne (gardien, équipe) répond aussi à la question de remplacement ; « ni joueur ni gardien » l'écarte", () => {
+  const mk = (id, t0, t1, x, y) => Array.from({ length: Math.round((t1 - t0) / 0.2) }, (_v, i) => ({ t: t0 + i * 0.2, p: { id, team: "A", x, y, b: B } }));
+  const frames = toFrames(mk(1, 0, 20, 10, 10), mk(2, 0, 20, 30, 12), mk(5, 5, 20, 20, 0.5));
+  const base = { L: 40, W: 20, bench: "left" };
+  const s = M.analyze(frames, base).subs.find((x) => x.id === 5);
+  assert.ok(s && !s.answered);
+  const rG = M.analyze(frames, Object.assign({ subAnswers: [{ kind: "team", t: s.t, x: s.x, y: s.y, team: "GKB" }] }, base));
+  assert.ok(rG.subs.find((x) => x.id === 5).answered, "la question de remplacement n'est plus posée");
+  assert.ok(rG.normalized.every((f) => f.A.every((p) => !p.sub)), "la personne est comptée comme joueur");
+  assert.equal(D.openQuestions({ subs: rG.subs, memory: { answers: [], rejected: [] } }).filter((q) => q.kind === "sub").length, 0);
+  const rN = M.analyze(frames, Object.assign({ subAnswers: [{ kind: "team", t: s.t, x: s.x, y: s.y, team: "NONE" }] }, base));
+  assert.ok(rN.subs.find((x) => x.id === 5).answered && rN.normalized.some((f) => f.A.some((p) => p.id === 5 && p.sub)), "écartée : traitée comme remplaçant");
+});
