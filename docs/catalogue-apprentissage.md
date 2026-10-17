@@ -131,3 +131,9 @@ fabricants, non des règles : ce catalogue n'est **pas exhaustif**.
   des centaines d'images étiquetées et un entraînement dédié : non fait.
 - La mémoire est par projet. Une autre salle ou un autre match repart de zéro (c'est voulu : tenues, numéros et salles changent).
 - Les résultats restent à valider par le coach : le programme propose, il ne tranche pas à sa place.
+
+## Rôles des personnes écartées du jeu (entraîneur, délégué, soigneur, arbitre, remplaçant, public)
+Quand une personne n'est ni joueur ni gardien, tu peux préciser son rôle ; il est retenu dans « Mes réponses » et la personne est retirée du comptage des joueurs. Le programme ne devine jamais ce rôle.
+
+## Indices de gardien : ce qui est mesurable et ce qui ne l'est pas
+Mesuré sur de vraies vidéos 1920x1080 : une main de gardien fait environ 10 pixels et bouge vite (flou) ; gants, tape sur les doigts, coudières et genouillères ne sont donc pas lisibles de façon fiable. Le programme ne s'en sert pas et ne prétend pas les reconnaître. Il se base sur la tenue (couleur, pantalon ou short), la position dans la surface et le nombre de joueurs de champ, et te pose la question en cas de doute.

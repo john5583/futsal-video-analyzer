@@ -405,3 +405,20 @@ test("clic sur un cadre : l'identifiant exact évite l'ambiguïté entre deux jo
   assert.ok(r.ok);
   assert.ok(frames.every((f) => f.players.filter((p) => p.id === 2).every((p) => p.team === "GKA") && f.players.filter((p) => p.id === 1).every((p) => p.team === "A")));
 });
+
+test("rôle précis d'une personne écartée : retenu dans la réponse, retirée du comptage, jamais deviné", () => {
+  const mem = { answers: [], rejected: [] };
+  const q = { t: 5, x: 10, y: 3, id: 7 };
+  const a = D.answerTeam(mem, q, "NONE", undefined, "COACH");
+  assert.equal(a.team, "NONE");
+  assert.equal(a.role, "COACH");
+  assert.match(D.describeAnswer(a, (t) => String(t), (x) => x), /entraîneur \(ne compte pas comme joueur\)/);
+  const b = D.answerTeam(mem, { t: 9, x: 1, y: 1 }, "NONE", undefined, "INCONNU");
+  assert.equal(b.role, undefined, "un rôle inconnu n'est pas retenu");
+  const c = D.answerTeam(mem, { t: 12, x: 2, y: 2 }, "A", undefined, "COACH");
+  assert.equal(c.role, undefined, "un rôle n'accompagne que « ni joueur ni gardien »");
+  const frames = [{ t: 5, players: [{ id: 7, team: "A", x: 10, y: 3 }, { id: 8, team: "B", x: 20, y: 9 }] }];
+  const r = D.applyOne(frames, a, { id: 7 });
+  assert.ok(r.ok);
+  assert.deepEqual(frames[0].players.map((p) => p.id), [8]);
+});

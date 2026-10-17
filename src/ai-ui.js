@@ -693,7 +693,7 @@
         tx.textContent = App.fmt(q.t) + " — Qui est la personne dans le cadre orange ? (" + q.why + ")";
         add("Mon équipe", () => answerTeam(q, "A")); add("Adversaire", () => answerTeam(q, "B"));
         add("Gardien (nous)", () => answerTeam(q, "GKA")); add("Gardien adverse", () => answerTeam(q, "GKB"));
-        add("Ni joueur ni gardien", () => answerTeam(q, "NONE"));
+        Object.keys(D.ROLE_LABEL).forEach((k) => add(D.ROLE_LABEL[k][0].toUpperCase() + D.ROLE_LABEL[k].slice(1) + " (ne pas compter)", () => answerTeam(q, "NONE", k)));
       } else if (q.kind === "sub") {
         tx.textContent = App.fmt(q.t) + " — Cette personne passe par la zone de remplacement : remplaçant qui entre ou sort, ou joueur sur le terrain ? (je ne la compte pas comme joueur pendant 3 s)";
         add("Remplaçant (entre / sort)", () => answerSub(q, "remplacant")); add("Joueur sur le terrain", () => answerSub(q, "joueur"));
@@ -717,10 +717,10 @@
     App.seek(q.kind === "team" || q.kind === "sub" || q.kind === "bench" ? q.t : Math.max(0, q.t - 2));
     drawOverlay();
   }
-  function answerTeam(q, team) {
+  function answerTeam(q, team, role) {
     const a = state.project.ai;
     qHighlight = null;
-    const ans = D.answerTeam(memory(), q, team), r = D.applyOne(frames, ans, { id: q.id });
+    const ans = D.answerTeam(memory(), q, team, undefined, role), r = D.applyOne(frames, ans, { id: q.id });
     if (r.ok) { ans.undo = r.undo; a.frames = P.compactFrames(frames); }
     else App.toast("Je ne retrouve pas cette personne dans les images : votre réponse est retenue pour la prochaine analyse.", true);
     const rest = D.openQuestions({ doubts: a.doubts || [], memory: memory() }).filter((x) => x.kind === "team");
@@ -776,8 +776,7 @@
         showMenu(e, "Qui est cette personne ? (lue : " + (best.team === "A" ? "mon équipe" : best.team === "B" ? "adversaire" : lab(best.team)) + ")", [
           { label: "Mon équipe", fn: () => answerTeam(q, "A") }, { label: "Adversaire", fn: () => answerTeam(q, "B") },
           { label: "Mon gardien", fn: () => answerTeam(q, "GKA") }, { label: "Gardien adverse", fn: () => answerTeam(q, "GKB") },
-          { label: "Arbitre, public ou remplaçant (ne pas compter)", fn: () => answerTeam(q, "NONE") }
-        ]);
+        ].concat(Object.keys(D.ROLE_LABEL).map((k) => ({ label: D.ROLE_LABEL[k][0].toUpperCase() + D.ROLE_LABEL[k].slice(1) + " (ne pas compter)", fn: () => answerTeam(q, "NONE", k) }))));
         return;
       }
     }
