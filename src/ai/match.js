@@ -373,7 +373,7 @@
       const h = ctx.states[i] && ctx.states[i].held;
       return !r.team && h && h.conf >= C.CONF_MIN ? Object.assign({}, r, { team: h.team, held: h }) : r;
     });
-    return { events, uncertain, subs: subsInfo.list, possession: shown, context: { passages: ctx.passages, reliable: ctx.reliable, bench: bench ? { side: bench.side, source: bench.source } : null }, stats: stats(nf, shown, L, W), normalized: nf };
+    return { events, uncertain, subs: subsInfo.list, playStates: ctx.states.map((x) => x.play), possession: shown, context: { passages: ctx.passages, reliable: ctx.reliable, bench: bench ? { side: bench.side, source: bench.source } : null }, stats: stats(nf, shown, L, W), normalized: nf };
   }
 
   /* Raison de ne pas suggérer une erreur à l'instant t : arrêt de jeu ou ballon non visible dans la seconde qui précède. */

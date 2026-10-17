@@ -128,6 +128,20 @@
     return pts;
   }
 
+  /* Lignes observées (joueurs triés par x ; nouvelle ligne à partir de 3,5 m d'écart) et correction d'un joueur pour retrouver la forme voulue :
+     { player, x } = le premier joueur dont la ligne diffère, et l'abscisse de la ligne qu'il devrait occuper ; null si rien à corriger. */
+  function shapeFix(sorted, expected) {
+    const e = expected.reduce((a, c, i) => a.concat(new Array(c).fill(i)), []);
+    if (!sorted.length || e.length !== sorted.length) return null;
+    const o = []; let line = 0;
+    sorted.forEach((p, i) => { if (i && p.x - sorted[i - 1].x >= 3.5) line++; o.push(line); });
+    const k = o.findIndex((l, i) => l !== e[i]);
+    if (k < 0) return null;
+    const mates = sorted.filter((_p, i) => e[i] === e[k] && i !== k);
+    const x = mates.length ? mates.reduce((a, p) => a + p.x, 0) / mates.length : sorted[k].x + (e[k] > o[k] ? 4 : -4);
+    return { player: sorted[k], x };
+  }
+
   /* event : { t, type } ; frames : images analysées (format développé) ; opts : { L, W, dirAt(t) }.
      Renvoie { t, ok, items: [...], correction: { ghost, arrows, lines, crosses } | null, involved: [ids], kind }.
      items / correction sont en coordonnées terrain réelles ; les éléments liés à un joueur portent son id (ils le suivent). */
@@ -156,7 +170,38 @@
     if (!players.length) return out("vide");
     const ref = ball || { x: players.reduce((s, p) => s + p.x, 0) / players.length, y: players.reduce((s, p) => s + p.y, 0) / players.length };
     const nearest = (list, q) => list.slice().sort((a, b) => d2(a, q) - d2(b, q))[0] || null;
-    const type = event.type;
+    const type = event.type === "plan_etire" ? "equipe_etiree" : event.type;      // bloc étiré du plan = même dessin que l'erreur du catalogue
+
+    // ----- écarts au plan tactique (event : { t, type: "plan_…", expected, observed, target, shift, … }) -----
+    if (type === "plan_forme") {
+      const sorted = A.slice().sort((a, b) => a.x - b.x), want = (event.expected || []).join("-"), got = (event.observed || []).join("-");
+      sorted.forEach((p, i) => ring(p, "err", i === 0 && got ? "Forme " + got + " au lieu de " + want : null));
+      const fix = shapeFix(sorted, event.expected || []);
+      if (fix) ghost(fix.player, fix.x, fix.player.y, "Reprendre le " + want);
+      return out("plan");
+    }
+    if (type === "plan_bloc") {
+      const lo = ((event.target || [0, 1])[0]) * L, hi = ((event.target || [0, 1])[1]) * L, shift = event.shift || 0;
+      items.push({ type: "zone", pts: [R(lo, 0), R(hi, 0), R(hi, W), R(lo, W)], color: "opp", label: "Bloc visé" });
+      A.forEach((p, i) => ring(p, "err", i === 0 ? (shift > 0 ? "Bloc trop bas" : "Bloc trop haut") : null));
+      A.forEach((p) => { const nx = Math.max(0.5, Math.min(L - 0.5, p.x + shift)); corr.arrows.push({ pts: [R(p.x, p.y), R(nx, p.y)], label: null }); });
+      return out("plan");
+    }
+    if (type === "plan_pressing") {
+      const holder = nearest(Bp, ref), presser = nearest(A, ref);
+      if (holder) ring(holder, "opp", "Porte le ballon");
+      if (presser) {
+        ring(presser, "err", "Ne presse pas");
+        if (holder) ghost(presser, holder.x - 1.5, holder.y, "Presser le porteur");
+      }
+      return out("plan");
+    }
+    if (type === "plan_gardien") {
+      const gk = players.find((p) => p.team === "GKA");
+      if (gk) { ring(gk, "err", "Gardien trop haut"); ghost(gk, 3, W / 2, "Retour dans sa zone"); }
+      else A.forEach((p) => ring(p, "err", null));
+      return out("plan");
+    }
 
     if (type === "perte_zone_mediane" || type === "perte_zone_def") {
       const before = stateAt(fs, t - 0.4);
@@ -288,5 +333,5 @@
     return best;
   }
 
-  return { chooseCorner, frameProjection, Projector, stateAt, buildOverlay, footOf, MIN_PLAYERS, MAX_ERR, MAX_GAP };
+  return { shapeFix, chooseCorner, frameProjection, Projector, stateAt, buildOverlay, footOf, MIN_PLAYERS, MAX_ERR, MAX_GAP };
 });

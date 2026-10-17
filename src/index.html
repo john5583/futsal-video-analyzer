@@ -13,6 +13,7 @@
   <nav class="tabs" id="tabs">
     <button data-tab="analyse" class="active">Analyse vidéo</button>
     <button data-tab="rapport">Rapport &amp; solutions</button>
+    <button data-tab="plan">Mon plan tactique</button>
     <button data-tab="corrections">Corrections animées</button>
     <button data-tab="kb">Base de connaissances</button>
     <button data-tab="aide">Guide</button>
@@ -219,6 +220,31 @@
     <iframe id="report-frame" sandbox="" title="Rapport d'analyse"></iframe>
   </section>
 
+  <!-- MON PLAN TACTIQUE -->
+  <section id="tab-plan" class="tab">
+    <div class="plan-layout">
+      <div class="plan-col">
+        <h2>Mon plan tactique</h2>
+        <p class="muted">Réponds à quelques questions : le programme compare ensuite ton plan à ce qu'il a mesuré sur le match analysé, et te montre ce qu'il ne fallait pas faire et ce qu'il faudrait faire. Il ne juge que ce qu'il peut mesurer ; le reste est dit clairement.</p>
+        <div id="plan-questions"></div>
+        <label class="plan-notes-l"><b>Mes autres consignes</b> <span class="muted">(sortie de balle, coups de pied arrêtés, rôles… notées dans cette page, non vérifiées par le programme)</span>
+          <textarea id="plan-notes" rows="3" placeholder="Ex. : sortie courte depuis le gardien, corner à deux joueurs…"></textarea></label>
+        <div class="plan-actions"><button id="plan-reset" class="ghost">Revenir aux valeurs conseillées pour ce système</button></div>
+      </div>
+      <div class="plan-col">
+        <h2>Mon match face à mon plan</h2>
+        <div class="corr-stage plan-stage"><div id="plan-real" class="corr-real" hidden>
+          <video id="pl-video" muted playsinline preload="auto"></video>
+          <canvas id="pl-overlay" class="cr-overlay"></canvas>
+          <canvas id="pl-map" class="cr-map" title="Vue de dessus : la même scène"></canvas>
+          <div id="pl-msg" class="cr-msg" hidden></div>
+        </div></div>
+        <p id="plan-view-text" class="cr-text" hidden></p>
+        <div id="plan-result"></div>
+      </div>
+    </div>
+  </section>
+
   <!-- CORRECTIONS ANIMÉES -->
   <section id="tab-corrections" class="tab">
     <div class="corr-layout">
@@ -337,6 +363,7 @@
 <script src="knowledge/glossary.js"></script>
 <script src="knowledge/drills.js"></script>
 <script src="knowledge/errors.js"></script>
+<script src="knowledge/plan.js"></script>
 <script src="engine/analyzer.js"></script>
 <script src="anim/engine.js"></script>
 <script src="anim/builder.js"></script>
@@ -365,6 +392,8 @@
 <script src="ai/court-fit.js"></script>
 <script src="wizard.js"></script>
 <script src="anim/realview.js"></script>
+<script src="engine/compliance.js"></script>
 <script src="corrections-ui.js"></script>
+<script src="plan-ui.js"></script>
 </body>
 </html>

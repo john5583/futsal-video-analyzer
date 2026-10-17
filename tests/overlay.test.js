@@ -74,3 +74,52 @@ test("perte de balle sans coéquipier visible : le joueur est guidé vers le cô
   assert.equal(o.correction.ghost.to[1], 1.5, "vers la ligne de touche la plus proche");
   assert.equal(o.correction.ghost.label, "Jouer vers l'extérieur");
 });
+
+/* ---------- écarts au plan tactique ---------- */
+const mkPlanFrames = (A, extra) => [0, 0.2, 0.4].map((t) => ({ t, players: A.map((x, i) => ({ id: i + 1, team: "A", x, y: 4 + i * 4, b: [100 * i, 200, 100 * i + 40, 400] })).concat((extra && extra.players) || []), ball: (extra && extra.ball) || { x: 20, y: 10 } }));
+
+test("plan : forme 2-2 au lieu de 3-1 -> cercles, joueur à déplacer vers la ligne attendue", () => {
+  const fr = mkPlanFrames([5, 7, 17, 19]);
+  const o = O.buildOverlay({ t: 0.2, type: "plan_forme", expected: [3, 1], observed: [2, 2] }, fr, { L: 40, W: 20 });
+  assert.equal(o.ok, true);
+  assert.equal(o.items.filter((i) => i.type === "ring").length, 4);
+  assert.match(o.items.find((i) => i.label).label, /2-2 au lieu de 3-1/);
+  assert.ok(o.correction && o.correction.ghost, "un joueur est déplacé");
+  assert.equal(o.correction.ghost.id, 3, "le premier joueur dont la ligne diffère (rang 3)");
+  assert.ok(o.correction.ghost.to[0] < 17, "il redescend vers la ligne de trois");
+  assert.equal(O.shapeFix([{ x: 5, y: 1 }, { x: 7, y: 2 }, { x: 9, y: 3 }, { x: 22, y: 4 }], [3, 1]), null, "forme déjà respectée : rien à corriger");
+});
+
+test("plan : bloc trop bas -> zone visée et flèches vers le haut ; bloc trop haut -> flèches vers le bas", () => {
+  const low = O.buildOverlay({ t: 0.2, type: "plan_bloc", target: [0.45, 1], shift: 6 }, mkPlanFrames([6, 8, 9, 10]), { L: 40, W: 20 });
+  assert.ok(low.items.some((i) => i.type === "zone" && i.label === "Bloc visé"));
+  assert.equal(low.correction.arrows.length, 4);
+  assert.ok(low.correction.arrows.every((a) => a.pts[1][0] > a.pts[0][0]));
+  assert.match(low.items.find((i) => i.type === "ring" && i.label).label, /trop bas/);
+  const high = O.buildOverlay({ t: 0.2, type: "plan_bloc", target: [0, 0.38], shift: -6 }, mkPlanFrames([26, 28, 29, 30]), { L: 40, W: 20 });
+  assert.ok(high.correction.arrows.every((a) => a.pts[1][0] < a.pts[0][0]));
+});
+
+test("plan : pressing manquant -> porteur et joueur le plus proche, correction près du porteur", () => {
+  const fr = mkPlanFrames([4, 5, 6, 7], { players: [{ id: 20, team: "B", x: 26, y: 10 }], ball: { x: 26, y: 10 } });
+  const o = O.buildOverlay({ t: 0.2, type: "plan_pressing" }, fr, { L: 40, W: 20 });
+  assert.ok(o.items.some((i) => i.label === "Porte le ballon"));
+  assert.ok(o.items.some((i) => i.label === "Ne presse pas"));
+  assert.ok(o.correction.ghost && Math.abs(o.correction.ghost.to[0] - 24.5) < 0.1 && Math.abs(o.correction.ghost.to[1] - 10) < 0.1);
+});
+
+test("plan : gardien monté -> cercle sur le gardien et retour dans sa zone ; bloc étiré = dessin de l'erreur du catalogue", () => {
+  const fr = mkPlanFrames([10, 12, 14, 16], { players: [{ id: 9, team: "GKA", x: 28, y: 10 }] });
+  const g = O.buildOverlay({ t: 0.2, type: "plan_gardien" }, fr, { L: 40, W: 20 });
+  assert.ok(g.items.some((i) => i.label === "Gardien trop haut" && i.id === 9));
+  assert.deepEqual(g.correction.ghost.to, [3, 10]);
+  const e = O.buildOverlay({ t: 0.2, type: "plan_etire" }, mkPlanFrames([2, 8, 14, 22]), { L: 40, W: 20 });
+  assert.equal(e.kind, "bloc", "même dessin que « équipe étirée »");
+});
+
+test("plan : repère inversé à la 2e période (mon équipe attaque vers x décroissant) : les positions restent justes", () => {
+  const fr = mkPlanFrames([35, 33, 23, 21]);
+  const o = O.buildOverlay({ t: 0.2, type: "plan_forme", expected: [3, 1], observed: [2, 2] }, fr, { L: 40, W: 20, dirAt: () => -1 });
+  assert.equal(o.items.filter((i) => i.type === "ring").length, 4);
+  assert.ok(o.correction.ghost.to[0] > 23, "dans le repère réel, le joueur se rapproche de sa ligne");
+});
