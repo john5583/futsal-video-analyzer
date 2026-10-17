@@ -210,6 +210,7 @@
   }
   function answerEvent(mem, q, verdict) {
     const a = { kind: "event", type: q.type, t: q.t, verdict };
+    if (q.event) { a.event = q.event; a.reason = q.reason; }          // gardés pour pouvoir rétablir la question en annulant
     mem.answers = mem.answers.filter((o) => !(o.kind === "event" && o.type === q.type && Math.abs(o.t - q.t) < REJ_TOL)).concat([a]);
     if (verdict === "non") reject(mem, q);
     return a;

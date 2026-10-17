@@ -38,6 +38,9 @@ réutilisé d'un autre projet. Le détecteur lui-même **n'apprend pas** : il ne
 - Une zone de banc qui a beaucoup suivi la caméra (est-elle encore sur le banc ?).
 - Un but qu'il croit voir sans en être sûr : il le dessine et demande « est-ce ce but ? ».
 
+- Les questions concernant peut-être la même personne coupée en plusieurs pistes sont **regroupées en une proposition** : la même réponse n'est appliquée qu'avec votre accord, et chaque réponse reste annulable.
+- Les questions « remplaçant ? » ne portent que sur les personnes suivies au moins 6 secondes (une silhouette qui ne fait que passer n'est pas questionnée).
+
 Une question sans réponse reste **non analysée** : elle n'entre ni dans les statistiques ni dans le rapport.
 
 ## 4. Ce qu'il ne fait jamais

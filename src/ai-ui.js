@@ -733,7 +733,13 @@
       App.renderEvents(); App.renderTimeline(); App.renderPalette();
     }
     D.removeAnswer(mem, a);
-    reanalyzeSuggestions(); refreshLive(); App.changed(true);
+    reanalyzeSuggestions();
+    // la question d'une erreur incertaine revient même si le recalcul ne la retrouve pas (elle est gardée avec la réponse)
+    if (a.kind === "event" && a.event && !(ai.uncertain || []).some((u) => u.type === a.type && Math.abs(u.t - a.t) < 2)) {
+      ai.uncertain = (ai.uncertain || []).concat([{ t: a.t, type: a.type, reason: a.reason || "ballon non visible", event: a.event }]);
+      renderSuggestions();
+    }
+    refreshLive(); App.changed(true);
   }
   function restoreRejected(r) {
     D.unreject(memory(), r);

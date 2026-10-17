@@ -45,6 +45,7 @@
   const BENCH_RATIO = 3;             // …et au moins 3 fois plus d'un côté que de l'autre
   const SUB_LINE = 3;                // m : zone de remplacement le long de la ligne de touche des bancs
   const SUB_ZONE = 10;               // m : de part et d'autre de la ligne médiane
+  const SUB_ASK_MIN = 6;             // s : on ne questionne que les personnes suivies au moins ce temps (une silhouette qui ne fait que passer n'est pas un joueur)
   const SUB_WINDOW = 3;              // s : durée pendant laquelle le joueur qui entre ou sort n'est pas compté
   const PRESS_DIST = 3;              // m : adversaire qui presse le porteur
   const LONG_POSSESSION = 8;         // s : au-delà, attaque placée
@@ -142,10 +143,14 @@
     const first = new Map(), last = new Map();
     frames.forEach((f) => f.players.forEach((p) => { if (!first.has(p.id)) first.set(p.id, [f.t, p]); last.set(p.id, [f.t, p]); }));
     const inZone = (p) => Math.abs(p.y - bench.y) <= SUB_LINE && Math.abs(p.x - L / 2) <= SUB_ZONE;
-    // le coach a déjà répondu pour cette personne à cet endroit : « joueur » = compté comme joueur, « remplaçant » = écarté comme avant
+    // Une réponse du coach vaut pour la PERSONNE (son entrée comme sa sortie) : elle est retrouvée par l'instant et l'endroit de
+    // l'un de ses deux bouts de piste. « joueur » = compté comme joueur ; « remplaçant » = écarté comme avant.
+    // Une question par personne, seulement si elle est suivie assez longtemps (SUB_ASK_MIN).
+    const near = (x, pt) => pt && Math.abs(x.t - pt[0]) <= 1.5 && Math.hypot(x.x - pt[1].x, x.y - pt[1].y) <= 3;
+    const ansOf = (id) => (answers || []).find((x) => x && x.kind === "sub" && (near(x, first.get(id)) || near(x, last.get(id))));
     const add = (id, a, b, t, p) => {
-      const ans = (answers || []).find((x) => x && x.kind === "sub" && Math.abs(x.t - t) <= 1.5 && Math.hypot(x.x - p.x, x.y - p.y) <= 3);
-      subs.list.push({ id, t, x: p.x, y: p.y, b: Array.isArray(p.b) ? p.b : null, answered: !!ans });
+      const ans = ansOf(id);
+      if (!subs.list.some((q) => q.id === id) && last.get(id)[0] - first.get(id)[0] >= SUB_ASK_MIN) subs.list.push({ id, t, x: p.x, y: p.y, b: Array.isArray(p.b) ? p.b : null, answered: !!ans });
       if (ans && ans.verdict === "joueur") return;
       if (!subs.has(id)) subs.set(id, []);
       subs.get(id).push([a, b]);

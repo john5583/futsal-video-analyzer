@@ -224,3 +224,13 @@ test("réponse appliquée à un groupe : chaque réponse est distincte et indiqu
   assert.equal(a.via, "00:35");
   assert.match(D.describeAnswer(a, (t) => "t" + t, (x) => x), /même réponse appliquée sur votre accord/);
 });
+
+test("remplaçants : une question par personne (entrée et sortie), seulement si suivie assez longtemps ; la réponse vaut pour les deux", () => {
+  const mk = (id, t0, t1, x, y) => Array.from({ length: Math.round((t1 - t0) / 0.2) }, (_v, i) => ({ t: t0 + i * 0.2, p: { id, team: "A", x, y, b: B } }));
+  // 5 : entre à 5 s par la zone et ressort à 12 s par la zone (7 s) ; 6 : ne fait que passer 2 s ; 1 et 2 : joueurs
+  const frames = toFrames(mk(1, 0, 30, 10, 10), mk(2, 0, 30, 30, 12), mk(5, 5, 12, 20, 0.5), mk(6, 8, 10, 25, 0.5));
+  const r0 = M.analyze(frames, { L: 40, W: 20, bench: "left" });
+  assert.deepEqual(r0.subs.map((s) => s.id), [5], "une seule question (id 5) : la silhouette de 2 s n'est pas questionnée");
+  const rJ = M.analyze(frames, { L: 40, W: 20, bench: "left", subAnswers: [{ kind: "sub", t: r0.subs[0].t, x: r0.subs[0].x, y: r0.subs[0].y, verdict: "joueur" }] });
+  assert.ok(rJ.normalized.every((f) => f.A.every((p) => p.id !== 5 || !p.sub)), "joueur : ni l'entrée ni la sortie ne sont écartées");
+});
