@@ -5,29 +5,29 @@
       id: "3-1",
       name: "3-1 (trois derrière, un pivot)",
       aka: "Système en « Y »",
-      structure: "Fixo et deux alas organisent le jeu derrière, un pivot occupe la zone de finition.",
+      structure: "Défenseur central et deux ailiers organisent le jeu derrière, un pivot occupe la zone de finition.",
       description: "Système le plus répandu au niveau amateur et formateur. Il offre une base défensive stable (trois joueurs derrière le ballon) et un point d'appui clair avec le pivot.",
       strengths: ["Équilibre défensif naturel", "Pivot comme point d'appui pour remonter le jeu", "Lisible pour des joueurs en formation"],
-      weaknesses: ["Peu de mouvements entre les lignes si le pivot est fixé", "Attaque prévisible (jeu systématique par le pivot)", "Largeur parfois mal occupée si les alas restent bas"],
+      weaknesses: ["Peu de mouvements entre les lignes si le pivot est fixé", "Attaque prévisible (jeu systématique par le pivot)", "Largeur parfois mal occupée si les ailiers restent bas"],
       weaknessErrors: ["pivot_isole", "attaque_statique", "largeur_mal_occupee"],
       tips: {
-        pivot_isole: "Faire monter un ala en soutien à 3–4 m du pivot et organiser des passe-et-va autour de lui.",
-        attaque_statique: "Introduire des permutations ala–pivot : le pivot décroche, l'ala plonge dans son dos.",
-        largeur_mal_occupee: "Les deux alas tiennent la largeur à tour de rôle ; le fixo trouve l'ala opposé par changement d'aile."
+        pivot_isole: "Faire monter un ailier en soutien à 3–4 m du pivot et organiser des passe-et-va autour de lui.",
+        attaque_statique: "Introduire des permutations ailier–pivot : le pivot décroche, l'ailier plonge dans son dos.",
+        largeur_mal_occupee: "Les deux ailiers tiennent la largeur à tour de rôle ; le défenseur central trouve l'ailier opposé par changement d'aile."
       }
     },
     {
       id: "1-2-1",
       name: "1-2-1 (losange)",
       aka: "Diamant / losange",
-      structure: "Un fixo derrière, deux alas sur les côtés, un pivot devant. Les quatre joueurs de champ forment un losange.",
-      description: "Structure offensive très utilisée en haut niveau. Les quatre joueurs de champ offrent des angles de passe à chaque possesseur ; les alas alternent entre largeur et profondeur.",
-      strengths: ["Nombreuses lignes de passe (triangles)", "Possibilité de circulation continue (rotation)", "Transition défensive claire autour du fixo"],
-      weaknesses: ["Le fixo est exposé s'il reste seul derrière", "Exige des alas très mobiles et une lecture mutuelle", "Perte de balle centrale = contre-attaque directe"],
+      structure: "Un défenseur central derrière, deux ailiers sur les côtés, un pivot devant. Les quatre joueurs de champ forment un losange.",
+      description: "Structure offensive très utilisée en haut niveau. Les quatre joueurs de champ offrent des angles de passe à chaque possesseur ; les ailiers alternent entre largeur et profondeur.",
+      strengths: ["Nombreuses lignes de passe (triangles)", "Possibilité de circulation continue (rotation)", "Transition défensive claire autour du défenseur central"],
+      weaknesses: ["Le défenseur central est exposé s'il reste seul derrière", "Exige des ailiers très mobiles et une lecture mutuelle", "Perte de balle centrale = contre-attaque directe"],
       weaknessErrors: ["espace_dos_fixo", "contre_attaque_subie", "repli_tardif"],
       tips: {
-        espace_dos_fixo: "Un ala fait « le deuxième fixo » côté ballon : repli prioritaire dès la perte.",
-        contre_attaque_subie: "Interdire la passe verticale en zone centrale ; jouer sur l'ala si le pivot est marqué.",
+        espace_dos_fixo: "Un ailier fait « le deuxième défenseur central » côté ballon : repli prioritaire dès la perte.",
+        contre_attaque_subie: "Interdire la passe verticale en zone centrale ; jouer sur l'ailier si le pivot est marqué.",
         repli_tardif: "Désigner un « sécurisant » : le joueur le plus proche du ballon temporise, les autres replient derrière lui."
       }
     },
@@ -53,7 +53,7 @@
       structure: "Quatre joueurs de champ qui tournent sans position fixe, souvent en carré ou en losange mobile.",
       description: "Système de haut niveau fondé sur la rotation permanente : chaque joueur occupe tous les postes. Très difficile à défendre en marquage individuel, mais exige une grande maîtrise technique et collective.",
       strengths: ["Difficile à marquer individuellement", "Possession longue, contrôle du rythme", "Chaque joueur est un danger potentiel"],
-      weaknesses: ["Pertes de balle en zone médiane si rotation mal synchronisée", "Repli défensif complexe sans fixo désigné", "Dépend fortement de la qualité technique"],
+      weaknesses: ["Pertes de balle en zone médiane si rotation mal synchronisée", "Repli défensif complexe sans défenseur central désigné", "Dépend fortement de la qualité technique"],
       weaknessErrors: ["perte_zone_mediane", "repli_tardif", "passe_imprecise", "dribble_excessif"],
       tips: {
         perte_zone_mediane: "Ne pas tourner quand le ballon est sous pression ; rotation seulement sur ballon sécurisé.",
@@ -80,7 +80,7 @@
       id: "1-2-2",
       name: "1-2-2 (gardien-joueur, variante offensive)",
       aka: "Power play — structure 1-2-2",
-      structure: "Un joueur de base, deux alas milieu, deux joueurs avancés (dont le gardien-joueur en soutien).",
+      structure: "Un joueur de base, deux ailiers milieu, deux joueurs avancés (dont le gardien-joueur en soutien).",
       description: "Variante du jeu avec gardien-joueur qui offre davantage de présence dans la surface adverse au prix d'un risque défensif accru.",
       strengths: ["Densité offensive devant le but", "Nombreuses solutions de tir"],
       weaknesses: ["Équilibre défensif fragile", "Perte de balle au centre = but encaissé facile"],
@@ -103,13 +103,13 @@
   ];
 
   target.PRINCIPLES = [
-    { title: "Largeur et profondeur", text: "Occuper les couloirs latéraux pour étirer la défense et créer des espaces ; alterner joueurs en profondeur (pivot, ala) et joueurs de soutien." },
+    { title: "Largeur et profondeur", text: "Occuper les couloirs latéraux pour étirer la défense et créer des espaces ; alterner joueurs en profondeur (pivot, ailier) et joueurs de soutien." },
     { title: "Triangles et lignes de passe", text: "Toujours offrir au porteur au moins deux solutions : une passe sûre et une passe qui avance." },
     { title: "Supériorité numérique locale", text: "Attirer plusieurs adversaires sur un côté, puis changer d'aile pour créer un 2 contre 1 ou un 3 contre 2." },
     { title: "Rotation", text: "Permutation planifiée des postes pour désorganiser le marquage ; la rotation doit se faire ballon sécurisé et en gardant un joueur derrière le ballon." },
     { title: "Jeu à un-deux (paredes)", text: "Passe suivie d'un appel et d'une remise immédiate : casse la défense et crée l'accélération." },
     { title: "Écrans et blocs", text: "Se placer légalement sur la trajectoire d'un défenseur pour libérer un partenaire (tireur, receveur) sans faute de contact." },
     { title: "Transition", text: "Les 3 premières secondes après une perte (contre-pressing / repli) et après une récupération (contre-attaque) décident du match." },
-    { title: "Sécurité défensive", text: "Même en phase offensive, un joueur reste en couverture (fixo ou sécurisant) pour éviter la contre-attaque." }
+    { title: "Sécurité défensive", text: "Même en phase offensive, un joueur reste en couverture (défenseur central ou sécurisant) pour éviter la contre-attaque." }
   ];
 })(typeof module === "object" && module.exports ? module.exports : (window.FutsalKB = window.FutsalKB || {}));

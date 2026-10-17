@@ -69,7 +69,7 @@
   target.PLAN_NOT_EVALUATED = [
     { label: "Sortie de balle depuis le gardien", why: "le programme ne repère pas de façon fiable qui a le ballon au pied du gardien" },
     { label: "Coups de pied arrêtés (corners, coups francs, rentrées)", why: "les arrêts de jeu sont détectés, mais pas la façon dont la remise en jeu est jouée" },
-    { label: "Rôles individuels (qui est pivot, qui est fixo)", why: "les joueurs sont suivis par morceaux de piste : le programme voit des positions, pas des noms ni des numéros" },
+    { label: "Rôles individuels (qui est pivot, qui est défenseur central)", why: "les joueurs sont suivis par morceaux de piste : le programme voit des positions, pas des noms ni des numéros" },
     { label: "Intentions, communication, consignes verbales", why: "invisibles sur la vidéo" }
   ];
 })(typeof module === "object" && module.exports ? module.exports : (window.FutsalKB = window.FutsalKB || {}));

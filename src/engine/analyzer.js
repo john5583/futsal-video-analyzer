@@ -202,7 +202,7 @@
         id: "pressing_battu", severity: "MAJEUR",
         title: "Pressing battu puis espace dans le dos de la défense",
         text: pressBeaten.length + " fois, un pressing non coordonné ou une équipe étirée a ouvert l'espace derrière le dernier défenseur.",
-        advice: "Fixer des déclencheurs communs de pressing, resserrer les lignes à 8–10 m et faire couvrir le dos du fixo par un ala.",
+        advice: "Fixer des déclencheurs communs de pressing, resserrer les lignes à 8–10 m et faire couvrir le dos du défenseur central par un ailier.",
         times: pressBeaten.map(([a]) => a.t)
       });
     }
@@ -249,7 +249,7 @@
           id: "cote_faible", severity: "MAJEUR",
           title: "Côté faible : " + KB.SIDES[worst].toLowerCase(),
           text: Math.round(share * 100) + " % des erreurs défensives localisées se situent sur le " + KB.SIDES[worst].toLowerCase() + " (" + Math.max(g, d) + " sur " + sided.length + ").",
-          advice: "Renforcer ce côté : couverture permanente de l'ala ou du fixo, changement de joueur ou d'organisation sur ce couloir.",
+          advice: "Renforcer ce côté : couverture permanente de l'ailier ou du défenseur central, changement de joueur ou d'organisation sur ce couloir.",
           times: times(sided.filter((e) => e.side === worst))
         });
       }

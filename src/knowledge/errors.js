@@ -15,11 +15,11 @@
   target.ERRORS = [
     // --- OFFENSIF ---
     E("relance_risquee", "Relance risquée sous pression", "OFF", 3, true,
-      "Le gardien ou le fixo relance court vers un partenaire marqué ou dans l'axe alors qu'un adversaire presse.",
+      "Le gardien ou le défenseur central relance court vers un partenaire marqué ou dans l'axe alors qu'un adversaire presse.",
       ["Passe dans l'axe vers un joueur dos à la pression", "Balle perdue dans les 6 m devant le but", "Relance précipitée à la main"],
-      ["Aucun appel de dégagement", "Pas d'option sûre (côté faible)", "Manque de calme du relanceur", "Alas trop hauts, ligne de passe fermée"],
-      ["Prévoir une solution sûre : passe latérale vers un ala démarqué ou relance longue", "Faire redescendre un ala pour offrir un appui", "En cas de pressing haut, jouer d'abord vers le côté faible puis sortir", "Relayer en 4 s maximum sans précipitation"],
-      ["Regarde d'abord, relance ensuite", "Si doute : sécurise sur l'ala ou joue long", "Appelle fort ton partenaire"],
+      ["Aucun appel de dégagement", "Pas d'option sûre (côté faible)", "Manque de calme du relanceur", "Ailiers trop hauts, ligne de passe fermée"],
+      ["Prévoir une solution sûre : passe latérale vers un ailier démarqué ou relance longue", "Faire redescendre un ailier pour offrir un appui", "En cas de pressing haut, jouer d'abord vers le côté faible puis sortir", "Relayer en 4 s maximum sans précipitation"],
+      ["Regarde d'abord, relance ensuite", "Si doute : sécurise sur l'ailier ou joue long", "Appelle fort ton partenaire"],
       ["relance_pression", "gardien_jeu_pied", "rondo_4v2"], ["regles-4s"]),
 
     E("perte_zone_def", "Perte de balle en zone défensive", "OFF", 4, false,
@@ -57,16 +57,16 @@
     E("pivot_isole", "Pivot isolé / non soutenu", "OFF", 3, false,
       "Le pivot reçoit sans soutien, se fait presser dos au but et perd le ballon.",
       ["Pivot servi par une longue balle sans appui", "Aucun joueur n'accompagne l'action", "Pivot forcé de jouer seul"],
-      ["Alas trop bas", "Passe trop tardive", "Appuis de soutien mal placés"],
-      ["Faire monter un ala en soutien à 3–4 m", "Organiser une remise immédiate (une touche)", "Varier avec une passe en profondeur ou un écran"],
-      ["Pivot : protège avec le corps", "Ala : viens en soutien", "Remise de première"],
+      ["Ailiers trop bas", "Passe trop tardive", "Appuis de soutien mal placés"],
+      ["Faire monter un ailier en soutien à 3–4 m", "Organiser une remise immédiate (une touche)", "Varier avec une passe en profondeur ou un écran"],
+      ["Pivot : protège avec le corps", "Ailier : viens en soutien", "Remise de première"],
       ["pivot_appui", "passe_et_va"], []),
 
     E("attaque_statique", "Attaque prévisible / sans rotation", "OFF", 2, false,
       "Le même schéma est répété ; la défense anticipe sans difficulté.",
       ["Toujours le même passeur vers le pivot", "Aucune permutation", "Circulation lente"],
       ["Schémas d'attaque limités", "Manque de variations de rythme", "Peu de communication"],
-      ["Entraîner 2–3 schémas de rotation avec variantes", "Changer de rythme : une accélération après la circulation", "Utiliser des permutations ala–pivot"],
+      ["Entraîner 2–3 schémas de rotation avec variantes", "Changer de rythme : une accélération après la circulation", "Utiliser des permutations ailier–pivot"],
       ["Change de rythme", "Permute après la passe", "Fais bouger le bloc adverse"],
       ["rotation_4_0", "passe_et_va"], []),
 
@@ -95,7 +95,7 @@
       ["rondo_4v2", "passe_et_va"], []),
 
     E("largeur_mal_occupee", "Largeur mal occupée", "OFF", 2, false,
-      "Les alas se resserrent vers l'axe, la défense adverse se compacte.",
+      "Les ailiers se resserrent vers l'axe, la défense adverse se compacte.",
       ["Plusieurs joueurs dans la même zone", "Pas de changement d'aile possible"],
       ["Mauvaise répartition", "Peur du ballon", "Manque de consignes de placement"],
       ["Repères visuels : un joueur par couloir, un en profondeur", "Alterner largeur et profondeur avec rotation", "Changements d'aile après 2–3 passes"],
@@ -123,7 +123,7 @@
       "Après une récupération, l'équipe ne profite pas du déséquilibre adverse.",
       ["Ballon récupéré puis circulation lente", "Aucune course vers l'avant"],
       ["Manque de joueurs en avance", "Peur de perdre le ballon", "Pas de plan de contre-attaque"],
-      ["Première passe vers l'avant", "Alas en course dès la récupération", "Finir en moins de 8 secondes si l'espace est libre"],
+      ["Première passe vers l'avant", "Ailiers en course dès la récupération", "Finir en moins de 8 secondes si l'espace est libre"],
       ["Ballon récupéré = regarde devant", "Cours dans l'espace", "Passe vers l'avant d'abord"],
       ["transition_off", "superiorite_2v1"], []),
 
@@ -148,15 +148,15 @@
       "Un adversaire est laissé libre dans la zone de tir.",
       ["Adversaire seul au second poteau", "Défenseur absent à la couverture"],
       ["Mauvaise communication", "Défenseur qui regarde le ballon", "Rotation adverse mal suivie"],
-      ["Communiquer : « j'ai le pivot, tu as l'ala »", "Passer en défense mixte si le marquage individuel se perd", "Suivre les rotations adverses par transmission de marquage"],
+      ["Communiquer : « j'ai le pivot, tu as l'ailier »", "Passer en défense mixte si le marquage individuel se perd", "Suivre les rotations adverses par transmission de marquage"],
       ["Regarde ton joueur et le ballon", "Parle : donne l'information", "Transmets en cas de croisement"],
       ["marquage_cpa", "pressing_zone"], []),
 
     E("espace_dos_fixo", "Espace dans le dos du dernier défenseur", "DEF", 4, true,
-      "Le fixo ou le dernier défenseur est trop haut et laisse un espace pour une passe en profondeur.",
+      "Le défenseur central ou le dernier défenseur est trop haut et laisse un espace pour une passe en profondeur.",
       ["Passe longue derrière la ligne défensive", "Attaquant lancé 1c1 face au gardien"],
-      ["Ligne défensive trop haute", "Pressing non synchronisé", "Fixo isolé"],
-      ["Placer le fixo à une distance cohérente du pressing (≈ 8–10 m)", "Un ala couvre le dos du fixo", "Le gardien communique : « monte / reste »"],
+      ["Ligne défensive trop haute", "Pressing non synchronisé", "Défenseur central isolé"],
+      ["Placer le défenseur central à une distance cohérente du pressing (≈ 8–10 m)", "Un ailier couvre le dos du défenseur central", "Le gardien communique : « monte / reste »"],
       ["Garde le ballon et l'espace dans ton champ de vision", "Pressing haut seulement si la couverture suit"],
       ["repli_3v2", "pressing_zone"], []),
 
@@ -205,7 +205,7 @@
       "Le gardien sort trop tard ou trop tôt et se fait lober ou dribbler.",
       ["Lob passé au-dessus du gardien", "Attaquant qui contourne le gardien"],
       ["Mauvaise lecture de la distance", "Absence de communication avec la défense"],
-      ["Ne sortir que si le ballon est atteignable", "Réduire l'angle en restant bas", "Communiquer avec le fixo"],
+      ["Ne sortir que si le ballon est atteignable", "Réduire l'angle en restant bas", "Communiquer avec le défenseur central"],
       ["Sors vite ou reste", "Réduis l'angle"],
       ["gardien_jeu_pied", "duel_1v1_def"], []),
 

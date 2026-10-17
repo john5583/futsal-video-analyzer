@@ -70,7 +70,7 @@
   /* Équipe type : mon équipe A (bleu) attaque vers la droite, adversaire B (rouge). */
   function std(id, title, duration) {
     return Scene(id, title, duration).phased()
-      .gka(2, 10).a(5, 10, 10, "Fixo").a(2, 15, 4, "Ala").a(3, 15, 16, "Ala").a(4, 25, 10, "Pivot")
+      .gka(2, 10).a(5, 10, 10, "Défenseur").a(2, 15, 4, "Ailier").a(3, 15, 16, "Ailier").a(4, 25, 10, "Pivot")
       .gkb(38, 10).b(6, 27, 10).b(7, 23, 5).b(8, 23, 15).b(9, 17, 10);
   }
 
