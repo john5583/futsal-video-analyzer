@@ -151,6 +151,12 @@
       ctx.fillStyle = "#f97316"; ctx.fillRect(a1[0], a1[1] - 20, tw, 20);
       ctx.fillStyle = "#fff"; ctx.fillText(label, a1[0] + 5, a1[1] - 5);
     }
+    if (qHighlight && qHighlight.ballPt && Math.abs((video.currentTime || 0) - qHighlight.t) < 0.4) {
+      const v = toView(qHighlight.ballPt.u, qHighlight.ballPt.v);
+      ctx.strokeStyle = "#f97316"; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(v[0], v[1], 16, 0, Math.PI * 2); ctx.stroke();
+      ctx.font = "700 13px 'Segoe UI',Arial,sans-serif"; const lb = qHighlight.label || "Ballon proposé", tw = ctx.measureText(lb).width + 10;
+      ctx.fillStyle = "#f97316"; ctx.fillRect(v[0] - tw / 2, v[1] - 40, tw, 20); ctx.fillStyle = "#fff"; ctx.fillText(lb, v[0] - tw / 2 + 5, v[1] - 25);
+    }
     // repères de calibrage
     pts.forEach((p) => {
       const v = toView(p.ix, p.iy);
@@ -794,7 +800,42 @@
     if (!BL.add(memory(), lab)) { App.toast("Étiquette refusée : le clic est en dehors de l'image.", true); return; }
     renderBallLabels(); App.changed();
     App.toast(ix == null ? "Noté : aucun ballon visible sur cette image." : "Étiquette du ballon enregistrée.");
+    if (bs && bs.list[bs.i] != null && Math.abs(bs.list[bs.i] - t) < 0.5) bsMove(1);
   }
+  /* ---------- session d'étiquetage : des images une à une, le ballon proposé par le programme, la réponse est la tienne ---------- */
+  let bs = null;                 // { list: [t…], i, n } ; null = pas de session
+  const BS_MAX = 150;
+  function bsBox(show) { const b = $("ai-bs-box"); if (b) b.hidden = !show; }
+  function startBallSession() {
+    if (!App.isVideoReady() || !frames.length) { App.toast("Chargez la vidéo et lancez d'abord l'analyse : les images à étiqueter viennent de l'analyse.", true); return; }
+    const done = BL.list(memory()), step = Math.max(1, Math.floor(frames.length / BS_MAX)), list = [];
+    for (let k = 0; k < frames.length && list.length < BS_MAX; k += step) { const t = frames[k].t; if (!done.some((l) => Math.abs(l.t - t) < BL.T_SAME)) list.push(t); }
+    if (!list.length) { App.toast("Toutes les images proposées sont déjà étiquetées."); return; }
+    bs = { list, i: 0 }; bsBox(true); bsShow();
+    try { $("ai-bs-box").scrollIntoView({ block: "nearest" }); } catch (_e) { /* défilement indisponible */ }
+  }
+  function bsEnd(msg) { bs = null; qHighlight = null; bsBox(false); drawOverlay(); if (msg) App.toast(msg); }
+  function bsMove(d) {
+    if (!bs) return;
+    const j = bs.i + d;
+    if (j >= bs.list.length) { bsEnd("Session terminée : " + BL.counts(memory()).total + " étiquette(s) au total dans ce projet."); return; }
+    bs.i = Math.max(0, j); bsShow();
+  }
+  function bsShow() {
+    const t = bs.list[bs.i], f = P.frameNear(frames, t, 0.3), H = projectionAt(t);
+    let pt = null;
+    if (f && f.ball && H) {
+      try { const q = HG.apply(HG.invert(H), f.ball.x, f.ball.y); if (isFinite(q[0]) && isFinite(q[1]) && q[0] >= 0 && q[1] >= 0 && q[0] <= video.videoWidth && q[1] <= video.videoHeight) pt = { u: q[0], v: q[1] }; } catch (_e) { pt = null; }
+    }
+    bs.pt = pt; bs.H = H;
+    video.pause();
+    qHighlight = { t, ballPt: pt, label: "Ballon proposé" };
+    $("ai-bs-text").textContent = "Image " + (bs.i + 1) + " sur " + bs.list.length + " (" + App.fmt(t) + ") — " + (pt ? "le programme propose le ballon dans le cercle orange. Est-ce bien le ballon ?" : "le programme ne propose aucun ballon. Vois-tu le ballon ?") + "  [Entrée = oui, N = aucun ballon, S = passer]";
+    $("ai-bs-ok").disabled = !pt;
+    App.seek(t); drawOverlay();
+  }
+  function bsOk() { if (bs && bs.pt) saveBallLabel(bs.list[bs.i], bs.pt.u, bs.pt.v, bs.H); }
+  function bsNone() { if (bs) saveBallLabel(bs.list[bs.i], null, null, null); }
   function renderBallLabels() {
     const c = state.project.ai ? BL.counts(memory()) : { total: 0, positives: 0, negatives: 0 }, el = $("ai-bl-count");
     if (el) el.textContent = c.total ? c.positives + " avec ballon, " + c.negatives + " sans ballon" : "aucune étiquette";
@@ -1081,7 +1122,7 @@
     $("ai-marks").checked = !(d.settings && d.settings.floorMarks === false);
     $("ai-bench").value = (d.settings && ["left", "right"].includes(d.settings.bench)) ? d.settings.bench : "auto";
     benchMark = null; renderBenchZones();
-    qGroup = null; qHighlight = null; qThumbs.clear();
+    qGroup = null; qHighlight = null; qThumbs.clear(); bs = null; bsBox(false);
     $("ai-t0").value = App.fmt((d.settings && d.settings.t0) || 0);
     $("ai-t1").value = App.fmt((d.settings && d.settings.t1) || state.project.duration || 0);
     fillLandmarks(); renderPoints(); renderCalibs(); renderKits(); renderStats(); renderSuggestions(); updateEstimate();
@@ -1103,6 +1144,19 @@
     $("ai-bench").addEventListener("change", () => { upd(); reanalyzeSuggestions(); });
     $("ai-bench-mark").addEventListener("click", startBenchMark);
     $("ai-bl-export").addEventListener("click", exportBallLabels);
+    $("ai-bs-start").addEventListener("click", startBallSession);
+    $("ai-bs-ok").addEventListener("click", bsOk); $("ai-bs-none").addEventListener("click", bsNone);
+    $("ai-bs-skip").addEventListener("click", () => bsMove(1)); $("ai-bs-prev").addEventListener("click", () => bsMove(-1));
+    $("ai-bs-stop").addEventListener("click", () => bsEnd());
+    // raccourcis pendant une session : Entrée = oui, N = aucun ballon, S = passer (jamais pendant une saisie de texte)
+    document.addEventListener("keydown", (e) => {
+      if (!bs || e.ctrlKey || e.metaKey || e.altKey) return;
+      const tg = e.target && e.target.tagName;
+      if (tg === "INPUT" || tg === "TEXTAREA" || tg === "SELECT" || (e.target && e.target.isContentEditable)) return;
+      if (e.key === "Enter") { e.preventDefault(); bsOk(); }
+      else if (e.key === "n" || e.key === "N") { e.preventDefault(); bsNone(); }
+      else if (e.key === "s" || e.key === "S") { e.preventDefault(); bsMove(1); }
+    });
     $("ai-bench-clear").addEventListener("click", () => { const a = ai(); a.benchZones = []; renderBenchZones(); drawOverlay(); App.changed(); });
     $("ai-camera").addEventListener("change", updateEstimate);
     $("ai-tol").addEventListener("input", () => { $("ai-tol-v").textContent = "(" + tol() + ")"; if (lastTest) renderPreview(); });
