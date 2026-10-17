@@ -76,7 +76,7 @@ function makeFrames() {
   await win.mouse.click(p5.x, p5.y);
   must(await waitFor(win, () => !!document.querySelector(".person-menu"), 4000), "un menu s'ouvre sur le cadre cliqué");
   const mt = await menuText();
-  must(/Qui est cette personne/.test(mt) && /lue : adversaire/.test(mt) && /Mon équipe/.test(mt) && /Adversaire/.test(mt) && /Mon gardien/.test(mt) && /Gardien adverse/.test(mt) && /Entraîneur (ne pas compter)/.test(mt) && /Arbitre (ne pas compter)/.test(mt) && /Public ou autre (ne pas compter)/.test(mt), "le menu pose la question et donne les équipes, les gardiens et les rôles écartés du jeu");
+  must(/Qui est cette personne/.test(mt) && /lue : adversaire/.test(mt) && /Mon équipe/.test(mt) && /Adversaire/.test(mt) && /Mon gardien/.test(mt) && /Gardien adverse/.test(mt) && /Entraîneur \(ne pas compter\)/.test(mt) && /Arbitre \(ne pas compter\)/.test(mt) && /Public ou autre \(ne pas compter\)/.test(mt), "le menu pose la question et donne les équipes, les gardiens et les rôles écartés du jeu");
   must((await teamOf(5)) === "B", "rien n'est changé tant qu'on n'a pas répondu");
   must(await menuClick("Mon gardien"), "réponse « Mon gardien »");
   must(await waitFor(win, () => window.FSAI.memory().answers.some((a) => a.kind === "team" && a.team === "GKA"), 5000), "la réponse est retenue dans la mémoire du projet");
