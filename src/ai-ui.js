@@ -15,6 +15,9 @@
   let pickRole = null;       // rôle de tenue à choisir
   let qGroup = null;         // proposition d'appliquer la même réponse aux pistes de la même personne : { team, q, group }
   let qHighlight = null;     // personne désignée par une question : { t, b } (cadre orange sur la vidéo)
+  const CT = window.FutsalContour;
+  const contours = new Map();          // contours des personnes par image : temps (ms) -> { state: "pending" | "ready" | "fail", items: [{ id, mask }], k, p }
+  let contChain = Promise.resolve(), shadow = null, shadowUrl = "";
   let benchMark = null;      // marquage d'une zone de banc en cours : { t, H, first: [x, y] | null }
   let frames = [];           // trajectoires (format d'analyse)
   let abort = null;
@@ -113,6 +116,96 @@
     return [[[0, 0], [l, 0], [l, w], [0, w], [0, 0]], [[l / 2, 0], [l / 2, w]], arc(l / 2, cy, 3, 0, 360), left, right];
   }
 
+  /* ---------- contours des personnes (MobileSAM, hors ligne) ----------
+     Une silhouette découpée remplace le cadre : elle ne contient que la personne (pas le ballon posé à côté d'un pied). Calculée à la demande
+     pour l'image affichée (1 à 2 s) et en avance pour la suivante ; jamais pour toute la vidéo. Si la découpe échoue, rien n'est inventé. */
+  const loadShadow = async () => {
+    const url = App.getVideoUrl();
+    if (!url) throw new Error("vidéo absente");
+    if (shadow && shadowUrl === url) return shadow;
+    if (shadow) { shadow.removeAttribute("src"); shadow.load(); shadow = null; }
+    const v = document.createElement("video");
+    v.muted = true; v.preload = "auto"; v.crossOrigin = "anonymous"; v.src = url;
+    await new Promise((res, rej) => { v.onloadedmetadata = res; v.onerror = () => rej(new Error("Vidéo illisible")); });
+    shadow = v; shadowUrl = url;
+    return v;
+  };
+  const seekShadow = (v, t) => new Promise((res) => {
+    const to = Math.max(0, Math.min((v.duration || t) - 0.05, t));
+    if (Math.abs(v.currentTime - to) < 1e-3 && v.readyState >= 2) { res(); return; }
+    const d = () => { v.removeEventListener("seeked", d); res(); };
+    v.addEventListener("seeked", d); v.currentTime = to; setTimeout(d, 4000);
+  });
+  const ckey = (t) => Math.round(t * 1000);
+  const contoursReady = (f) => { const e = f && contours.get(ckey(f.t)); return e && e.state === "ready" ? e : null; };
+  function getContours(f) {
+    if (!f || !CT || !App.getVideoUrl() || !App.isVideoReady() || !video.videoWidth) return Promise.resolve(null);
+    const key = ckey(f.t), old = contours.get(key);
+    if (old) return old.p;
+    const vw = video.videoWidth, vh = video.videoHeight, k = 1024 / Math.max(vw, vh), w = Math.max(2, Math.round(vw * k)), h = Math.max(2, Math.round(vh * k));
+    const list = f.players.filter((p) => Array.isArray(p.b) && p.b.length === 4 && ((p.b[3] - p.b[1]) / 1000) * h >= 24 && ((p.b[2] - p.b[0]) / 1000) * w >= 8)
+      .sort((a, b) => (b.b[2] - b.b[0]) * (b.b[3] - b.b[1]) - (a.b[2] - a.b[0]) * (a.b[3] - a.b[1])).slice(0, 24);
+    const e = { state: "pending", items: [], k, t: f.t };
+    if (!list.length) { e.state = "ready"; e.p = Promise.resolve(e); contours.set(key, e); return e.p; }
+    e.p = contChain = contChain.then(async () => {
+      try {
+        const v = await loadShadow();
+        await seekShadow(v, f.t);
+        const cv = document.createElement("canvas"); cv.width = w; cv.height = h;
+        const g = cv.getContext("2d", { willReadFrequently: true });
+        g.drawImage(v, 0, 0, w, h);
+        const img = g.getImageData(0, 0, w, h);
+        const boxes = list.map((p) => [(p.b[0] / 1000) * w, (p.b[1] / 1000) * h, (p.b[2] / 1000) * w, (p.b[3] / 1000) * h]);
+        const res = await FSAI.segment({ imgId: "c" + key + "-" + Date.now().toString(36), width: w, height: h, buffer: img.data.buffer.slice(0), boxes });
+        if (!res || res.error) throw new Error(res && res.error ? res.error : "réponse vide");
+        e.items = list.map((p, i) => ({ id: p.id, mask: res.masks[i] && res.masks[i].data ? { x0: res.masks[i].x0, y0: res.masks[i].y0, w: res.masks[i].w, h: res.masks[i].h, data: res.masks[i].data instanceof Uint8Array ? res.masks[i].data : new Uint8Array(res.masks[i].data), area: res.masks[i].area } : null }))
+          .filter((it) => it.mask && it.mask.area > 30);
+        e.state = "ready";
+      } catch (_err) { e.state = "fail"; }
+      drawOverlay();
+      return e;
+    });
+    contours.set(key, e);
+    if (contours.size > 40) contours.delete(contours.keys().next().value);
+    return e.p;
+  }
+  /* Trace les contours de l'image f. only : un seul identifiant (la personne d'une question, en orange avec son étiquette). Renvoie vrai si dessiné. */
+  function drawContours(ctx, f, only, label) {
+    const e = contoursReady(f);
+    if (!e) return false;
+    let drawn = false;
+    e.items.forEach((it) => {
+      if (only != null && it.id !== only) return;
+      if (!it.poly) it.poly = CT.outline(it.mask, 0.8);
+      if (!it.poly) return;
+      const pl = f.players.find((p) => p.id === it.id), col = only != null ? "#f97316" : TEAM_COLOR[pl ? pl.team : "UNK"] || TEAM_COLOR.UNK;
+      ctx.strokeStyle = col; ctx.lineWidth = only != null ? 3 : 2; ctx.lineJoin = "round";
+      ctx.beginPath();
+      it.poly.forEach((p, n) => { const v = toView(p[0] / e.k, p[1] / e.k); if (n) ctx.lineTo(v[0], v[1]); else ctx.moveTo(v[0], v[1]); });
+      ctx.closePath(); ctx.stroke();
+      if (only != null && label) {
+        let top = Infinity, left = Infinity;
+        it.poly.forEach((p) => { const v = toView(p[0] / e.k, p[1] / e.k); if (v[1] < top) { top = v[1]; left = v[0]; } });
+        ctx.font = "700 13px 'Segoe UI',Arial,sans-serif";
+        const tw = ctx.measureText(label).width + 10;
+        ctx.fillStyle = "#f97316"; ctx.fillRect(left - tw / 2, top - 22, tw, 20); ctx.fillStyle = "#fff"; ctx.fillText(label, left - tw / 2 + 5, top - 7);
+      }
+      drawn = true;
+    });
+    return drawn || e.items.length === 0;
+  }
+  let ctTimer = null;
+  const scheduleContours = (f) => { clearTimeout(ctTimer); ctTimer = setTimeout(() => { if (video.paused && frames.length && Math.abs(f.t - (video.currentTime || 0)) < 0.15) getContours(f); }, 600); };
+  const prefetchContours = (t) => { if (frames.length) { const f = P.frameNear(frames, t, 0.3); if (f) getContours(f); } };
+
+  /* Ballon proposé par le programme : un simple cercle fin (le ballon reste visible à l'intérieur), avec son étiquette au-dessus. */
+  function drawBallMarker(ctx) {
+    if (!(qHighlight && qHighlight.ballPt && Math.abs((video.currentTime || 0) - qHighlight.t) < 0.4)) return;
+    const v = toView(qHighlight.ballPt.u, qHighlight.ballPt.v);
+    ctx.strokeStyle = "#f97316"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(v[0], v[1], 18, 0, Math.PI * 2); ctx.stroke();
+    ctx.font = "700 13px 'Segoe UI',Arial,sans-serif"; const lb = qHighlight.label || "Ballon proposé", tw = ctx.measureText(lb).width + 10;
+    ctx.fillStyle = "#f97316"; ctx.fillRect(v[0] - tw / 2, v[1] - 46, tw, 20); ctx.fillStyle = "#fff"; ctx.fillText(lb, v[0] - tw / 2 + 5, v[1] - 31);
+  }
   function drawOverlay() {
     const c = $("overlay");
     if (c.hidden) return;
@@ -125,6 +218,11 @@
     const r = videoRect();
     const a = state.project.ai;
     const t = video.currentTime || 0;
+    if (bs) {
+      const fb = frames.length ? P.frameNear(frames, t, 0.3) : null;
+      if (fb && !drawContours(ctx, fb)) getContours(fb);           // le contour arrive en 1 à 2 s ; en attendant, rien n'est dessiné sur les personnes
+      drawBallMarker(ctx); return;
+    }          // session d'étiquetage : image propre, pour voir le ballon sans cadre, silhouette ni terrain par-dessus
     // aperçu du terrain calibré
     // (tracé seulement si la projection est fiable à cet instant ; sinon un message l'explique, pas de lignes absurdes)
     if (a && $("ov-court").checked) {
@@ -155,6 +253,10 @@
     // joueurs détectés
     const f = preview || live || (frames.length ? P.frameNear(frames, t, 0.8) : null);
     if (f && ($("ov-boxes").checked || $("ov-sil").checked)) {
+      // image arrêtée : le vrai contour de chaque personne remplace le cadre (calculé en arrière-plan, 1 à 2 s) ; en lecture ou en attendant, cadres
+      const still = $("ov-boxes").checked && !preview && !live && video.paused && Math.abs(f.t - t) < 0.15;
+      const ceGen = still ? contoursReady(f) : null;
+      if (ceGen) drawContours(ctx, f); else if (still) scheduleContours(f);
       f.players.forEach((p) => {
         if (!p.b || p.b.length < 4) return;
         const x1 = (p.b[0] / 1000) * r.vw, y1 = (p.b[1] / 1000) * r.vh, x2 = (p.b[2] / 1000) * r.vw, y2 = (p.b[3] / 1000) * r.vh;
@@ -166,7 +268,7 @@
           ctx.beginPath(); ctx.ellipse(a1[0] + w / 2, a1[1] + h * 0.1, w * 0.22, h * 0.09, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
           ctx.beginPath(); ctx.roundRect(a1[0] + w * 0.1, a1[1] + h * 0.2, w * 0.8, h * 0.8, w * 0.25); ctx.fill(); ctx.stroke();
         }
-        if ($("ov-boxes").checked) {
+        if ($("ov-boxes").checked && !ceGen) {
           ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.strokeRect(a1[0], a1[1], w, h);
         }
         if ($("ov-ids").checked) {
@@ -184,7 +286,9 @@
       qHighlight.polys.forEach((pl) => { ctx.beginPath(); pl.forEach((p, k) => { const v = toView(p[0] * r.vw, p[1] * r.vh); if (k) ctx.lineTo(v[0], v[1]); else ctx.moveTo(v[0], v[1]); }); ctx.closePath(); ctx.stroke(); });
       ctx.setLineDash([]);
     }
-    if (qHighlight && Math.abs((video.currentTime || 0) - qHighlight.t) < 0.4 && Array.isArray(qHighlight.b)) {
+    const qf = qHighlight && qHighlight.id != null && frames.length ? P.frameNear(frames, qHighlight.t, 0.3) : null;
+    const qDone = qf && Math.abs((video.currentTime || 0) - qHighlight.t) < 0.4 && drawContours(ctx, qf, qHighlight.id, qHighlight.label);
+    if (qHighlight && !qDone && Math.abs((video.currentTime || 0) - qHighlight.t) < 0.4 && Array.isArray(qHighlight.b)) {
       const b = qHighlight.b, a1 = toView((b[0] / 1000) * r.vw, (b[1] / 1000) * r.vh), a2 = toView((b[2] / 1000) * r.vw, (b[3] / 1000) * r.vh);
       ctx.strokeStyle = "#f97316"; ctx.lineWidth = 4; ctx.strokeRect(a1[0], a1[1], a2[0] - a1[0], a2[1] - a1[1]);
       ctx.font = "700 13px 'Segoe UI',Arial,sans-serif";
@@ -192,12 +296,7 @@
       ctx.fillStyle = "#f97316"; ctx.fillRect(a1[0], a1[1] - 20, tw, 20);
       ctx.fillStyle = "#fff"; ctx.fillText(label, a1[0] + 5, a1[1] - 5);
     }
-    if (qHighlight && qHighlight.ballPt && Math.abs((video.currentTime || 0) - qHighlight.t) < 0.4) {
-      const v = toView(qHighlight.ballPt.u, qHighlight.ballPt.v);
-      ctx.strokeStyle = "#f97316"; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(v[0], v[1], 16, 0, Math.PI * 2); ctx.stroke();
-      ctx.font = "700 13px 'Segoe UI',Arial,sans-serif"; const lb = qHighlight.label || "Ballon proposé", tw = ctx.measureText(lb).width + 10;
-      ctx.fillStyle = "#f97316"; ctx.fillRect(v[0] - tw / 2, v[1] - 40, tw, 20); ctx.fillStyle = "#fff"; ctx.fillText(lb, v[0] - tw / 2 + 5, v[1] - 25);
-    }
+    drawBallMarker(ctx);
     // repères de calibrage
     pts.forEach((p) => {
       const v = toView(p.ix, p.iy);
@@ -760,8 +859,9 @@
      pour une erreur incertaine, 2 s avant le moment, pour le voir se produire. */
   function showQuestion(q) {
     video.pause();
-    qHighlight = q.kind === "team" || q.kind === "sub" ? { t: q.t, b: q.b, label: q.kind === "sub" ? "Remplaçant ?" : "Question : qui est-ce ?" } : q.kind === "bench" ? { t: q.t, polys: benchPolys(q), label: "Zone du banc" } : null;
+    qHighlight = q.kind === "team" || q.kind === "sub" ? { t: q.t, b: q.b, id: q.id, label: q.kind === "sub" ? "Remplaçant ?" : "Question : qui est-ce ?" } : q.kind === "bench" ? { t: q.t, polys: benchPolys(q), label: "Zone du banc" } : null;
     App.seek(q.kind === "team" || q.kind === "sub" || q.kind === "bench" ? q.t : Math.max(0, q.t - 2));
+    if (q.kind === "team" || q.kind === "sub") prefetchContours(q.t);
     drawOverlay();
   }
   function answerTeam(q, team, role) {
@@ -806,32 +906,50 @@
     menuEl = m;
   }
   /* Clic sur un cadre : « qui est cette personne ? » ; clic ailleurs : « le ballon est ici ? ». Rien n'est changé sans ta réponse ; tout est annulable. */
-  function personClick(e, ix, iy) {
-    if (!frames.length || !state.project.ai) return;
+  let clickBusy = false;
+  /* Un clic sur la vidéo : dans la silhouette d'une personne = « qui est-ce ? » ; en dehors = « le ballon est ici ? ». Si la silhouette n'est pas
+     disponible (découpe en échec), on retombe sur le cadre de la détection, comme avant. */
+  async function personClick(e, ix, iy) {
+    if (!frames.length || !state.project.ai || clickBusy) return;
     const t = video.currentTime || 0, f = P.frameNear(frames, t, 0.8), vw = video.videoWidth, vh = video.videoHeight;
-    if (f) {
+    if (f && !bs) {
       let best = null, area = Infinity;
-      f.players.forEach((p) => {
-        if (!p.b || p.b.length < 4) return;
-        const x1 = (p.b[0] / 1000) * vw, y1 = (p.b[1] / 1000) * vh, x2 = (p.b[2] / 1000) * vw, y2 = (p.b[3] / 1000) * vh;
-        if (ix >= x1 - 6 && ix <= x2 + 6 && iy >= y1 - 6 && iy <= y2 + 6 && (x2 - x1) * (y2 - y1) < area) { area = (x2 - x1) * (y2 - y1); best = p; }
-      });
+      let ce = contoursReady(f);
+      if (!ce && CT) {
+        clickBusy = true; App.toast("Je cherche les silhouettes de cette image (1 à 2 s)…");
+        try { const r = await getContours(f); ce = r && r.state === "ready" ? r : null; } catch (_e) { ce = null; }
+        clickBusy = false;
+      }
+      if (ce) {
+        const hit = CT.pick(ce.items, ix * ce.k, iy * ce.k);
+        if (hit) best = f.players.find((p) => p.id === hit.id) || null;
+      } else {
+        f.players.forEach((p) => {
+          if (!p.b || p.b.length < 4) return;
+          const x1 = (p.b[0] / 1000) * vw, y1 = (p.b[1] / 1000) * vh, x2 = (p.b[2] / 1000) * vw, y2 = (p.b[3] / 1000) * vh;
+          if (ix >= x1 - 6 && ix <= x2 + 6 && iy >= y1 - 6 && iy <= y2 + 6 && (x2 - x1) * (y2 - y1) < area) { area = (x2 - x1) * (y2 - y1); best = p; }
+        });
+      }
       if (best) {
         const q = { kind: "team", id: best.id, t: f.t, x: best.x, y: best.y, b: best.b };
-        qHighlight = { t: f.t, b: best.b, label: "Qui est-ce ?" }; drawOverlay();
+        qHighlight = { t: f.t, b: best.b, id: best.id, label: "Qui est-ce ?" }; drawOverlay();
         const lab = (k) => D.TEAM_LABEL[k] || k;
         showMenu(e, "Qui est cette personne ? (lue : " + (best.team === "A" ? "mon équipe" : best.team === "B" ? "adversaire" : lab(best.team)) + ")", [
           { label: "Mon équipe", fn: () => answerTeam(q, "A") }, { label: "Adversaire", fn: () => answerTeam(q, "B") },
           { label: "Mon gardien", fn: () => answerTeam(q, "GKA") }, { label: "Gardien adverse", fn: () => answerTeam(q, "GKB") },
-        ].concat(Object.keys(D.ROLE_LABEL).map((k) => ({ label: D.ROLE_LABEL[k][0].toUpperCase() + D.ROLE_LABEL[k].slice(1) + " (ne pas compter)", fn: () => answerTeam(q, "NONE", k) }))));
+        ].concat(Object.keys(D.ROLE_LABEL).map((k) => ({ label: D.ROLE_LABEL[k][0].toUpperCase() + D.ROLE_LABEL[k].slice(1) + " (ne pas compter)", fn: () => answerTeam(q, "NONE", k) })), ballItems(t, f, ix, iy).slice(0, 1).map((it) => Object.assign({}, it, { label: "Ce n'est pas une personne : le ballon est ici" }))));
         return;
       }
     }
+    showMenu(e, "Le ballon est ici ?", ballItems(t, f, ix, iy));
+  }
+  /* Choix proposés pour un clic qui désigne le ballon : [le ballon est ici, aucun ballon visible]. */
+  function ballItems(t, f, ix, iy) {
     const H = projectionAt(t), p = H && f ? HG.apply(H, ix, iy) : null, items = [];
     if (p && isFinite(p[0]) && isFinite(p[1])) items.push({ label: "Oui, le ballon est ici (image de " + App.fmt(f.t) + ")", fn: () => { saveBallLabel(t, ix, iy, H); answerBallAt({ t: f.t, x: Math.round(p[0] * 100) / 100, y: Math.round(p[1] * 100) / 100 }); } });
     else items.push({ label: "Le ballon est ici (sert seulement à l'entraînement : terrain non repéré à cet instant)", fn: () => saveBallLabel(t, ix, iy, null) });
     items.push({ label: "Aucun ballon visible sur cette image", fn: () => saveBallLabel(t, null, null, null) });
-    showMenu(e, "Le ballon est ici ?", items);
+    return items;
   }
   /* Étiquette exacte du ballon (pixel cliqué) pour mesurer puis entraîner le détecteur ; jamais déduite par le programme. */
   function saveBallLabel(t, ix, iy, H) {
@@ -875,6 +993,8 @@
     $("ai-bs-ok").disabled = !pt;
     App.seek(t);
     if (pt) zoomOnPoint(pt.u, pt.v, 5); else setZoom({ k: 1, tx: 0, ty: 0 });      // agrandissement automatique autour du ballon proposé
+    prefetchContours(t);
+    if (bs.list[bs.i + 1] != null) prefetchContours(bs.list[bs.i + 1]);            // l'image suivante est préparée pendant que tu réponds
   }
   function bsOk() { if (bs && bs.pt) saveBallLabel(bs.list[bs.i], bs.pt.u, bs.pt.v, bs.H); }
   function bsNone() { if (bs) saveBallLabel(bs.list[bs.i], null, null, null); }
@@ -1164,7 +1284,7 @@
     $("ai-marks").checked = !(d.settings && d.settings.floorMarks === false);
     $("ai-bench").value = (d.settings && ["left", "right"].includes(d.settings.bench)) ? d.settings.bench : "auto";
     benchMark = null; renderBenchZones();
-    qGroup = null; qHighlight = null; qThumbs.clear(); bs = null; bsBox(false);
+    qGroup = null; qHighlight = null; qThumbs.clear(); contours.clear(); bs = null; bsBox(false);
     $("ai-t0").value = App.fmt((d.settings && d.settings.t0) || 0);
     $("ai-t1").value = App.fmt((d.settings && d.settings.t1) || state.project.duration || 0);
     fillLandmarks(); renderPoints(); renderCalibs(); renderKits(); renderStats(); renderSuggestions(); updateEstimate();
@@ -1258,7 +1378,7 @@
     document.addEventListener("mousedown", (e) => { if (menuEl && !menuEl.contains(e.target)) closeMenu(); });
     document.addEventListener("keydown", (e) => { if (e.key === "Escape" && benchMark) { benchMark = null; updateOverlayMode(); return; } if (e.key === "Escape" && (placing || pickRole || pip)) { placing = null; pickRole = null; if (pip) cancelPipette(); else updateOverlayMode(); } });
     ["loadedmetadata", "seeked", "pause", "timeupdate", "emptied"].forEach((ev) => video.addEventListener(ev, () => {
-      if (ev === "emptied") setZoom({ k: 1, tx: 0, ty: 0 });
+      if (ev === "emptied") { setZoom({ k: 1, tx: 0, ty: 0 }); contours.clear(); if (shadow) { shadow.removeAttribute("src"); shadow.load(); shadow = null; shadowUrl = ""; } }
       if (preview && ev === "seeked" && lastTest && Math.abs(video.currentTime - preview.t) > 0.2) { preview = null; lastTest = null; $("ai-test-msg").textContent = ""; }
       if (ev === "loadedmetadata" || ev === "emptied") updateOverlayMode(); else refreshLive();
     }));

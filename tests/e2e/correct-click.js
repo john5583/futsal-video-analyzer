@@ -55,6 +55,7 @@ function makeFrames() {
   win.on("dialog", (d) => { errors.push("dialogue : " + d.message()); d.dismiss().catch(() => {}); });
   await win.waitForLoadState("load");
   must(await waitFor(win, () => window.FSAI && window.FSAI.ai().frames && window.FSAI.ai().frames.length > 20 && window.FSApp.getVideoUrl() && document.querySelector("video").readyState >= 1, 30000), "projet chargé");
+  await win.evaluate(() => { window.FSAI.segmentImpl = async (req) => ({ masks: req.boxes.map((b) => { const x0 = Math.floor(b[0]), y0 = Math.floor(b[1]), w = Math.max(1, Math.ceil(b[2] - b[0])), h = Math.max(1, Math.ceil(b[3] - b[1])); const data = new Uint8Array(w * h); let area = 0; for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const dx = (x + 0.5 - w / 2) / (w / 2), dy = (y + 0.5 - h / 2) / (h / 2); if (dx * dx + dy * dy <= 1) { data[y * w + x] = 1; area++; } } return { x0, y0, w, h, area, data }; }) }); });
   // image à 2,0 s en pause
   await win.evaluate(() => { const v = document.querySelector("video"); v.pause(); v.currentTime = 2.0; });
   must(await waitFor(win, () => Math.abs(document.querySelector("video").currentTime - 2.0) < 0.05 && !document.querySelector("video").seeking, 8000), "vidéo placée à 2,0 s");
@@ -77,6 +78,7 @@ function makeFrames() {
   must(await waitFor(win, () => !!document.querySelector(".person-menu"), 4000), "un menu s'ouvre sur le cadre cliqué");
   const mt = await menuText();
   must(/Qui est cette personne/.test(mt) && /lue : adversaire/.test(mt) && /Mon équipe/.test(mt) && /Adversaire/.test(mt) && /Mon gardien/.test(mt) && /Gardien adverse/.test(mt) && /Entraîneur \(ne pas compter\)/.test(mt) && /Arbitre \(ne pas compter\)/.test(mt) && /Public ou autre \(ne pas compter\)/.test(mt), "le menu pose la question et donne les équipes, les gardiens et les rôles écartés du jeu");
+  must(/Ce n'est pas une personne : le ballon est ici/.test(mt), "le menu d'une personne propose aussi « le ballon est ici »");
   must((await teamOf(5)) === "B", "rien n'est changé tant qu'on n'a pas répondu");
   must(await menuClick("Mon gardien"), "réponse « Mon gardien »");
   must(await waitFor(win, () => window.FSAI.memory().answers.some((a) => a.kind === "team" && a.team === "GKA"), 5000), "la réponse est retenue dans la mémoire du projet");
@@ -105,7 +107,20 @@ function makeFrames() {
   must(await waitFor(win, () => window.FSAI.memory().answers.length === 0, 5000), "réponse retirée");
   must((await win.evaluate(() => { const f = window.FSAI.ai().frames.find((q) => Math.abs(q[0] - 2.0) < 0.02); return JSON.stringify(f[2]); })) === before, "l'ancienne position du ballon est rétablie");
 
-    // 5. étiquette exacte du ballon (pour l'entraînement) : posée par le « Oui », remplaçable par « aucun ballon visible »
+    // 4 bis. le clic suit la silhouette : au coin du cadre d'une personne (hors silhouette), c'est le ballon qui est désigné
+  const corner = await win.evaluate(() => {
+    const c = document.getElementById("overlay").getBoundingClientRect(), v = document.querySelector("video"), vw = v.videoWidth, vh = v.videoHeight;
+    const s = Math.min(c.width / vw, c.height / vh), ox = c.left + (c.width - vw * s) / 2, oy = c.top + (c.height - vh * s) / 2;
+    const f = window.FSAI.ai().frames.find((q) => Math.abs(q[0] - 2.0) < 0.02), pl = f[1].find((q) => q[0] === 5), b = pl.slice(4, 8);
+    return { x: ox + (b[0] + (b[2] - b[0]) * 0.04) / 1000 * vw * s, y: oy + (b[1] + (b[3] - b[1]) * 0.04) / 1000 * vh * s };
+  });
+  await win.mouse.click(corner.x, corner.y);
+  must(await waitFor(win, () => !!document.querySelector(".person-menu"), 6000), "un clic au coin du cadre ouvre un menu");
+  const cmt = await menuText();
+  must(/Le ballon est ici/.test(cmt) && !/Qui est cette personne/.test(cmt), "hors silhouette = le ballon, pas la personne : " + cmt.slice(0, 60));
+  await win.keyboard.press("Escape");
+
+  // 5. étiquette exacte du ballon (pour l'entraînement) : posée par le « Oui », remplaçable par « aucun ballon visible »
   const lab = await win.evaluate(() => window.FSAI.memory().ballLabels || []);
   must(lab.length === 1 && !lab[0].none && lab[0].u > 0 && lab[0].v > 0 && lab[0].u <= lab[0].vw && lab[0].est === true, "l'étiquette du ballon (pixel cliqué) est retenue : " + JSON.stringify(lab));
   await win.mouse.click(free.x, free.y);
@@ -118,6 +133,13 @@ function makeFrames() {
   const n0 = await win.evaluate(() => (window.FSAI.memory().ballLabels || []).length);
   await win.click("#ai-bs-start");
   must(await waitFor(win, () => !document.getElementById("ai-bs-box").hidden && /Image 1 sur/.test(document.getElementById("ai-bs-text").textContent), 5000), "la session d'étiquetage s'ouvre sur la première image");
+  // pendant la session, un clic sur une personne désigne le ballon (pas de question « qui est-ce ? ») et l'image est propre (aucun cadre)
+  const pp = await where(5);
+  await win.mouse.click(pp.x, pp.y);
+  must(await waitFor(win, () => !!document.querySelector(".person-menu"), 4000), "un clic pendant la session ouvre un menu");
+  const smt = await menuText();
+  must(/Le ballon est ici/.test(smt) && !/Qui est cette personne/.test(smt), "en session, le menu parle du ballon et pas de la personne : " + smt.slice(0, 80));
+  await win.keyboard.press("Escape");
   await win.click("#ai-bs-none");
   must(await waitFor(win, () => /Image 2 sur/.test(document.getElementById("ai-bs-text").textContent), 5000), "après une réponse, l'image suivante est proposée");
   must((await win.evaluate(() => (window.FSAI.memory().ballLabels || []).length)) === n0 + 1, "la réponse est retenue comme étiquette");
