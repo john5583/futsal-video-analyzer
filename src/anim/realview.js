@@ -147,8 +147,9 @@
       for (let i = 0; i < info.total; i++) {
         if (signal && signal.aborted) throw new Error("Export interrompu");
         if (gen !== this.gen) throw new Error("La correction affichée a changé pendant l'export");
+        if (!this.el.root.offsetParent) throw new Error("Restez sur l'onglet pendant l'export (les dessins sont calculés à la taille de l'écran)");
         const T = Math.min(info.duration, i / info.fps), st = this.clipState(T);
-        await seek(v, st.t);
+        if (!(await seek(v, st.t))) throw new Error("La vidéo n'a pas pu se positionner à " + st.t.toFixed(1) + " s");
         this.draw(st.t, st.shown, st.corr);
         this.compose(g, info.width, info.height);
         await onFrame(out, i, info.total);

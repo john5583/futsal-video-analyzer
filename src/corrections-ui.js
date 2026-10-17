@@ -168,11 +168,13 @@
     m.addEventListener("pointerdown", (e) => {
       if (r.classList.contains("map-only") || r.classList.contains("map-big")) return;
       const a = r.getBoundingClientRect(), b = m.getBoundingClientRect();
-      drag = { dx: e.clientX - b.left, dy: e.clientY - b.top, a, w: b.width, h: b.height };
+      drag = { dx: e.clientX - b.left, dy: e.clientY - b.top, a, w: b.width, h: b.height, sx: e.clientX, sy: e.clientY, moved: false };
       m.setPointerCapture(e.pointerId); e.preventDefault();
     });
     m.addEventListener("pointermove", (e) => {
       if (!drag) return;
+      if (!drag.moved && Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) < 4) return;       // simple clic : rien ne bouge
+      drag.moved = true;
       const x = Math.max(0, Math.min(drag.a.width - drag.w, e.clientX - drag.a.left - drag.dx)), y = Math.max(0, Math.min(drag.a.height - drag.h, e.clientY - drag.a.top - drag.dy));
       ["br", "bl", "tl", "tr", "off"].forEach((k) => r.classList.remove("map-" + k));
       r.dataset.mapMode = "fixed";
@@ -180,6 +182,7 @@
     });
     const end = (e) => {
       if (!drag) return;
+      if (!drag.moved) { drag = null; return; }                  // le mode (automatique ou coin choisi) est conservé
       const a = drag.a, x = m.offsetLeft, y = m.offsetTop, fx = a.width > drag.w ? x / (a.width - drag.w) : 1, fy = a.height > drag.h ? y / (a.height - drag.h) : 1;
       drag = null;
       try { localStorage.setItem("fsal.corrMapFree", JSON.stringify({ fx: Math.max(0, Math.min(1, fx)), fy: Math.max(0, Math.min(1, fy)) })); } catch (_e) { /* stockage indisponible */ }
@@ -253,10 +256,11 @@
     const view = real.view, GIF = window.FutsalGif, fps = kind === "gif" ? 10 : 30;
     if (!view || !view.s) { App.toast("Choisissez d'abord une erreur à exporter.", true); return; }
     const info = view.exportInfo(kind === "gif" ? 560 : 1280, kind === "gif" ? 360 : 720, fps);
-    if (!info) { App.toast("Cette correction n'est pas montrée sur la vraie vidéo (plan seul) : rien à exporter ici.", true); return; }
+    if (!info) { App.toast(view.el.overlay.clientWidth ? "Cette correction n'est pas montrée sur la vraie vidéo (plan seul) : rien à exporter ici." : "Restez sur l'onglet « Corrections animées » pour exporter : la vidéo doit être affichée.", true); return; }
     const ev = view.s.ev, name = "correction-" + (ev.type || "erreur") + "-" + App.fmt(ev.t).replace(":", "m");
     setExporting(true, kind === "gif" ? "Création du GIF…" : "Création de la vidéo…");
     $("cp-bar").style.width = "0%";
+    const ctrl = new AbortController(), queue = [];
     try {
       let out;
       if (kind === "gif") {
@@ -265,21 +269,20 @@
         await view.exportFrames(info, async (canvas, i, total) => {
           frames.push(canvas.getContext("2d").getImageData(0, 0, info.width, info.height).data);
           if (i % 3 === 0) { $("cp-bar").style.width = Math.round((i / total) * 90) + "%"; await new Promise((r) => setTimeout(r, 0)); }
-        });
+        }, ctrl.signal);
         $("cp-msg").textContent = "Compression du GIF…"; await new Promise((r) => setTimeout(r, 30));
         out = { buffer: GIF.encodeGif({ width: info.width, height: info.height, frames, fps }), ext: "gif" };
       } else {
         // le rendu produit les images dans l'ordre (en mémoire, au plus 6 d'avance) ; l'encodeur les consomme dans l'ordre
-        const queue = [];
         let renderErr = null;
         const render = view.exportFrames(info, async (canvas) => {
           queue.push(await createImageBitmap(canvas));
-          while (queue.length > 6) await new Promise((r) => setTimeout(r, 4));
-        }).catch((e) => { renderErr = e; });
+          while (queue.length > 6 && !ctrl.signal.aborted) await new Promise((r) => setTimeout(r, 4));
+        }, ctrl.signal).catch((e) => { renderErr = e; });
         const tmp = document.createElement("canvas"); tmp.width = info.width; tmp.height = info.height;
         const tg = tmp.getContext("2d");
         out = await PL.encodeSequence({
-          width: info.width, height: info.height, fps, total: info.total,
+          width: info.width, height: info.height, fps, total: info.total, signal: ctrl.signal,
           renderFrame: async () => {
             while (!queue.length) { if (renderErr) throw renderErr; await new Promise((r) => setTimeout(r, 4)); }
             const bmp = queue.shift(); tg.drawImage(bmp, 0, 0); bmp.close();
@@ -297,8 +300,12 @@
       if (kind !== "gif" && out.ext !== "mp4") App.toast("Format WebM utilisé (MP4 non pris en charge sur cet ordinateur). Lisible avec Chrome, Edge ou VLC.");
       if (api.showItem) api.showItem(r.path);
     } catch (e) {
+      ctrl.abort();                                              // arrête le rendu en cours (jamais de rendu orphelin)
       setExporting(false, "");
       App.toast("Export impossible : " + e.message, true);
+    } finally {
+      ctrl.abort();
+      while (queue.length) { try { queue.shift().close(); } catch (_e) { /* déjà libérée */ } }
     }
   }
 
@@ -320,15 +327,15 @@
   }
 
   function bind() {
-    $("cr-fixed").addEventListener("click", () => { real.mode = "fixed"; if (real.view && real.events.length) openReal(); });
-    $("cr-seq").addEventListener("click", () => { real.mode = "seq"; if (real.view && real.events.length) openReal(); });
-    $("cr-replay").addEventListener("click", () => { if (real.view) real.view.restart(); });
+    $("cr-fixed").addEventListener("click", () => { if (exporting) return; real.mode = "fixed"; if (real.view && real.events.length) openReal(); });
+    $("cr-seq").addEventListener("click", () => { if (exporting) return; real.mode = "seq"; if (real.view && real.events.length) openReal(); });
+    $("cr-replay").addEventListener("click", () => { if (exporting) return; if (real.view) real.view.restart(); });
     $("cr-exp-video").addEventListener("click", () => exportReal("video"));
     $("cr-exp-gif").addEventListener("click", () => exportReal("gif"));
     $("cr-map-pos").addEventListener("click", () => { setMapPos(MAP_POS[(MAP_POS.indexOf(mapPos()) + 1) % MAP_POS.length]); });
     setMapPos(mapPos()); bindMapDrag();
-    $("cr-prev").addEventListener("click", () => { real.idx = (real.idx + real.events.length - 1) % real.events.length; openReal(); });
-    $("cr-next").addEventListener("click", () => { real.idx = (real.idx + 1) % real.events.length; openReal(); });
+    $("cr-prev").addEventListener("click", () => { if (exporting) return; real.idx = (real.idx + real.events.length - 1) % real.events.length; openReal(); });
+    $("cr-next").addEventListener("click", () => { if (exporting) return; real.idx = (real.idx + 1) % real.events.length; openReal(); });
     $("cr-catalog").addEventListener("click", () => {
       if (!current) return;
       real.catalog = !real.catalog;

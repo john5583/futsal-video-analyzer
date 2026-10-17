@@ -608,13 +608,18 @@
     img.onerror = () => resolve(url);
     img.src = url;
   });
+  let thumbBusy = false, thumbAgain = false;
   async function loadQuestionThumbs(qs) {
+    if (thumbBusy) { thumbAgain = true; return; }                 // une seule capture à la fois (chacune ouvre la vidéo)
     const todo = qs.filter((q) => !qThumbs.has(q.key));
     if (!todo.length || !App.getVideoUrl() || !App.isVideoReady()) return;
+    thumbBusy = true;
     let shots = [];
-    try { shots = await P.captureFrames(App.getVideoUrl(), todo.map((q) => q.t), 480); } catch (_e) { return; }
+    try { shots = await P.captureFrames(App.getVideoUrl(), todo.map((q) => q.t), 480); } catch (_e) { thumbBusy = false; return; }
     for (let i = 0; i < todo.length; i++) if (shots[i]) qThumbs.set(todo[i].key, await markBox(shots[i], todo[i].kind === "team" || todo[i].kind === "sub" ? todo[i].b : null, todo[i].kind === "bench" ? benchPolys(todo[i]) : null));
     document.querySelectorAll("#ai-q img[data-k]").forEach((im) => { const u = qThumbs.get(im.dataset.k); if (u) im.src = u; });
+    thumbBusy = false;
+    if (thumbAgain) { thumbAgain = false; renderQuestions(); }
   }
   function renderQuestions() {
     const box = $("ai-q");
@@ -712,7 +717,7 @@
   function renderAnswers() {
     const box = $("ai-ans");
     if (!box) return;
-    const mem = memory(), rows = [];
+    const mem = state.project.ai ? memory() : { answers: [], rejected: [] }, rows = [];      // ne crée pas de projet IA vide juste pour afficher la liste
     mem.answers.slice().reverse().forEach((a) => rows.push({ text: D.describeAnswer(a, App.fmt, App.labelOf), label: "Annuler", fn: () => cancelAnswer(a) }));
     mem.rejected.slice().reverse().forEach((r) => rows.push({ text: App.fmt(r.t) + " — erreur écartée : " + App.labelOf(r.type), label: "Rétablir", fn: () => restoreRejected(r) }));
     $("ai-ans-count").textContent = "(" + rows.length + ")";
@@ -727,9 +732,14 @@
   }
   function cancelAnswer(a) {
     const p = state.project, ai = p.ai, mem = memory();
-    if (a.kind === "team" && D.undoOne(frames, a)) ai.frames = P.compactFrames(frames);
+    if (a.kind === "team") {
+      if (D.undoOne(frames, a)) ai.frames = P.compactFrames(frames);
+      else App.toast("Cette réponse n'avait modifié aucune image (personne absente ou ambiguë) : rien à rétablir.");
+    }
     if (a.kind === "event" && a.verdict === "oui") {
+      const before = p.events.length;
       p.events = p.events.filter((e) => !(e.auto && e.type === a.type && Math.abs(e.t - a.t) < 2.5 && /confirmé par vous/.test(e.note || "")));
+      if (p.events.length === before) App.toast("L'événement ajouté n'a pas été retrouvé (sa note a peut-être été modifiée) : supprime-le à la main dans la liste des événements.", true);
       App.renderEvents(); App.renderTimeline(); App.renderPalette();
     }
     D.removeAnswer(mem, a);
@@ -745,12 +755,18 @@
     D.unreject(memory(), r);
     reanalyzeSuggestions(); App.changed();
   }
+  const evBusy = new Set();
   async function answerEvent(q, verdict) {
-    const a = state.project.ai, mem = memory();
-    D.answerEvent(mem, q, verdict);
-    a.uncertain = (a.uncertain || []).filter((u) => !(u.type === q.type && Math.abs(u.t - q.t) < 2));
-    if (verdict === "oui") await acceptSuggestions([Object.assign({ sid: "q" + Date.now().toString(36) }, q.event, { note: ((q.event && q.event.note) || "") + " — confirmé par vous" })]);
-    renderSuggestions(); App.changed();
+    if (evBusy.has(q.key)) return;                              // double clic : une seule réponse, un seul événement
+    evBusy.add(q.key);
+    try {
+      const a = state.project.ai, mem = memory();
+      D.answerEvent(mem, q, verdict);
+      a.uncertain = (a.uncertain || []).filter((u) => !(u.type === q.type && Math.abs(u.t - q.t) < 2));
+      renderSuggestions();                                      // la question disparaît tout de suite (la vignette de l'événement arrive ensuite)
+      if (verdict === "oui") await acceptSuggestions([Object.assign({ sid: "q" + Date.now().toString(36) }, q.event, { note: ((q.event && q.event.note) || "") + " — confirmé par vous" })]);
+      renderSuggestions(); App.changed();
+    } finally { evBusy.delete(q.key); }
   }
 
   /* Recalcule les erreurs suggérées à partir des images déjà analysées (après un changement de réglage qui ne demande
@@ -862,6 +878,7 @@
       const out = result.frames;
       frames = out;
       a.doubts = result.doubts || [];
+      qGroup = null; qThumbs.clear();                    // les numéros de pistes d'une nouvelle analyse n'ont rien à voir avec les anciens
       D.applyAnswers(frames, memory().answers);
       a.camera = camera; a.lost = result.lost; a.notes = result.notes;
       a.frames = P.compactFrames(frames);
@@ -937,6 +954,7 @@
     $("ai-marks").checked = !(d.settings && d.settings.floorMarks === false);
     $("ai-bench").value = (d.settings && ["left", "right"].includes(d.settings.bench)) ? d.settings.bench : "auto";
     benchMark = null; renderBenchZones();
+    qGroup = null; qHighlight = null; qThumbs.clear();
     $("ai-t0").value = App.fmt((d.settings && d.settings.t0) || 0);
     $("ai-t1").value = App.fmt((d.settings && d.settings.t1) || state.project.duration || 0);
     fillLandmarks(); renderPoints(); renderCalibs(); renderKits(); renderStats(); renderSuggestions(); updateEstimate();

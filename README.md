@@ -20,6 +20,12 @@ Programme **Windows** (installeur `.exe`) d'analyse vidéo tactique de futsal, *
 - **Durée d'analyse** : environ 0,2 à 0,5 s par image analysée sur un PC courant (affichée avant lancement). Analysez un extrait ou choisissez la précision « Rapide » pour un match entier.
 - Les lois du jeu sont une synthèse pédagogique : se référer au règlement de la compétition.
 
+## Nouveautés des versions 1.3 et 1.4
+- Buts de toute couleur (rouge, bleu, vert, couleur apprise en 3 clics) ; cadre clair proposé avec confirmation.
+- Questions du programme, mémoire du projet et écran « Mes réponses » (annulable) : voir `docs/catalogue-apprentissage.md`.
+- Export d'une correction sur la vraie vidéo en MP4/WebM ou GIF animé ; petite carte vue de dessus automatique ou déplaçable.
+- Page « Mon plan tactique » : comparaison du match au plan voulu (système, bloc, compacité, pressing, gardien-joueur).
+
 ## Installer
 
 L'installeur est construit par GitHub Actions (workflow *Futsal Analyzer — installeur Windows*) :

@@ -182,6 +182,15 @@
     const { w, h, L, A, B } = work, px = [];
     [goal.left, goal.right].forEach((p) => {
       const y0 = Math.max(0, Math.floor(p.v0)), y1 = Math.min(h - 1, Math.ceil(p.v1));
+      // un clic décalé de quelques pixels : on recentre le poteau sur la colonne la plus colorée à ±6 px
+      let uc = Math.round(p.u), bestC = -1;
+      for (let dx = -6; dx <= 6; dx++) {
+        const x = Math.round(p.u) + dx;
+        if (x < 0 || x >= w) continue;
+        let c = 0;
+        for (let y = y0; y <= y1; y++) { const i = y * w + x; if (Math.hypot(A[i], B[i]) > 22 && !isWhite(L[i], A[i], B[i])) c++; }
+        if (c > bestC) { bestC = c; uc = x; }
+      }
       const bg = [];
       for (let y = y0; y <= y1; y++) [-12, -9, 9, 12].forEach((dx) => {
         const x = Math.round(p.u + dx);
@@ -189,7 +198,7 @@
       });
       const med = [0, 1, 2].map((k) => { const v = bg.map((q) => q[k]).sort((m, n) => m - n); return v.length ? v[v.length >> 1] : 0; });
       for (let y = y0; y <= y1; y++) {
-        for (let x = Math.max(0, Math.round(p.u - 3)); x <= Math.min(w - 1, Math.round(p.u + 3)); x++) {
+        for (let x = Math.max(0, uc - 3); x <= Math.min(w - 1, uc + 3); x++) {
           const i = y * w + x;
           if (Math.hypot(A[i], B[i]) > 22 && !isWhite(L[i], A[i], B[i]) && bg.length && Math.hypot(L[i] - med[0], A[i] - med[1], B[i] - med[2]) > 20) px.push([L[i], A[i], B[i]]);
         }
@@ -198,7 +207,7 @@
     if (px.length < 12) return null;
     const m = [0, 1, 2].map((k) => px.reduce((s, q) => s + q[k], 0) / px.length);
     const sd = Math.sqrt(px.reduce((s, q) => s + (q[0] - m[0]) ** 2 + (q[1] - m[1]) ** 2 + (q[2] - m[2]) ** 2, 0) / px.length);
-    return { name: "appris", lab: m.map((v) => Math.round(v * 10) / 10), tol: Math.round(Math.max(14, Math.min(34, 2 * sd + 8)) * 10) / 10, n: px.length };
+    return { name: "appris", lab: m.map((v) => Math.round(v * 10) / 10), tol: Math.round(Math.max(14, Math.min(22, 2 * sd + 8)) * 10) / 10, n: px.length };
   }
 
   return { classify, verticalStripes, groupPosts, detect, goalsOf, candidates, learnPalette, PALETTES };

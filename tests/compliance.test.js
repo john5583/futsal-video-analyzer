@@ -169,3 +169,33 @@ test("forme : part exacte et part « proche » (un seul joueur hors de sa ligne)
   assert.equal(f.share, 0);
   assert.equal(f.near, 1);
 });
+
+/* ---------- relecture indépendante ---------- */
+test("plan : perte sans aucun joueur de champ visible -> non jugée (jamais « à Infinity m »)", () => {
+  const res = build(30, (t) => (t < 10 ? { A: [10, 12, 14, 16], team: "A", ball: [12, 8] } : { A: [], team: "B", ball: [26, 10] }));
+  const r = C.evaluate(plan({ pressing: "oui", defense: "median" }), res, { L, W });
+  assert.equal(r.deviations.filter((d) => d.rule === "pressing").length, 0);
+  assert.ok(r.deviations.every((d) => !/Infinity/.test(d.avoid)));
+});
+
+test("plan : pertes en zone défensive — sans ballon vu, « indicatif » (pas un vert trompeur) ; les pertes confirmées par le coach comptent", () => {
+  const blind = build(30, () => ({ A: [10, 12, 14, 16], team: "A", ball: null }));
+  assert.equal(rule(C.evaluate(plan({ noLossOwnZone: "oui" }), blind, { L, W }), "pertes").status, "indicatif");
+  const seen = build(30, () => ({ A: [10, 12, 14, 16], team: "A", ball: [12, 8] }));
+  assert.equal(rule(C.evaluate(plan({ noLossOwnZone: "oui" }), seen, { L, W }), "pertes").status, "ok");
+  const r = C.evaluate(plan({ noLossOwnZone: "oui" }), seen, { L, W, events: [{ type: "perte_zone_def", t: 12, note: "vue par le coach" }] });
+  assert.equal(rule(r, "pertes").count, 1);
+  assert.match(r.deviations.find((d) => d.rule === "pertes").avoid, /confirmée par vous/);
+});
+
+test("plan : le bloc et la compacité ne sont jugés qu'avec quatre joueurs de champ visibles", () => {
+  const three = build(30, () => ({ A: [5, 8, 20], team: "B" }));
+  const r = C.evaluate(plan({ defense: "haut", compact: "serree" }), three, { L, W });
+  assert.ok(!rule(r, "bloc") && !rule(r, "compact"));
+});
+
+test("plan : les dessins reçoivent les identifiants des joueurs mesurés", () => {
+  const res = build(40, (t) => ({ A: t < 20 ? [5, 7, 9, 22] : [5, 7, 17, 19], team: "A" }));
+  const d = C.evaluate(plan(), res, { L, W }).deviations.find((x) => x.rule === "forme");
+  assert.deepEqual(d.data.ids.length, 4);
+});
