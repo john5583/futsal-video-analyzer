@@ -126,7 +126,8 @@
     return (doubts || []).filter((d) => d.kind === "team" && d.id !== q.id && typeof d.leg === "number" && d.leg < LEG_NEAR && d.cur === q.cur);
   }
 
-  const sameSpot = (a, b) => Math.abs(a.t - b.t) <= T_TOL && Math.hypot(a.x - b.x, a.y - b.y) <= D_APPLY;
+  const sameId = (a, b) => a.id == null || b.id == null || a.id === b.id;       // deux réponses qui portent des identifiants différents concernent deux personnes
+  const sameSpot = (a, b) => sameId(a, b) && Math.abs(a.t - b.t) <= T_TOL && Math.hypot(a.x - b.x, a.y - b.y) <= D_APPLY;
 
   /* Image la plus proche de t (images triées par temps) à moins de tol s, sinon null. */
   function nearestFrame(frames, t, tol) {
@@ -263,7 +264,7 @@
   function reject(mem, e) { if (!isRejected(mem, e)) mem.rejected.push({ type: e.type, t: Math.round(e.t * 10) / 10 }); }
   function unreject(mem, r) { mem.rejected = mem.rejected.filter((x) => !(x.type === r.type && Math.abs(x.t - r.t) <= 0.051)); }
 
-  const subMatch = (a, s) => a.kind === "sub" && Math.abs(a.t - s.t) <= SUB_TOL && Math.hypot(a.x - s.x, a.y - s.y) <= D_APPLY;
+  const subMatch = (a, s) => a.kind === "sub" && sameId(a, s) && Math.abs(a.t - s.t) <= SUB_TOL && Math.hypot(a.x - s.x, a.y - s.y) <= D_APPLY;
 
   /* Questions encore ouvertes : doutes d'équipe, zone de banc, remplacements, erreurs incertaines — sans celles déjà répondues. */
   function openQuestions(src) {
@@ -293,6 +294,7 @@
   /* Enregistre une réponse dans la mémoire. Renvoie l'entrée retenue. */
   function answerTeam(mem, q, team, via, role) {
     const a = { kind: "team", t: q.t, x: q.x, y: q.y, team };
+    if (q.id != null) a.id = q.id;
     if (via) a.via = via;
     if (team === "NONE" && ROLE_LABEL[role]) a.role = role;           // rôle précis facultatif : jamais deviné, seulement celui que le coach a choisi
     if (Array.isArray(q.pts)) a.pts = q.pts;
@@ -315,6 +317,7 @@
   /* verdict : "remplacant" (il entre ou sort : compté comme tel) ou "joueur" (il est bien sur le terrain : compté comme joueur). */
   function answerSub(mem, q, verdict) {
     const a = { kind: "sub", t: q.t, x: q.x, y: q.y, verdict };
+    if (q.id != null) a.id = q.id;                       // la personne exacte de cette analyse : plusieurs personnes au même endroit ne se confondent plus
     mem.answers = mem.answers.filter((o) => !subMatch(o, q)).concat([a]);
     return a;
   }

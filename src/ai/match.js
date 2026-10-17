@@ -150,7 +150,12 @@
     const idsOf = (x) => [...first.keys()].filter((id) => near(x, first.get(id)) || near(x, last.get(id)));
     // une réponse qui correspond à deux personnes (l'entrant et le sortant d'un même échange) n'est appliquée à aucune : on ne devine pas
     // Dire qui est la personne (mon équipe, adversaire, gardien) répond aussi à la question : c'est un joueur sur le terrain ; « ni joueur ni gardien » = écartée.
-    const ansOf = (id) => (answers || []).find((x) => x && (x.kind === "sub" || x.kind === "team") && (near(x, first.get(id)) || near(x, last.get(id))) && idsOf(x).length === 1);
+    // Une réponse qui porte l'identifiant exact de la personne (question ou clic de cette analyse, vérifié par le lieu et l'instant) ne vaut que
+    // pour elle : plusieurs personnes au même endroit ne bloquent plus la réponse. Sans identifiant (anciennes réponses) : la règle de position.
+    const list = (answers || []).filter((x) => x && (x.kind === "sub" || x.kind === "team"));
+    const ownerOf = (x) => (x.id != null && first.has(x.id) && (near(x, first.get(x.id)) || near(x, last.get(x.id))) ? x.id : null);
+    const ansOf = (id) => list.find((x) => ownerOf(x) === id)
+      || list.find((x) => ownerOf(x) == null && (near(x, first.get(id)) || near(x, last.get(id))) && idsOf(x).length === 1);
     const verdictOf = (a) => (a.kind === "team" ? (a.team === "NONE" ? "remplacant" : "joueur") : a.verdict);
     const add = (id, a, b, t, p) => {
       const ans = ansOf(id);

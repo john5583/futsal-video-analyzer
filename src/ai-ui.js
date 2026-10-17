@@ -1034,6 +1034,9 @@
   function answerSub(q, verdict) {
     D.answerSub(memory(), q, verdict);
     reanalyzeSuggestions(); App.changed();
+    // la réponse est toujours retenue ; si elle ne peut pas être reliée à UNE personne, on le dit au lieu de laisser la question sans réaction
+    const a = state.project.ai;
+    if (a && (a.subs || []).some((x) => x.id === q.id && !x.answered)) App.toast("Ta réponse est retenue, mais je ne peux pas la relier avec certitude à une seule personne (plusieurs au même endroit). Relance l'analyse si besoin.", true);
   }
   function answerBench(ok) {
     D.answerBench(memory(), ok);
