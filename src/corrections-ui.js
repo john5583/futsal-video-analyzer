@@ -138,7 +138,7 @@
     $("corr-real").hidden = true; $("corr-canvas").hidden = false; $("cr-text").hidden = true;
     sceneControls().hidden = false;
     $("cr-bar").hidden = !(real.catalog && real.events.length);
-    ["cr-fixed", "cr-seq", "cr-replay", "cr-prev", "cr-next", "cr-label", "cr-map-pos"].forEach((x) => { $(x).hidden = true; });
+    ["cr-fixed", "cr-seq", "cr-replay", "cr-exp-video", "cr-exp-gif", "cr-prev", "cr-next", "cr-label", "cr-map-pos"].forEach((x) => { $(x).hidden = true; });
     $("cr-catalog").textContent = "Vraie vidéo";
   }
   /* Petite carte : coin choisi (ou masquée), mémorisé pour ce poste. */
@@ -194,7 +194,7 @@
     $("corr-pip").hidden = true; $("corr-pip-video").pause();
     $("corr-canvas").hidden = true; $("corr-real").hidden = false; $("cr-bar").hidden = false; $("cr-text").hidden = false;
     sceneControls().hidden = true;
-    ["cr-fixed", "cr-seq", "cr-replay", "cr-prev", "cr-next", "cr-label", "cr-map-pos"].forEach((x) => { $(x).hidden = false; });
+    ["cr-fixed", "cr-seq", "cr-replay", "cr-exp-video", "cr-exp-gif", "cr-prev", "cr-next", "cr-label", "cr-map-pos"].forEach((x) => { $(x).hidden = false; });
     $("cr-catalog").textContent = "Animation du catalogue";
     if (mapPos() === "free") placeFree();
     openReal();
@@ -245,6 +245,63 @@
     }
   }
 
+  /* Export de la correction affichée sur la vraie vidéo : MP4/WebM (image par image, hors temps réel) ou GIF animé.
+     La page doit rester visible pendant l'export (les dessins sont calculés à la taille de l'écran). */
+  async function exportReal(kind) {
+    if (exporting) return;
+    if (!api) { App.toast("Export disponible dans l'application uniquement.", true); return; }
+    const view = real.view, GIF = window.FutsalGif, fps = kind === "gif" ? 10 : 30;
+    if (!view || !view.s) { App.toast("Choisissez d'abord une erreur à exporter.", true); return; }
+    const info = view.exportInfo(kind === "gif" ? 560 : 1280, kind === "gif" ? 360 : 720, fps);
+    if (!info) { App.toast("Cette correction n'est pas montrée sur la vraie vidéo (plan seul) : rien à exporter ici.", true); return; }
+    const ev = view.s.ev, name = "correction-" + (ev.type || "erreur") + "-" + App.fmt(ev.t).replace(":", "m");
+    setExporting(true, kind === "gif" ? "Création du GIF…" : "Création de la vidéo…");
+    $("cp-bar").style.width = "0%";
+    try {
+      let out;
+      if (kind === "gif") {
+        if (!GIF) throw new Error("Encodeur GIF indisponible.");
+        const frames = [];
+        await view.exportFrames(info, async (canvas, i, total) => {
+          frames.push(canvas.getContext("2d").getImageData(0, 0, info.width, info.height).data);
+          if (i % 3 === 0) { $("cp-bar").style.width = Math.round((i / total) * 90) + "%"; await new Promise((r) => setTimeout(r, 0)); }
+        });
+        $("cp-msg").textContent = "Compression du GIF…"; await new Promise((r) => setTimeout(r, 30));
+        out = { buffer: GIF.encodeGif({ width: info.width, height: info.height, frames, fps }), ext: "gif" };
+      } else {
+        // le rendu produit les images dans l'ordre (en mémoire, au plus 6 d'avance) ; l'encodeur les consomme dans l'ordre
+        const queue = [];
+        let renderErr = null;
+        const render = view.exportFrames(info, async (canvas) => {
+          queue.push(await createImageBitmap(canvas));
+          while (queue.length > 6) await new Promise((r) => setTimeout(r, 4));
+        }).catch((e) => { renderErr = e; });
+        const tmp = document.createElement("canvas"); tmp.width = info.width; tmp.height = info.height;
+        const tg = tmp.getContext("2d");
+        out = await PL.encodeSequence({
+          width: info.width, height: info.height, fps, total: info.total,
+          renderFrame: async () => {
+            while (!queue.length) { if (renderErr) throw renderErr; await new Promise((r) => setTimeout(r, 4)); }
+            const bmp = queue.shift(); tg.drawImage(bmp, 0, 0); bmp.close();
+            return tmp;
+          },
+          onProgress: (p) => { $("cp-bar").style.width = Math.round(p * 100) + "%"; }
+        });
+        await render;
+        if (renderErr) throw renderErr;
+      }
+      const r = await api.saveAnimation(out.buffer, name, out.ext);
+      if (r.canceled) { setExporting(false, ""); return; }
+      if (r.error) { setExporting(false, ""); App.toast(r.error, true); return; }
+      setExporting(false, (kind === "gif" ? "GIF" : out.ext.toUpperCase()) + " enregistré : " + r.path);
+      if (kind !== "gif" && out.ext !== "mp4") App.toast("Format WebM utilisé (MP4 non pris en charge sur cet ordinateur). Lisible avec Chrome, Edge ou VLC.");
+      if (api.showItem) api.showItem(r.path);
+    } catch (e) {
+      setExporting(false, "");
+      App.toast("Export impossible : " + e.message, true);
+    }
+  }
+
   function fullSequence() {
     let analysis;
     try { analysis = A.analyze(state.project); } catch (_e) { return null; }
@@ -266,6 +323,8 @@
     $("cr-fixed").addEventListener("click", () => { real.mode = "fixed"; if (real.view && real.events.length) openReal(); });
     $("cr-seq").addEventListener("click", () => { real.mode = "seq"; if (real.view && real.events.length) openReal(); });
     $("cr-replay").addEventListener("click", () => { if (real.view) real.view.restart(); });
+    $("cr-exp-video").addEventListener("click", () => exportReal("video"));
+    $("cr-exp-gif").addEventListener("click", () => exportReal("gif"));
     $("cr-map-pos").addEventListener("click", () => { setMapPos(MAP_POS[(MAP_POS.indexOf(mapPos()) + 1) % MAP_POS.length]); });
     setMapPos(mapPos()); bindMapDrag();
     $("cr-prev").addEventListener("click", () => { real.idx = (real.idx + real.events.length - 1) % real.events.length; openReal(); });

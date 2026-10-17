@@ -115,5 +115,35 @@
     return { buffer: mux.target.buffer, ext: pick.kind, codec: pick.codec };
   }
 
-  root.FutsalPlayer = { ScenePlayer, exportVideo, pickCodec, WIDTH: W, HEIGHT: H };
+  /* Encode une suite d'images fournie par o.renderFrame(i) (canvas à la taille width × height) :
+     o : { width, height, fps, total, renderFrame(i) -> canvas, onProgress(0..1), signal } -> { buffer, ext, codec } */
+  async function encodeSequence(o) {
+    const fps = o.fps || 30, w = o.width, h = o.height;
+    const pick = await pickCodec(w, h, fps);
+    if (!pick) throw new Error("Aucun encodeur vidéo disponible sur cet ordinateur.");
+    const mux = pick.kind === "mp4"
+      ? new root.Mp4Muxer.Muxer({ target: new root.Mp4Muxer.ArrayBufferTarget(), video: { codec: "avc", width: w, height: h, frameRate: fps }, fastStart: "in-memory" })
+      : new root.WebMMuxer.Muxer({ target: new root.WebMMuxer.ArrayBufferTarget(), video: { codec: pick.codec === "vp8" ? "V_VP8" : "V_VP9", width: w, height: h, frameRate: fps } });
+    let encError = null;
+    const encoder = new VideoEncoder({ output: (chunk, meta) => mux.addVideoChunk(chunk, meta), error: (e) => { encError = e; } });
+    encoder.configure({ codec: pick.codec, width: w, height: h, bitrate: 6000000, framerate: fps });
+    for (let i = 0; i < o.total; i++) {
+      if (o.signal && o.signal.aborted) { encoder.close(); throw new Error("Export interrompu"); }
+      if (encError) throw new Error("Erreur d'encodage : " + encError.message);
+      const canvas = await o.renderFrame(i);
+      const frame = new VideoFrame(canvas, { timestamp: Math.round((i * 1000000) / fps), duration: Math.round(1000000 / fps) });
+      encoder.encode(frame, { keyFrame: i % 60 === 0 });
+      frame.close();
+      while (encoder.encodeQueueSize > 12) await new Promise((r) => setTimeout(r, 4));
+      if (o.onProgress && i % 5 === 0) { o.onProgress(i / o.total); await new Promise((r) => setTimeout(r, 0)); }
+    }
+    await encoder.flush();
+    encoder.close();
+    if (encError) throw new Error("Erreur d'encodage : " + encError.message);
+    mux.finalize();
+    if (o.onProgress) o.onProgress(1);
+    return { buffer: mux.target.buffer, ext: pick.kind, codec: pick.codec };
+  }
+
+  root.FutsalPlayer = { ScenePlayer, exportVideo, encodeSequence, pickCodec, WIDTH: W, HEIGHT: H };
 })(window);

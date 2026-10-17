@@ -348,11 +348,11 @@ function registerIpc() {
   ipcMain.handle("ai:stop", () => { aiStop(); return true; });
 
   ipcMain.handle("animation:save", async (_e, buffer, defaultName, ext) => {
-    const e = ext === "mp4" ? "mp4" : "webm";
+    const e = ext === "mp4" ? "mp4" : ext === "gif" ? "gif" : "webm";
     const r = await dialog.showSaveDialog(mainWindow, {
       title: "Enregistrer la vidéo de correction",
       defaultPath: (defaultName || "correction-futsal").replace(/[\\/:*?"<>|]+/g, "-").slice(0, 80) + "." + e,
-      filters: [{ name: e === "mp4" ? "Vidéo MP4" : "Vidéo WebM", extensions: [e] }]
+      filters: [{ name: e === "mp4" ? "Vidéo MP4" : e === "gif" ? "Image animée GIF" : "Vidéo WebM", extensions: [e] }]
     });
     if (r.canceled || !r.filePath) return { canceled: true };
     try { fs.writeFileSync(r.filePath, Buffer.from(buffer)); return { path: r.filePath }; }
