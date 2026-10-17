@@ -174,3 +174,27 @@ test("zone vue : un projecteur renvoie la projection la plus proche (H) pour cal
   assert.ok(at.ok && Array.isArray(at.H) && at.H.length === 9);
   assert.ok(O.visibleZone(at.H, L, W));
 });
+
+/* ---------- terrain estimé : tracé seulement près de l'action ---------- */
+test("fenêtre d'action : rectangle des joueurs élargi, borné au terrain ; sans action, rien", () => {
+  const ps = [{ x: 10, y: 5 }, { x: 14, y: 9 }];
+  const w = O.actionWindow(ps, 40, 20, 5);
+  assert.deepEqual(w, { x1: 5, y1: 0, x2: 19, y2: 14 });
+  assert.deepEqual(O.actionWindow([{ x: 1, y: 1 }, { x: 39, y: 19 }], 40, 20, 5), { x1: 0, y1: 0, x2: 40, y2: 20 }, "borné au terrain");
+  assert.equal(O.actionWindow([{ x: 10, y: 5 }], 40, 20), null, "un seul joueur : pas assez pour juger");
+  assert.equal(O.actionWindow([], 40, 20), null);
+  assert.equal(O.actionWindow([{ x: NaN, y: 1 }, { x: 2, y: 2 }], 40, 20), null, "valeur invalide ignorée");
+});
+
+test("ligne du terrain découpée : seuls les morceaux dans la fenêtre restent, la ligne lointaine disparaît", () => {
+  const win = { x1: 5, y1: 0, x2: 19, y2: 14 };
+  const touche = [[0, 0], [40, 0]];
+  const morceaux = O.clipLine(touche, win, 0.5);
+  assert.equal(morceaux.length, 1);
+  assert.ok(morceaux[0][0][0] >= 5 && morceaux[0][morceaux[0].length - 1][0] <= 19, "de 5 m à 19 m seulement");
+  assert.deepEqual(O.clipLine([[30, 18], [40, 18]], win, 0.5), [], "ligne entièrement hors fenêtre : rien");
+  assert.deepEqual(O.clipLine(touche, null, 0.5), [], "pas de fenêtre : rien n'est inventé");
+  // une ligne qui sort puis revient donne deux morceaux
+  const u = O.clipLine([[6, 1], [6, 20], [8, 20], [8, 1]], win, 0.5);
+  assert.equal(u.length, 2);
+});

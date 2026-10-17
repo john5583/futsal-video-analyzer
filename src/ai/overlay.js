@@ -363,5 +363,33 @@
     return best;
   }
 
-  return { visibleZone, shapeFix, chooseCorner, frameProjection, Projector, stateAt, buildOverlay, footOf, MIN_PLAYERS, MAX_ERR, MAX_GAP };
+  /* Fenêtre de l'action (en mètres) : le rectangle qui contient les joueurs détectés, élargi d'une marge, borné au terrain. Le terrain estimé n'est
+     tracé que là : près de l'action, l'estimation de la caméra est fiable ; au fond de la salle, une petite erreur d'angle devient une grosse erreur. */
+  function actionWindow(players, L, W, margin) {
+    const ps = (players || []).filter((p) => p && isFinite(p.x) && isFinite(p.y));
+    if (ps.length < 2 || !(L > 0) || !(W > 0)) return null;
+    const m = margin == null ? 5 : margin;
+    let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity;
+    ps.forEach((p) => { x1 = Math.min(x1, p.x); y1 = Math.min(y1, p.y); x2 = Math.max(x2, p.x); y2 = Math.max(y2, p.y); });
+    return { x1: Math.max(0, x1 - m), y1: Math.max(0, y1 - m), x2: Math.min(L, x2 + m), y2: Math.min(W, y2 + m) };
+  }
+  /* Une ligne du terrain (points en mètres) découpée à la fenêtre : renvoie les morceaux qui restent dedans (la ligne est d'abord réduite en pas de 'step' m). */
+  function clipLine(pl, win, step) {
+    if (!win || !pl || pl.length < 2) return [];
+    const st = step || 0.5, pts = [pl[0]];
+    for (let i = 1; i < pl.length; i++) {
+      const a = pl[i - 1], b = pl[i], n = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / st));
+      for (let k = 1; k <= n; k++) pts.push([a[0] + ((b[0] - a[0]) * k) / n, a[1] + ((b[1] - a[1]) * k) / n]);
+    }
+    const out = [];
+    let cur = [];
+    pts.forEach((p) => {
+      if (p[0] >= win.x1 && p[0] <= win.x2 && p[1] >= win.y1 && p[1] <= win.y2) cur.push(p);
+      else if (cur.length) { out.push(cur); cur = []; }
+    });
+    if (cur.length) out.push(cur);
+    return out.filter((c) => c.length >= 2);
+  }
+
+  return { actionWindow, clipLine, visibleZone, shapeFix, chooseCorner, frameProjection, Projector, stateAt, buildOverlay, footOf, MIN_PLAYERS, MAX_ERR, MAX_GAP };
 });

@@ -2,7 +2,7 @@
 (function () {
   "use strict";
   const App = window.FSApp;
-  const KB = window.FutsalKB, HG = window.FutsalHomography, K = window.FutsalKit, P = window.FutsalPipeline, M = window.FutsalMatch, E = window.FutsalAnim, D = window.FutsalDoubt, BL = window.FutsalBallLabels, Z = window.FutsalZoom, Q = window.FutsalQuality;
+  const KB = window.FutsalKB, HG = window.FutsalHomography, K = window.FutsalKit, P = window.FutsalPipeline, M = window.FutsalMatch, E = window.FutsalAnim, D = window.FutsalDoubt, BL = window.FutsalBallLabels, Z = window.FutsalZoom, O = window.FutsalOverlay, Q = window.FutsalQuality;
   const $ = (id) => document.getElementById(id);
   const esc = App.esc;
   const video = App.video, api = App.api, state = App.state;
@@ -231,17 +231,21 @@
         const Hi = HG.invert(ch.H), o = toView(0, 0), e = toView(r.vw, r.vh), far = 4;
         ctx.save(); ctx.beginPath(); ctx.rect(o[0], o[1], e[0] - o[0], e[1] - o[1]); ctx.clip();
         ctx.strokeStyle = "rgba(0,230,255,.9)"; ctx.lineWidth = 2;
-        courtPolylines().forEach((pl) => {
-          let pen = false;
-          ctx.beginPath();
-          pl.forEach((p) => {
-            const q = HG.apply(Hi, p[0], p[1]);
-            if (!isFinite(q[0]) || !isFinite(q[1]) || Math.abs(q[0]) > far * r.vw || Math.abs(q[1]) > far * r.vh) { pen = false; return; }
-            const v = toView(q[0], q[1]);
-            if (pen) ctx.lineTo(v[0], v[1]); else ctx.moveTo(v[0], v[1]);
-            pen = true;
+        // seulement près de l'action (là où l'estimation de la caméra est fiable) ; sans au moins deux joueurs détectés, rien n'est tracé
+        const fa = frames.length ? P.frameNear(frames, t, 0.3) : null, win = fa ? O.actionWindow(fa.players, L(), W(), 5) : null;
+        courtPolylines().forEach((full) => {
+          (win ? O.clipLine(full, win, 0.5) : []).forEach((pl) => {
+            let pen = false;
+            ctx.beginPath();
+            pl.forEach((p) => {
+              const q = HG.apply(Hi, p[0], p[1]);
+              if (!isFinite(q[0]) || !isFinite(q[1]) || Math.abs(q[0]) > far * r.vw || Math.abs(q[1]) > far * r.vh) { pen = false; return; }
+              const v = toView(q[0], q[1]);
+              if (pen) ctx.lineTo(v[0], v[1]); else ctx.moveTo(v[0], v[1]);
+              pen = true;
+            });
+            ctx.stroke();
           });
-          ctx.stroke();
         });
         ctx.restore();
       } else if (ch) {
