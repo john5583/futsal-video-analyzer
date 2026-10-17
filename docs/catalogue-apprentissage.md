@@ -137,3 +137,6 @@ Quand une personne n'est ni joueur ni gardien, tu peux préciser son rôle ; il 
 
 ## Indices de gardien : ce qui est mesurable et ce qui ne l'est pas
 Mesuré sur de vraies vidéos 1920x1080 : une main de gardien fait environ 10 pixels et bouge vite (flou) ; gants, tape sur les doigts, coudières et genouillères ne sont donc pas lisibles de façon fiable. Le programme ne s'en sert pas et ne prétend pas les reconnaître. Il se base sur la tenue (couleur, pantalon ou short), la position dans la surface et le nombre de joueurs de champ, et te pose la question en cas de doute.
+
+## Contours des personnes (à la place des cadres)
+Sur une image arrêtée, pour une question ou pour la session d'étiquetage, chaque personne est entourée de son vrai contour (MobileSAM, hors ligne, 1 à 2 s par image, jamais sur toute la vidéo). Le contour ne contient que la personne : un ballon posé à côté d'un pied n'y est pas. Un clic dans la silhouette désigne la personne ; un clic en dehors désigne le ballon. L'image suivante de la session est préparée pendant que tu réponds. En lecture, ou si la découpe échoue, les cadres de la détection restent affichés : rien n'est inventé. Limite : quand le ballon touche le pied, la découpe peut l'englober.
