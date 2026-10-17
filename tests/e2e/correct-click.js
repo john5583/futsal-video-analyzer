@@ -77,6 +77,7 @@ function makeFrames() {
   must(await waitFor(win, () => !!document.querySelector(".person-menu"), 4000), "un menu s'ouvre sur le cadre cliqué");
   const mt = await menuText();
   must(/Qui est cette personne/.test(mt) && /lue : adversaire/.test(mt) && /Mon équipe/.test(mt) && /Adversaire/.test(mt) && /Mon gardien/.test(mt) && /Gardien adverse/.test(mt) && /Entraîneur \(ne pas compter\)/.test(mt) && /Arbitre \(ne pas compter\)/.test(mt) && /Public ou autre \(ne pas compter\)/.test(mt), "le menu pose la question et donne les équipes, les gardiens et les rôles écartés du jeu");
+  must(/Ce n'est pas une personne : le ballon est ici/.test(mt), "le menu d'une personne propose aussi « le ballon est ici »");
   must((await teamOf(5)) === "B", "rien n'est changé tant qu'on n'a pas répondu");
   must(await menuClick("Mon gardien"), "réponse « Mon gardien »");
   must(await waitFor(win, () => window.FSAI.memory().answers.some((a) => a.kind === "team" && a.team === "GKA"), 5000), "la réponse est retenue dans la mémoire du projet");
@@ -118,6 +119,13 @@ function makeFrames() {
   const n0 = await win.evaluate(() => (window.FSAI.memory().ballLabels || []).length);
   await win.click("#ai-bs-start");
   must(await waitFor(win, () => !document.getElementById("ai-bs-box").hidden && /Image 1 sur/.test(document.getElementById("ai-bs-text").textContent), 5000), "la session d'étiquetage s'ouvre sur la première image");
+  // pendant la session, un clic sur une personne désigne le ballon (pas de question « qui est-ce ? ») et l'image est propre (aucun cadre)
+  const pp = await where(5);
+  await win.mouse.click(pp.x, pp.y);
+  must(await waitFor(win, () => !!document.querySelector(".person-menu"), 4000), "un clic pendant la session ouvre un menu");
+  const smt = await menuText();
+  must(/Le ballon est ici/.test(smt) && !/Qui est cette personne/.test(smt), "en session, le menu parle du ballon et pas de la personne : " + smt.slice(0, 80));
+  await win.keyboard.press("Escape");
   await win.click("#ai-bs-none");
   must(await waitFor(win, () => /Image 2 sur/.test(document.getElementById("ai-bs-text").textContent), 5000), "après une réponse, l'image suivante est proposée");
   must((await win.evaluate(() => (window.FSAI.memory().ballLabels || []).length)) === n0 + 1, "la réponse est retenue comme étiquette");

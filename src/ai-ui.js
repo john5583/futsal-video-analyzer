@@ -113,6 +113,14 @@
     return [[[0, 0], [l, 0], [l, w], [0, w], [0, 0]], [[l / 2, 0], [l / 2, w]], arc(l / 2, cy, 3, 0, 360), left, right];
   }
 
+  /* Ballon proposé par le programme : un simple cercle fin (le ballon reste visible à l'intérieur), avec son étiquette au-dessus. */
+  function drawBallMarker(ctx) {
+    if (!(qHighlight && qHighlight.ballPt && Math.abs((video.currentTime || 0) - qHighlight.t) < 0.4)) return;
+    const v = toView(qHighlight.ballPt.u, qHighlight.ballPt.v);
+    ctx.strokeStyle = "#f97316"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(v[0], v[1], 18, 0, Math.PI * 2); ctx.stroke();
+    ctx.font = "700 13px 'Segoe UI',Arial,sans-serif"; const lb = qHighlight.label || "Ballon proposé", tw = ctx.measureText(lb).width + 10;
+    ctx.fillStyle = "#f97316"; ctx.fillRect(v[0] - tw / 2, v[1] - 46, tw, 20); ctx.fillStyle = "#fff"; ctx.fillText(lb, v[0] - tw / 2 + 5, v[1] - 31);
+  }
   function drawOverlay() {
     const c = $("overlay");
     if (c.hidden) return;
@@ -125,6 +133,7 @@
     const r = videoRect();
     const a = state.project.ai;
     const t = video.currentTime || 0;
+    if (bs) { drawBallMarker(ctx); return; }          // session d'étiquetage : image propre, pour voir le ballon sans cadre, silhouette ni terrain par-dessus
     // aperçu du terrain calibré
     // (tracé seulement si la projection est fiable à cet instant ; sinon un message l'explique, pas de lignes absurdes)
     if (a && $("ov-court").checked) {
@@ -192,12 +201,7 @@
       ctx.fillStyle = "#f97316"; ctx.fillRect(a1[0], a1[1] - 20, tw, 20);
       ctx.fillStyle = "#fff"; ctx.fillText(label, a1[0] + 5, a1[1] - 5);
     }
-    if (qHighlight && qHighlight.ballPt && Math.abs((video.currentTime || 0) - qHighlight.t) < 0.4) {
-      const v = toView(qHighlight.ballPt.u, qHighlight.ballPt.v);
-      ctx.strokeStyle = "#f97316"; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(v[0], v[1], 16, 0, Math.PI * 2); ctx.stroke();
-      ctx.font = "700 13px 'Segoe UI',Arial,sans-serif"; const lb = qHighlight.label || "Ballon proposé", tw = ctx.measureText(lb).width + 10;
-      ctx.fillStyle = "#f97316"; ctx.fillRect(v[0] - tw / 2, v[1] - 40, tw, 20); ctx.fillStyle = "#fff"; ctx.fillText(lb, v[0] - tw / 2 + 5, v[1] - 25);
-    }
+    drawBallMarker(ctx);
     // repères de calibrage
     pts.forEach((p) => {
       const v = toView(p.ix, p.iy);
@@ -809,7 +813,7 @@
   function personClick(e, ix, iy) {
     if (!frames.length || !state.project.ai) return;
     const t = video.currentTime || 0, f = P.frameNear(frames, t, 0.8), vw = video.videoWidth, vh = video.videoHeight;
-    if (f) {
+    if (f && !bs) {
       let best = null, area = Infinity;
       f.players.forEach((p) => {
         if (!p.b || p.b.length < 4) return;
@@ -823,15 +827,19 @@
         showMenu(e, "Qui est cette personne ? (lue : " + (best.team === "A" ? "mon équipe" : best.team === "B" ? "adversaire" : lab(best.team)) + ")", [
           { label: "Mon équipe", fn: () => answerTeam(q, "A") }, { label: "Adversaire", fn: () => answerTeam(q, "B") },
           { label: "Mon gardien", fn: () => answerTeam(q, "GKA") }, { label: "Gardien adverse", fn: () => answerTeam(q, "GKB") },
-        ].concat(Object.keys(D.ROLE_LABEL).map((k) => ({ label: D.ROLE_LABEL[k][0].toUpperCase() + D.ROLE_LABEL[k].slice(1) + " (ne pas compter)", fn: () => answerTeam(q, "NONE", k) }))));
+        ].concat(Object.keys(D.ROLE_LABEL).map((k) => ({ label: D.ROLE_LABEL[k][0].toUpperCase() + D.ROLE_LABEL[k].slice(1) + " (ne pas compter)", fn: () => answerTeam(q, "NONE", k) })), ballItems(t, f, ix, iy).slice(0, 1).map((it) => Object.assign({}, it, { label: "Ce n'est pas une personne : le ballon est ici" }))));
         return;
       }
     }
+    showMenu(e, "Le ballon est ici ?", ballItems(t, f, ix, iy));
+  }
+  /* Choix proposés pour un clic qui désigne le ballon : [le ballon est ici, aucun ballon visible]. */
+  function ballItems(t, f, ix, iy) {
     const H = projectionAt(t), p = H && f ? HG.apply(H, ix, iy) : null, items = [];
     if (p && isFinite(p[0]) && isFinite(p[1])) items.push({ label: "Oui, le ballon est ici (image de " + App.fmt(f.t) + ")", fn: () => { saveBallLabel(t, ix, iy, H); answerBallAt({ t: f.t, x: Math.round(p[0] * 100) / 100, y: Math.round(p[1] * 100) / 100 }); } });
     else items.push({ label: "Le ballon est ici (sert seulement à l'entraînement : terrain non repéré à cet instant)", fn: () => saveBallLabel(t, ix, iy, null) });
     items.push({ label: "Aucun ballon visible sur cette image", fn: () => saveBallLabel(t, null, null, null) });
-    showMenu(e, "Le ballon est ici ?", items);
+    return items;
   }
   /* Étiquette exacte du ballon (pixel cliqué) pour mesurer puis entraîner le détecteur ; jamais déduite par le programme. */
   function saveBallLabel(t, ix, iy, H) {
