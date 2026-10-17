@@ -161,6 +161,28 @@
     return out;
   }
 
+  /* Part de peau visible entre le short et les chaussettes (0 à 1) : un short laisse voir les cuisses, un pantalon ou un survêtement non.
+     Mesuré sur des images étiquetées : médiane 0 % pour un gardien en survêtement, 22 à 34 % pour des joueurs en short.
+     Sert à repérer une personne qui s'habille autrement que son équipe (pour poser une question), jamais à décider seul. */
+  const LEG_BAND = { x0: 0.3, x1: 0.7, y0: 0.68, y1: 0.82 };
+  function legSkin(img, box) {
+    const bw = box[2] - box[0], bh = box[3] - box[1];
+    if (!img || bw < 6 || bh < 40) return null;
+    const x0 = Math.max(0, Math.round(box[0] + bw * LEG_BAND.x0)), x1 = Math.min(img.width, Math.round(box[0] + bw * LEG_BAND.x1));
+    const y0 = Math.max(0, Math.round(box[1] + bh * LEG_BAND.y0)), y1 = Math.min(img.height, Math.round(box[1] + bh * LEG_BAND.y1));
+    let n = 0, skin = 0;
+    for (let y = y0; y < y1; y++) {
+      for (let x = x0; x < x1; x++) {
+        const i = (y * img.width + x) * 4, r = img.data[i], g = img.data[i + 1], b = img.data[i + 2];
+        const Y = 0.299 * r + 0.587 * g + 0.114 * b, Cb = 128 - 0.168736 * r - 0.331264 * g + 0.5 * b, Cr = 128 + 0.5 * r - 0.418688 * g - 0.081312 * b;
+        n++;
+        // peau : teinte chaude et pas trop sombre (un pantalon noir est sombre et sans teinte)
+        if (Y > 38 && Cr > 134 && Cr < 185 && Cb > 80 && Cb < 128 && r > g && g >= b - 6) skin++;
+      }
+    }
+    return n >= 20 ? skin / n : null;
+  }
+
   /* Distance entre deux empreintes : seules les parties présentes des deux côtés comptent (le maillot pèse le plus). */
   function dist(a, b) {
     let s = 0, w = 0;
@@ -278,5 +300,5 @@
     return ref ? { shirt: ref.shirt ? toHex(ref.shirt) : null, shorts: ref.shorts ? toHex(ref.shorts) : null, socks: ref.socks ? toHex(ref.socks) : null, trim: ref.trim ? toHex(ref.trim) : null } : null;
   }
 
-  return { BANDS, REJECT_DISTANCE, rgbToLab, labToRgb, sample, average, classify, dist, swatches, toHex, pipette, fromParts, fromMask, detectTrim, accentFraction, trimHueFraction, addAccents, ambiguity, ambiguityMessages, ACC_MIN, ACC_MIN_CLOSE, PLAYER_SPREAD, CLOSE_DISTANCE };
+  return { BANDS, REJECT_DISTANCE, rgbToLab, labToRgb, sample, average, classify, dist, swatches, toHex, pipette, fromParts, fromMask, detectTrim, accentFraction, trimHueFraction, addAccents, ambiguity, ambiguityMessages, ACC_MIN, ACC_MIN_CLOSE, PLAYER_SPREAD, CLOSE_DISTANCE, legSkin };
 });

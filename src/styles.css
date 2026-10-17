@@ -257,3 +257,7 @@ fieldset.plan-q label.plan-opt{display:flex;flex-direction:row;gap:8px;align-ite
 .plan-err{color:#fca5a5}
 .plan-notes{white-space:normal}
 @media (max-width:1000px){.plan-layout{grid-template-columns:1fr}}
+.overlay.fixable{pointer-events:auto;cursor:pointer}
+.person-menu{position:fixed;z-index:60;display:flex;flex-direction:column;gap:4px;min-width:240px;max-width:320px;padding:8px;background:#0b1220;border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 28px #000b}
+.person-menu .pm-title{font-weight:600;font-size:13px;padding:2px 4px 6px;color:#fff}
+.person-menu button{text-align:left}
