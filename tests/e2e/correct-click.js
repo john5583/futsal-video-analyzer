@@ -105,6 +105,15 @@ function makeFrames() {
   must(await waitFor(win, () => window.FSAI.memory().answers.length === 0, 5000), "réponse retirée");
   must((await win.evaluate(() => { const f = window.FSAI.ai().frames.find((q) => Math.abs(q[0] - 2.0) < 0.02); return JSON.stringify(f[2]); })) === before, "l'ancienne position du ballon est rétablie");
 
+    // 5. étiquette exacte du ballon (pour l'entraînement) : posée par le « Oui », remplaçable par « aucun ballon visible »
+  const lab = await win.evaluate(() => window.FSAI.memory().ballLabels || []);
+  must(lab.length === 1 && !lab[0].none && lab[0].u > 0 && lab[0].v > 0 && lab[0].u <= lab[0].vw && lab[0].est === true, "l'étiquette du ballon (pixel cliqué) est retenue : " + JSON.stringify(lab));
+  await win.mouse.click(free.x, free.y);
+  must(await waitFor(win, () => !!document.querySelector(".person-menu"), 4000), "menu au deuxième clic");
+  must(await menuClick("Aucun ballon visible"), "réponse « aucun ballon visible »");
+  must(await waitFor(win, () => { const l = window.FSAI.memory().ballLabels || []; return l.length === 1 && l[0].none === true; }, 4000), "l'image sans ballon remplace l'étiquette de la même image");
+  must(await win.evaluate(() => /sans ballon/.test(document.getElementById("ai-bl-count").textContent) && !document.getElementById("ai-bl-export").disabled), "le compteur et le bouton d'export sont à jour");
+
   must(errors.length === 0, "aucune erreur dans l'interface " + JSON.stringify(errors));
   await app.close();
   fs.rmSync(dir, { recursive: true, force: true });

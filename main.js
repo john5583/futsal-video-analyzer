@@ -347,6 +347,23 @@ function registerIpc() {
   });
   ipcMain.handle("ai:stop", () => { aiStop(); return true; });
 
+  ipcMain.handle("dataset:exportBall", async (_e, items) => {
+    if (!Array.isArray(items) || !items.length || items.length > 5000) return { error: "Aucune image à exporter." };
+    const r = await dialog.showOpenDialog(mainWindow, { title: "Choisir le dossier où enregistrer les images du ballon", properties: ["openDirectory", "createDirectory"] });
+    if (r.canceled || !r.filePaths[0]) return { canceled: true };
+    try {
+      const dir = path.join(r.filePaths[0], "etiquettes-ballon-" + Date.now());
+      fs.mkdirSync(path.join(dir, "images"), { recursive: true }); fs.mkdirSync(path.join(dir, "labels"), { recursive: true });
+      items.forEach((it) => {
+        const n = String(it.name || "").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 40);
+        if (!n) return;
+        fs.writeFileSync(path.join(dir, "images", n + ".jpg"), Buffer.from(it.jpeg));
+        fs.writeFileSync(path.join(dir, "labels", n + ".txt"), typeof it.label === "string" ? it.label.slice(0, 200) : "");
+      });
+      fs.writeFileSync(path.join(dir, "classes.txt"), "ballon\n");
+      return { dir };
+    } catch (err) { return { error: "Écriture impossible : " + err.message }; }
+  });
   ipcMain.handle("animation:save", async (_e, buffer, defaultName, ext) => {
     const e = ext === "mp4" ? "mp4" : ext === "gif" ? "gif" : "webm";
     const r = await dialog.showSaveDialog(mainWindow, {

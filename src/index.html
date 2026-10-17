@@ -201,6 +201,8 @@
             <h3 class="ai-h">Questions du programme <span id="ai-q-count" class="muted"></span></h3>
             <p class="muted" style="padding:0 4px">Ce que le programme ne peut pas trancher seul : il vous le demande au lieu de le deviner. Vos réponses sont retenues dans ce projet. Sans réponse, le cas reste « non analysé ».</p>
             <div id="ai-q" class="events"></div>
+            <div class="muted" style="padding:4px">Étiquettes du ballon (clic droit ou clic sur la vidéo puis « Le ballon est ici ») : <span id="ai-bl-count">aucune étiquette</span>
+              <button id="ai-bl-export" class="ghost" disabled title="Enregistre les images étiquetées dans un dossier de ton choix, pour entraîner le détecteur plus tard. Rien n'est envoyé sur Internet.">Exporter les images</button></div>
             <details id="ai-ans-box"><summary class="ai-h" style="cursor:pointer">Mes réponses <span id="ai-ans-count" class="muted"></span></summary>
               <p class="muted" style="padding:0 4px">Ce que vous avez répondu ou écarté dans ce projet. « Annuler » remet la situation comme avant et la question réapparaît.</p>
               <div id="ai-ans" class="events"></div>
@@ -384,6 +386,7 @@
 <script src="ai/kit.js"></script>
 <script src="ai/tracker.js"></script>
 <script src="ai/doubt.js"></script>
+<script src="ai/ballLabels.js"></script>
 <script src="ai/camera.js"></script>
 <script src="ai/context.js"></script>
 <script src="ai/match.js"></script>

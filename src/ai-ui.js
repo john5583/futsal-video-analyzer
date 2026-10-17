@@ -2,7 +2,7 @@
 (function () {
   "use strict";
   const App = window.FSApp;
-  const KB = window.FutsalKB, HG = window.FutsalHomography, K = window.FutsalKit, P = window.FutsalPipeline, M = window.FutsalMatch, E = window.FutsalAnim, D = window.FutsalDoubt, Q = window.FutsalQuality;
+  const KB = window.FutsalKB, HG = window.FutsalHomography, K = window.FutsalKit, P = window.FutsalPipeline, M = window.FutsalMatch, E = window.FutsalAnim, D = window.FutsalDoubt, BL = window.FutsalBallLabels, Q = window.FutsalQuality;
   const $ = (id) => document.getElementById(id);
   const esc = App.esc;
   const video = App.video, api = App.api, state = App.state;
@@ -662,7 +662,7 @@
     const box = $("ai-q");
     if (!box) return;
     const a = state.project.ai;
-    renderAnswers();
+    renderAnswers(); renderBallLabels();
     const qs = a ? D.openQuestions({ doubts: a.doubts || [], subs: a.subs || [], uncertain: a.uncertain || [], memory: memory() }) : [];
     $("ai-q-count").textContent = "(" + qs.length + ")";
     box.innerHTML = "";
@@ -781,11 +781,46 @@
         return;
       }
     }
-    const H = projectionAt(t);
-    if (!H || !f) { App.toast("Je ne peux pas placer le ballon ici : pas d'image analysée avec le terrain repéré à cet instant.", true); return; }
-    const p = HG.apply(H, ix, iy);
-    if (!isFinite(p[0]) || !isFinite(p[1])) return;
-    showMenu(e, "Le ballon est ici ?", [{ label: "Oui, le ballon est ici (image de " + App.fmt(f.t) + ")", fn: () => answerBallAt({ t: f.t, x: Math.round(p[0] * 100) / 100, y: Math.round(p[1] * 100) / 100 }) }]);
+    const H = projectionAt(t), p = H && f ? HG.apply(H, ix, iy) : null, items = [];
+    if (p && isFinite(p[0]) && isFinite(p[1])) items.push({ label: "Oui, le ballon est ici (image de " + App.fmt(f.t) + ")", fn: () => { saveBallLabel(t, ix, iy, H); answerBallAt({ t: f.t, x: Math.round(p[0] * 100) / 100, y: Math.round(p[1] * 100) / 100 }); } });
+    else items.push({ label: "Le ballon est ici (sert seulement à l'entraînement : terrain non repéré à cet instant)", fn: () => saveBallLabel(t, ix, iy, null) });
+    items.push({ label: "Aucun ballon visible sur cette image", fn: () => saveBallLabel(t, null, null, null) });
+    showMenu(e, "Le ballon est ici ?", items);
+  }
+  /* Étiquette exacte du ballon (pixel cliqué) pour mesurer puis entraîner le détecteur ; jamais déduite par le programme. */
+  function saveBallLabel(t, ix, iy, H) {
+    const vw = video.videoWidth, vh = video.videoHeight;
+    if (!vw || !vh) return;
+    const lab = ix == null ? { t, none: true, vw, vh } : Object.assign({ t, u: ix, v: iy, vw, vh }, BL.ballSize(ix, iy, vw, H, HG));
+    if (!BL.add(memory(), lab)) { App.toast("Étiquette refusée : le clic est en dehors de l'image.", true); return; }
+    renderBallLabels(); App.changed();
+    App.toast(ix == null ? "Noté : aucun ballon visible sur cette image." : "Étiquette du ballon enregistrée.");
+  }
+  function renderBallLabels() {
+    const c = state.project.ai ? BL.counts(memory()) : { total: 0, positives: 0, negatives: 0 }, el = $("ai-bl-count");
+    if (el) el.textContent = c.total ? c.positives + " avec ballon, " + c.negatives + " sans ballon" : "aucune étiquette";
+    const b = $("ai-bl-export"); if (b) b.disabled = !c.total;
+  }
+  /* Exporte les images étiquetées (JPEG + fichier YOLO) dans un dossier choisi : rien ne part sur Internet. */
+  async function exportBallLabels() {
+    const labs = BL.list(memory()).slice();
+    if (!labs.length || !App.isVideoReady()) { App.toast("Chargez la vidéo et étiquetez au moins une image.", true); return; }
+    const cv = document.createElement("canvas"), items = [], wasPaused = video.paused, t0 = video.currentTime;
+    cv.width = video.videoWidth; cv.height = video.videoHeight;
+    video.pause();
+    for (const l of labs) {
+      if (l.vw !== video.videoWidth || l.vh !== video.videoHeight) continue;      // étiquette d'une autre vidéo : ignorée
+      await new Promise((res) => { const done = () => { video.removeEventListener("seeked", done); res(); }; video.addEventListener("seeked", done); video.currentTime = l.t; setTimeout(done, 4000); });
+      cv.getContext("2d").drawImage(video, 0, 0, cv.width, cv.height);
+      const blob = await new Promise((res) => cv.toBlob(res, "image/jpeg", 0.92));
+      if (!blob) continue;
+      items.push({ name: "balle_" + String(Math.round(l.t * 1000)).padStart(8, "0"), jpeg: await blob.arrayBuffer(), label: BL.yoloLine(l) });
+    }
+    video.currentTime = t0; if (!wasPaused) video.play();
+    if (!items.length) { App.toast("Aucune étiquette ne correspond à cette vidéo.", true); return; }
+    const r = await window.fsal.exportBallDataset(items);
+    if (r && r.error) App.toast(r.error, true);
+    else if (r && !r.canceled) App.toast(items.length + " image(s) exportée(s) dans : " + r.dir);
   }
   function answerBallAt(pt) {
     const a = state.project.ai, ans = D.answerBall(memory(), pt), r = D.applyOne(frames, ans);
@@ -1068,6 +1103,7 @@
     ["ai-L", "ai-W", "ai-dir", "ai-flip", "ai-fps", "ai-tiles", "ai-camera", "ai-marks"].forEach((id) => $(id).addEventListener("change", upd));
     $("ai-bench").addEventListener("change", () => { upd(); reanalyzeSuggestions(); });
     $("ai-bench-mark").addEventListener("click", startBenchMark);
+    $("ai-bl-export").addEventListener("click", exportBallLabels);
     $("ai-bench-clear").addEventListener("click", () => { const a = ai(); a.benchZones = []; renderBenchZones(); drawOverlay(); App.changed(); });
     $("ai-camera").addEventListener("change", updateEstimate);
     $("ai-tol").addEventListener("input", () => { $("ai-tol-v").textContent = "(" + tol() + ")"; if (lastTest) renderPreview(); });
