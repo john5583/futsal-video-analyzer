@@ -81,3 +81,20 @@ test("match : une erreur incertaine garde l'événement pour pouvoir être confi
   const r = M.analyze(frames, { L: 40, W: 20 });
   r.uncertain.forEach((u) => assert.ok(u.event && u.event.type === u.type));
 });
+
+test("lecture fine (f) utilisée d'abord : une piste bien lue par f n'est pas questionnée malgré des lectures brutes bruitées", () => {
+  const noisy = track(9, 30, ["B"], 12, 6).map((q) => { q.p.f = "A"; return q; });          // brut B, mais f = A partout
+  assert.equal(D.trackDoubts(toFrames(noisy), { 9: "A" }).length, 0);
+});
+
+test("gardien compté pour son équipe ; gardien retenu : rôle décidé par la position, pas questionné", () => {
+  const gkReads = track(10, 30, ["GKA", "A"], 3, 10);
+  assert.equal(D.trackDoubts(toFrames(gkReads), { 10: "A" }).length, 0, "GKA et A sont du même côté");
+  assert.equal(D.trackDoubts(toFrames(track(11, 30, ["B", "A"], 3, 10)), { 11: "GKA" }).length, 0);
+});
+
+test("équipe retenue contredite par les images : question avec la raison", () => {
+  const q = D.trackDoubts(toFrames(track(12, 30, ["B", "B", "B", "B", "B", "B", "B", "A"], 20, 5)), { 12: "A" });
+  assert.equal(q.length, 1);
+  assert.match(q[0].why, /contredit|équipe lue/);
+});

@@ -19,6 +19,7 @@
   const D_TOL = 3;             // m : …à cette distance au plus
   const REJ_TOL = 2;           // s : une erreur écartée ne revient pas dans cette fenêtre
   const OK = { A: 1, B: 1, GKA: 1, GKB: 1 };
+  const SIDE = { A: "A", GKA: "A", B: "B", GKB: "B" };   // côté d'une lecture : un gardien compte pour son équipe
   const TEAM_LABEL = {
     A: "de votre équipe", B: "de l'équipe adverse", GKA: "le gardien de votre équipe", GKB: "le gardien adverse",
     NONE: "ni joueur ni gardien (arbitre, public, remplaçant)"
@@ -32,7 +33,9 @@
       let i = info.get(p.id);
       if (!i) { i = { n: 0, votes: {}, pts: [] }; info.set(p.id, i); }
       i.n++;
-      if (p.team && p.team !== "UNK") i.votes[p.team] = (i.votes[p.team] || 0) + 1;
+      // lecture la plus fine d'abord (équipe de champ la plus proche, `f`), comme pour la coupure des pistes ; sinon l'équipe lue
+      const read = p.f === "A" || p.f === "B" ? p.f : p.team;
+      if (SIDE[read]) i.votes[SIDE[read]] = (i.votes[SIDE[read]] || 0) + 1;
       if (Array.isArray(p.b) && p.b.length === 4) i.pts.push({ t: f.t, x: p.x, y: p.y, b: p.b });
     }));
     const out = [];
@@ -42,10 +45,12 @@
       if (cur === "REF") return;                                  // écarté par la position (immobile, arbitre) : décision mesurée
       const sum = Object.keys(i.votes).reduce((s, k) => s + i.votes[k], 0);
       let why = null;
-      if (OK[cur]) {
-        const share = sum ? (i.votes[cur] || 0) / sum : 0;
-        if (sum >= MIN_VOTES && share < SHARE_OK) why = "équipe lue " + Math.round(share * 100) + " % du temps seulement";
-      } else if (i.n >= MIN_UNKNOWN) why = "jamais identifié";
+      if (cur === "A" || cur === "B") {
+        // joueur de champ : l'équipe retenue doit être celle que les images lisent le plus souvent, nettement
+        const top = Math.max(i.votes.A || 0, i.votes.B || 0), share = sum ? top / sum : 0, mine = sum ? (i.votes[cur] || 0) / sum : 0;
+        if (sum >= MIN_VOTES && share < SHARE_OK) why = "équipe lue " + Math.round(mine * 100) + " % du temps seulement";
+        else if (sum >= MIN_VOTES && mine < 0.5) why = "l'équipe retenue contredit les images (" + Math.round(mine * 100) + " % du temps)";
+      } else if (!OK[cur] && i.n >= MIN_UNKNOWN) why = "jamais identifié";   // gardien : rôle décidé par la position, pas questionné
       if (!why) return;
       const q = i.pts[i.pts.length >> 1];
       out.push({ kind: "team", id, t: q.t, x: q.x, y: q.y, b: q.b, n: i.n, cur: OK[cur] ? cur : null, votes: Object.assign({}, i.votes), why });

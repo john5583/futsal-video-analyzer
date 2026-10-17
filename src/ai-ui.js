@@ -13,6 +13,7 @@
   let pts = [];              // repères en cours de placement : { id, label, ix, iy }
   let placing = null;        // identifiant du repère à placer
   let pickRole = null;       // rôle de tenue à choisir
+  let qHighlight = null;     // personne désignée par une question : { t, b } (cadre orange sur la vidéo)
   let benchMark = null;      // marquage d'une zone de banc en cours : { t, H, first: [x, y] | null }
   let frames = [];           // trajectoires (format d'analyse)
   let abort = null;
@@ -133,6 +134,15 @@
           ctx.fillStyle = "#fff"; ctx.fillText(label, a1[0] + 4, a1[1] - 4);
         }
       });
+    }
+    // personne d'une question du programme : cadre orange sur l'image exacte de la question
+    if (qHighlight && Math.abs((video.currentTime || 0) - qHighlight.t) < 0.4 && Array.isArray(qHighlight.b)) {
+      const b = qHighlight.b, a1 = toView((b[0] / 1000) * r.vw, (b[1] / 1000) * r.vh), a2 = toView((b[2] / 1000) * r.vw, (b[3] / 1000) * r.vh);
+      ctx.strokeStyle = "#f97316"; ctx.lineWidth = 4; ctx.strokeRect(a1[0], a1[1], a2[0] - a1[0], a2[1] - a1[1]);
+      ctx.font = "700 13px 'Segoe UI',Arial,sans-serif";
+      const label = "Question : qui est-ce ?", tw = ctx.measureText(label).width + 10;
+      ctx.fillStyle = "#f97316"; ctx.fillRect(a1[0], a1[1] - 20, tw, 20);
+      ctx.fillStyle = "#fff"; ctx.fillText(label, a1[0] + 5, a1[1] - 5);
     }
     // repères de calibrage
     pts.forEach((p) => {
@@ -601,11 +611,13 @@
     qs.forEach((q) => {
       const row = document.createElement("div"); row.className = "q";
       const im = document.createElement("img"); im.dataset.k = q.key; im.alt = ""; if (qThumbs.has(q.key)) im.src = qThumbs.get(q.key);
-      im.addEventListener("click", () => App.seek(Math.max(0, q.t - 1)));
+      im.title = "Voir cette image dans la vidéo"; im.style.cursor = "pointer";
+      im.addEventListener("click", () => showQuestion(q));
       const col = document.createElement("div");
       const tx = document.createElement("div"); tx.className = "qt";
       const bt = document.createElement("div"); bt.className = "qb";
-      const add = (label, fn) => { const b = document.createElement("button"); b.textContent = label; b.addEventListener("click", fn); bt.appendChild(b); };
+      const add = (label, fn, cls) => { const b = document.createElement("button"); b.textContent = label; if (cls) b.className = cls; b.addEventListener("click", fn); bt.appendChild(b); };
+      add("▶ Voir dans la vidéo", () => showQuestion(q), "primary");
       if (q.kind === "team") {
         tx.textContent = App.fmt(q.t) + " — Qui est la personne dans le cadre orange ? (" + q.why + ")";
         add("Mon équipe", () => answerTeam(q, "A")); add("Adversaire", () => answerTeam(q, "B"));
@@ -620,8 +632,17 @@
     });
     loadQuestionThumbs(qs);
   }
+  /* Montre la question dans la vraie vidéo : image exacte (en pause) avec le cadre orange sur la personne concernée ;
+     pour une erreur incertaine, 2 s avant le moment, pour le voir se produire. */
+  function showQuestion(q) {
+    video.pause();
+    qHighlight = q.kind === "team" ? { t: q.t, b: q.b } : null;
+    App.seek(q.kind === "team" ? q.t : Math.max(0, q.t - 2));
+    drawOverlay();
+  }
   function answerTeam(q, team) {
     const a = state.project.ai;
+    qHighlight = null;
     D.answerTeam(memory(), q, team);
     D.applyAnswers(frames, [{ kind: "team", t: q.t, x: q.x, y: q.y, team }]);
     a.frames = P.compactFrames(frames);
