@@ -85,9 +85,21 @@
     const cancel = "<div class=\"wiz-btns\"><button class=\"ghost\" data-act=\"cancel\">Annuler l'assistant</button></div>";
     if (T.phase === "scan") return head + "<p class=\"wiz-busy\">⏳ " + esc(T.text || "Recherche d'un but dans la vidéo…") + "</p>" + cancel;
     if (T.phase === "nogoal") {
-      return head + "<p>Je n'ai pas repéré de but (poteaux rayés rouge et blanc) dans la vidéo. Avancez la vidéo jusqu'à une image où <b>un but est bien visible</b>, puis cliquez :</p>" +
-        "<div class=\"wiz-btns\"><button class=\"primary\" data-act=\"retryGoal\">🔍 Chercher le but sur cette image</button><button data-act=\"manualMode\">Placer les repères moi-même</button></div>" +
+      return head + "<p>Je n'ai pas repéré de but dans la vidéo (je cherche des poteaux à bandes de couleur, ou d'une couleur que vous m'avez déjà montrée). Avancez la vidéo jusqu'à une image où <b>un but est bien visible</b>, puis cliquez :</p>" +
+        "<div class=\"wiz-btns\"><button class=\"primary\" data-act=\"retryGoal\">🔍 Chercher le but sur cette image</button><button data-act=\"showGoal\">Je montre le but moi-même (3 clics)</button><button data-act=\"manualMode\">Placer les repères moi-même</button></div>" +
         (T.msg ? "<p class=\"wiz-err\">" + esc(T.msg) + "</p>" : "") + cancel;
+    }
+    if (T.phase === "confirmGoal") {
+      return head + "<p class=\"wiz-now\">Je crois voir un but (cadre clair, sans bandes de couleur), entouré en orange. Est-ce bien un but ?</p>" +
+        "<p class=\"muted\">Je ne le retiens pas sans votre accord : des poteaux clairs peuvent aussi être une fenêtre, un panier ou des vêtements.</p>" +
+        "<div class=\"wiz-btns\"><button class=\"primary\" data-act=\"confirmGoal\">Oui, c'est le but</button><button data-act=\"showGoal\">Non, je le montre moi-même (3 clics)</button><button data-act=\"retryGoal\">Chercher sur une autre image</button></div>" + cancel;
+    }
+    if (T.phase === "mgoal") {
+      const n = (T.mg || []).length, what = ["le <b>pied du poteau gauche</b>", "le <b>pied du poteau droit</b>", "le <b>haut d'un des deux poteaux</b>"][n] || "";
+      return head + "<p class=\"wiz-now\">Montrez-moi le but : cliquez sur " + what + " (" + (n + 1) + " / 3).</p>" +
+        "<p class=\"muted\">Je retiendrai l'aspect de ce but pour le retrouver ailleurs dans ce projet. Si je n'arrive pas à lire sa couleur, je ne l'invente pas.</p>" +
+        (T.msg ? "<p class=\"wiz-err\">" + esc(T.msg) + "</p>" : "") +
+        "<div class=\"wiz-btns\">" + (n ? "<button data-act=\"undoGoalClick\">↶ Annuler le dernier clic</button>" : "") + "<button data-act=\"retryGoal\">Chercher à nouveau automatiquement</button></div>" + cancel;
     }
     if (T.phase === "color") {
       return head + "<p class=\"wiz-now\">Quelle est la couleur des lignes de votre terrain de futsal ?</p>" +
@@ -220,6 +232,9 @@
       await openVideo(0);
     },
     async retryGoal() { await prepareFrame(); },
+    showGoal() { startShowGoal(); },
+    confirmGoal() { const T = W.T; if (!T || !T.cand) return; const g = T.cand; T.cand = null; acceptGoal(g); },
+    undoGoalClick() { const T = W.T; if (T && T.mg) T.mg.pop(); render(); AI.redraw(); },
     manualMode() { const T = W.T; if (T) T.cancel = true; W.T = Object.assign(T || {}, { phase: "manual" }); AI.setPointer(null); AI.clearPoints(); W.lmIdx = 0; W.terrainT = null; W.msg = ""; render(); beginLandmark(); AI.redraw(); },
     async autoMode() { AI.cancelPlacing(); AI.clearPoints(); await startTerrain(); },
     pickColor(btn) { const T = W.T; T.colorKey = btn.dataset.key; buildRidge(); T.phase = "clicks"; render(); AI.redraw(); },
@@ -307,6 +322,9 @@
   }
   const tick = () => new Promise((r) => setTimeout(r, 15));
 
+  /* Couleurs de but apprises dans ce projet (voir « Je montre le but moi-même »). */
+  const goalOpts = () => ({ palettes: AI.memory().goalPalettes });
+
   function nextTarget() {
     const T = W.T;
     if (!T) return null;
@@ -315,7 +333,7 @@
 
   async function startTerrain() {
     if (W.T) W.T.cancel = true;
-    W.T = { phase: "scan", text: "", msg: "", clicks: [], skipped: new Set(), colors: [], colorKey: null, cancel: false, busy: true, results: [], resultIdx: 0, pose: null, work: null, goal: null, frame: null };
+    W.T = { phase: "scan", cands: [], text: "", msg: "", clicks: [], skipped: new Set(), colors: [], colorKey: null, cancel: false, busy: true, results: [], resultIdx: 0, pose: null, work: null, goal: null, frame: null };
     const T = W.T;
     AI.clearPoints(); AI.setPointer(terrainPointer);
     setStep("terrain");
@@ -327,12 +345,19 @@
         T.text = "Recherche d'un but dans la vidéo… (" + (i + 1) + " / " + n + ")"; render();
         await tick();
         await seekVideo(dur * fr[i]);
-        const g = AI.grabSam(), wk = CF.prepare(g.img, 640), goal = GL.detect(wk).goals[0];
+        const g = AI.grabSam(), wk = CF.prepare(g.img, 640), goal = GL.detect(wk, goalOpts()).goals[0];
+        const cand = goal ? null : GL.candidates(wk)[0];
+        if (cand) T.cands.push({ t: g.t, score: cand.score });
         if (goal) T.results.push({ t: g.t, h: Math.min(goal.left.v1 - goal.left.v0, goal.right.v1 - goal.right.v0) });
       }
     } catch (e) { T.msg = "Recherche impossible : " + e.message; }
     if (T.cancel) return;
     T.busy = false;
+    if (!T.results.length && T.cands.length) {
+      // aucun but à bandes : le meilleur candidat « cadre clair » est montré au coach pour confirmation
+      const bestC = T.cands.slice().sort((x, y) => y.score - x.score)[0];
+      await seekVideo(bestC.t); await prepareFrame(); return;
+    }
     if (!T.results.length) { T.phase = "nogoal"; T.msg = ""; await seekVideo(0); render(); AI.redraw(); return; }
     // on préfère le premier instant où le but est bien visible (l'analyse commence au repérage du terrain)
     const best = Math.max(...T.results.map((r) => r.h));
@@ -354,15 +379,65 @@
     const T = W.T;
     if (!T || !App.isVideoReady()) return false;
     T.busy = true; video.pause();
-    const g = AI.grabSam(), wk = CF.prepare(g.img, 640), goal = GL.detect(wk).goals[0] || null;
+    const g = AI.grabSam(), wk = CF.prepare(g.img, 640), goal = GL.detect(wk, goalOpts()).goals[0] || null;
     T.frame = { t: g.t, w: g.w, h: g.h, k: g.k }; T.work = wk; T.goal = goal; T.clicks = []; T.skipped = new Set(); T.pose = null; T.msg = "";
-    if (!goal) { T.phase = "nogoal"; T.msg = "Aucun but repéré sur cette image."; T.busy = false; render(); AI.redraw(); return false; }
+    if (!goal) {
+      const cand = GL.candidates(wk)[0] || null;
+      if (cand) { T.cand = cand; T.phase = "confirmGoal"; T.msg = ""; T.busy = false; render(); AI.redraw(); return false; }
+      T.phase = "nogoal"; T.msg = "Aucun but repéré sur cette image."; T.busy = false; render(); AI.redraw(); return false;
+    }
+    T.cand = null;
+    acceptGoal(goal);
+    return true;
+  }
+
+  /* Un but est retenu (détecté ou montré par le coach) : couleurs de lignes, puis repères. */
+  function acceptGoal(goal) {
+    const T = W.T, wk = T.work;
+    T.goal = goal;
     T.sep = Math.hypot(goal.right.u - goal.left.u, goal.right.v1 - goal.left.v1);
     T.colors = CF.colorCandidates(wk);
     if (T.colors.length > 1) { T.phase = "color"; T.colorKey = null; T.rm = null; T.maskCanvas = null; }
     else { T.colorKey = T.colors[0] ? T.colors[0].key : null; buildRidge(); T.phase = "clicks"; }
     T.busy = false; render(); AI.redraw();
-    return true;
+  }
+
+  /* Le coach montre le but : 3 clics (pied gauche, pied droit, haut d'un poteau). */
+  function startShowGoal() {
+    const T = W.T;
+    if (!T || !App.isVideoReady()) return;
+    video.pause();
+    const g = AI.grabSam(), wk = CF.prepare(g.img, 640);
+    T.frame = { t: g.t, w: g.w, h: g.h, k: g.k }; T.work = wk; T.goal = null; T.clicks = []; T.skipped = new Set(); T.pose = null; T.msg = ""; T.mg = []; T.phase = "mgoal"; T.busy = false;
+    render(); AI.redraw();
+  }
+  function onGoalClick(ix, iy, ok) {
+    const T = W.T;
+    if (!ok || !T || T.phase !== "mgoal" || T.busy) return;
+    const kk = T.work.w / AI.videoSize().w;
+    T.mg.push({ u: ix * kk, v: iy * kk }); T.msg = "";
+    if (T.mg.length < 3) { render(); AI.redraw(); return; }
+    const [a, b, c] = T.mg;
+    const left = a.u <= b.u ? a : b, right = a.u <= b.u ? b : a;
+    const near = Math.abs(c.u - left.u) <= Math.abs(c.u - right.u) ? left : right;
+    const hgt = near.v - c.v, sep = right.u - left.u;
+    if (hgt < 14 || sep < 0.5 * hgt || sep > 5 * hgt) {
+      T.mg = []; T.msg = "Ces trois points ne forment pas un but (pieds des deux poteaux, puis haut d'un poteau) : recommencez.";
+      render(); AI.redraw(); return;
+    }
+    const post = (p) => ({ u: p.u, v0: p.v - hgt, v1: p.v, width: 4, score: hgt });
+    const goal = { left: post(left), right: post(right), score: hgt, palette: "montré" };
+    const pal = GL.learnPalette(T.work, goal);
+    const mem = AI.memory();
+    if (pal) {
+      const same = mem.goalPalettes.findIndex((q) => Math.hypot(q.lab[0] - pal.lab[0], q.lab[1] - pal.lab[1], q.lab[2] - pal.lab[2]) < 12);
+      if (same >= 0) mem.goalPalettes[same] = pal; else mem.goalPalettes = mem.goalPalettes.concat([pal]).slice(-5);
+      App.changed();
+    }
+    T.mg = null;
+    acceptGoal(goal);
+    T.msg = pal ? "J'ai retenu l'aspect de ce but pour la suite de ce projet." : "Je ne peux pas lire de couleur sur ce but (blanc uni ou image floue) : je ne l'invente pas. Si je ne le retrouve pas ailleurs, je vous demanderai de le montrer.";
+    render();
   }
 
   function buildRidge() {
@@ -401,7 +476,7 @@
     solveNow();
     render(); AI.redraw();
   }
-  const terrainPointer = { click: onTerrainClick };
+  const terrainPointer = { click: (ix, iy, ok, e) => (W.T && W.T.phase === "mgoal" ? onGoalClick(ix, iy, ok) : onTerrainClick(ix, iy, ok, e)) };
 
   function finishTerrain(side) {
     const T = W.T;
@@ -426,12 +501,30 @@
       const o = V(0, 0), e = V(T.work.w, T.work.h);
       ctx.drawImage(T.maskCanvas, o[0], o[1], e[0] - o[0], e[1] - o[1]);
     }
+    if (T.phase === "confirmGoal" && T.cand) {
+      ctx.strokeStyle = "#f97316"; ctx.lineWidth = 3; ctx.setLineDash([8, 5]);
+      const c = T.cand;
+      [c.left, c.right].forEach((p) => { const a = V(p.u, p.v0), b = V(p.u, p.v1); ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke(); });
+      const ta = V(c.left.u, c.left.v0), tb = V(c.right.u, c.right.v0);
+      ctx.beginPath(); ctx.moveTo(ta[0], ta[1]); ctx.lineTo(tb[0], tb[1]); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle = "#f97316"; ctx.font = "700 13px 'Segoe UI',Arial,sans-serif"; ctx.fillText("But ?", ta[0] + 4, ta[1] - 6);
+    }
     if (T.goal) {
       ctx.strokeStyle = "#22c55e"; ctx.lineWidth = 3;
       [T.goal.left, T.goal.right].forEach((p) => { const a = V(p.u, p.v0), b = V(p.u, p.v1); ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke(); });
       const a = V(T.goal.left.u, T.goal.left.v0), b = V(T.goal.right.u, T.goal.right.v0);
       ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
       ctx.fillStyle = "#22c55e"; ctx.font = "600 12px 'Segoe UI',Arial,sans-serif"; ctx.fillText("But", a[0] + 4, a[1] - 6);
+    }
+    if (T.phase === "mgoal") {
+      (T.mg || []).forEach((c) => {
+        const v = V(c.u, c.v);
+        ctx.strokeStyle = "#22c55e"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(v[0], v[1], 7, 0, Math.PI * 2); ctx.stroke();
+      });
+      ctx.fillStyle = "rgba(11,18,32,.85)"; ctx.fillRect(8, 8, 520, 26);
+      ctx.fillStyle = "#fff"; ctx.font = "600 13px 'Segoe UI',Arial,sans-serif";
+      ctx.fillText("Cliquez sur : " + ["le pied du poteau gauche", "le pied du poteau droit", "le haut d'un poteau"][Math.min(2, (T.mg || []).length)], 16, 26);
+      return;
     }
     if (T.phase !== "clicks") return;
     const aiState = AI.ai();
@@ -726,7 +819,7 @@
   video.addEventListener("seeked", () => {
     if (W.step === "terrain" && W.T && W.T.phase !== "manual") {
       const T = W.T;
-      if (!T.busy && T.frame && (T.phase === "clicks" || T.phase === "color") && Math.abs(video.currentTime - T.frame.t) > 0.05) {
+      if (!T.busy && T.frame && (T.phase === "clicks" || T.phase === "color" || T.phase === "mgoal" || T.phase === "confirmGoal") && Math.abs(video.currentTime - T.frame.t) > 0.05) {
         T.msg = "Vous avez déplacé la vidéo : je cherche à nouveau le but sur cette image.";
         prepareFrame().then(() => { if (W.T && !W.T.goal) { W.T.msg = "Aucun but repéré sur cette image."; render(); } });
       }

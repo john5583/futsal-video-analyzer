@@ -220,3 +220,10 @@ input[type=range]{accent-color:var(--blue)}
 .ai-adv>summary{cursor:pointer;color:var(--muted);font-size:12px}
 .wiz-colors{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}.wiz-colors button{display:inline-flex;align-items:center;gap:6px;padding:8px 14px}.wiz-colors .sw{width:18px;height:18px;border-radius:4px;border:1px solid #fff6;display:inline-block}
 .wiz-accept{border:1px solid #f59e0b;background:#2a1f05;border-radius:8px;padding:8px 12px;margin:8px 0}.wiz-accept p{margin:0 0 4px;color:#fde68a}
+.q{display:grid;grid-template-columns:96px 1fr;gap:8px;padding:8px 4px;border-bottom:1px solid var(--line)}
+.q img{width:96px;border-radius:4px;background:#0b1220;min-height:54px}
+.q .qt{font-size:13px}
+.q .qb{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}
+.q .qb button{font-size:12px;padding:3px 8px}
+.corr-stage .corr-real canvas.cr-map{cursor:grab;touch-action:none}
+.corr-stage .corr-real canvas.cr-map:active{cursor:grabbing}

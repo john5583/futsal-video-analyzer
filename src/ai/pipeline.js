@@ -2,11 +2,11 @@
    reconnaissance des équipes, suivi, et lecture de la vidéo image par image (navigateur). */
 (function (root, factory) {
   if (typeof module === "object" && module.exports) {
-    module.exports = factory(require("./yolox"), require("./homography"), require("./kit"), require("./tracker"), require("./camera"), require("./balltrack"));
+    module.exports = factory(require("./yolox"), require("./homography"), require("./kit"), require("./tracker"), require("./camera"), require("./balltrack"), require("./doubt"));
   } else {
-    root.FutsalPipeline = factory(root.FutsalYolox, root.FutsalHomography, root.FutsalKit, root.FutsalTracker, root.FutsalCamera, root.FutsalBallTrack);
+    root.FutsalPipeline = factory(root.FutsalYolox, root.FutsalHomography, root.FutsalKit, root.FutsalTracker, root.FutsalCamera, root.FutsalBallTrack, root.FutsalDoubt);
   }
-})(typeof self !== "undefined" ? self : this, function (Y, HG, K, T, Cam, BT) {
+})(typeof self !== "undefined" ? self : this, function (Y, HG, K, T, Cam, BT, D) {
   "use strict";
 
   const TEAM_CODE = { A: "A", B: "B", GKA: "a", GKB: "b" };
@@ -130,6 +130,21 @@
     return cur;
   }
 
+  /* Projection (pixels vidéo -> terrain) à utiliser pour tracer le terrain à l'instant t, ou null si elle n'est pas fiable :
+     1. la projection mesurée sur l'image analysée la plus proche (à 0,3 s), qui suit la caméra ;
+     2. sinon le calibrage, mais seulement si la caméra est fixe ou si le calibrage date de moins de 0,5 s (une caméra à la main
+        a bougé depuis : tracer le terrain avec un vieux calibrage donnerait des lignes dans tous les sens). */
+  function courtH(frames, calibs, camera, t, vw, vh) {
+    const f = frames && frames.length ? frameNear(frames, t, 0.3) : null;
+    if (f && Array.isArray(f.h) && f.h.length === 9 && vw > 0 && vh > 0) {
+      try { return { H: HG.mul3(f.h, [1 / vw, 0, 0, 0, 1 / vh, 0, 0, 0, 1]), source: "image" }; } catch (_e) { /* projection inutilisable */ }
+    }
+    const cal = calibrationAt(calibs, t);
+    if (!cal) return null;
+    if (camera !== "fixed" && Math.abs(cal.t - t) > 0.5) return { H: null, source: "calibrage-ancien" };
+    return { H: cal.H, source: "calibrage" };
+  }
+
   /* Détections d'une image -> joueurs sur le terrain + ballon.
      ctx : { frameW, frameH, scale (px analysés / px vidéo), img ({data,width,height}), H, L, W, refs, tracker, t,
              close (tenues A et B trop proches : reconnaissance adaptée) }
@@ -182,7 +197,7 @@
       if (ctx.refs && ctx.refs.A && ctx.refs.B) item.f = K.classify(feat, { A: ctx.refs.A, B: ctx.refs.B }, close ? { reject: ctx.reject, close } : { reject: ctx.reject }).team;
       list.push(item);
     });
-    if (zones && ctx.benchDrift) followBenches(ctx.benchDrift, seatedIn);
+    if (zones && ctx.benchDrift) { followBenches(ctx.benchDrift, seatedIn); if (ctx.bench) trackDrift(ctx.bench, ctx.benchDrift, ctx.benchZones, ctx.t); }
     ctx.tracker.update(ctx.t, list);
     const bc = [];
     balls.sort((a, b) => b.score - a.score).forEach((d) => {
@@ -223,6 +238,14 @@
   function shiftedZones(zones, drift) {
     if (!Array.isArray(zones) || !zones.length) return null;
     return zones.map((z, i) => { const d = drift && drift[i] ? drift[i] : { dx: 0, dy: 0 }; return { x1: z.x1 + d.dx, y1: z.y1 + d.dy, x2: z.x2 + d.dx, y2: z.y2 + d.dy }; });
+  }
+  /* Plus forte dérive vue sur un banc (en m) et l'instant où elle a eu lieu, avec les zones décalées à cet instant : sert à demander
+     au coach si la zone est encore sur le banc (dérive >= BENCH_ASK). */
+  const BENCH_ASK = 3;
+  function trackDrift(bench, drift, zones, t) {
+    let d = 0;
+    drift.forEach((z) => { if (z) d = Math.max(d, Math.hypot(z.dx, z.dy)); });
+    if (d > (bench.drift ? bench.drift.d : 0) + 1e-9) bench.drift = { d: Math.round(d * 10) / 10, t, zones: shiftedZones(zones, drift) };
   }
   function followBenches(drift, seatedIn) {
     seatedIn.forEach((list, i) => {
@@ -270,6 +293,7 @@
       // morceaux d'un même joueur séparés par une courte disparition ou une coupure : recollés (même équipe, vitesse plausible)
       T.relinkTracks(frames, teams, (tm) => tm === "A" || tm === "B");
     }
+    if (opts && Array.isArray(opts.doubts) && D) D.trackDoubts(frames, teams).forEach((q) => opts.doubts.push(q));
     const counts = {};
     frames.forEach((f) => f.players.forEach((p) => { counts[p.id] = (counts[p.id] || 0) + 1; }));
     return frames.map((f) => {
@@ -503,8 +527,9 @@
     const tracker = new T.Tracker(amb.close ? { soft: 2 } : undefined);
     const frames = [], lost = [];
     let lostStart = null, lastBall = null;
+    const doubts = [];                   // pistes dont l'équipe est douteuse (questions au coach)
     const bench = { y0: 0, yW: 0 };      // personnes vues le long de chaque ligne de touche (côté des bancs)
-    const benchDrift = [];               // décalage de chaque zone de banc (suivi de la dérive de la caméra)
+    const benchDrift = opts.benchFollow === false ? null : [];   // décalage de chaque zone de banc (suivi de la dérive de la caméra) ; null = coupé par le coach
     const trk = { anchor: null, M: IDENTITY, prev: null, t: 0, boxes: [], keys: [], failCount: 0 };
     const STEP = 0.1;
     const grabSmall = (boxes) => { gctx.drawImage(video, 0, 0, gw, gh); return Cam.prepare(gctx.getImageData(0, 0, gw, gh).data, gw, gh, boxes, 4); };
@@ -599,7 +624,9 @@
     if (lostStart != null) lost.push([lostStart, times[times.length - 1]]);
     video.removeAttribute("src"); video.load();
     if (lost.length) notes.push("Suivi de la caméra perdu sur " + lost.length + " passage(s) : ces images sont ignorées. Ajoutez un calibrage dans ces passages (flou, caméra trop rapide ou sol sans détails).");
-    return { frames: finalizeFrames(frames, { L: opts.L, W: opts.W, dirAt: opts.dirAt, roles: amb.close || amb.roles }), lost, notes, bench };
+    const finalFrames = finalizeFrames(frames, { L: opts.L, W: opts.W, dirAt: opts.dirAt, roles: amb.close || amb.roles, doubts });
+    if (bench.drift && bench.drift.d >= BENCH_ASK) doubts.push({ kind: "bench", t: bench.drift.t, d: bench.drift.d, zones: bench.drift.zones });
+    return { frames: finalFrames, lost, notes, bench, doubts };
   }
 
   /* Vignettes JPEG de la vidéo à des instants donnés (illustrations des erreurs acceptées). */
@@ -636,5 +663,5 @@
     return { dets, scale, img: ctx.getImageData(0, 0, cw, ch), width: cw, height: ch };
   }
 
-  return { inBenchZone, shiftedZones, followBenches, tileRects, courtRegion, zoomRects, tileToFrame, mergeTiles, isFloorMark, dropFloorMarks, calibrationAt, processDetections, finalizeFrames, compactFrames, expandFrames, frameNear, sampleTimes, startTime, estimateDuration, learnFactor, FACTOR_MIN, FACTOR_MAX, analyseVideo, detectAt, detectCanvas, captureFrames, TEAM_CODE };
+  return { courtH, trackDrift, inBenchZone, shiftedZones, followBenches, tileRects, courtRegion, zoomRects, tileToFrame, mergeTiles, isFloorMark, dropFloorMarks, calibrationAt, processDetections, finalizeFrames, compactFrames, expandFrames, frameNear, sampleTimes, startTime, estimateDuration, learnFactor, FACTOR_MIN, FACTOR_MAX, analyseVideo, detectAt, detectCanvas, captureFrames, TEAM_CODE };
 });

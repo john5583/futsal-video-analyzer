@@ -2,7 +2,7 @@
 (function () {
   "use strict";
   const App = window.FSApp;
-  const KB = window.FutsalKB, HG = window.FutsalHomography, K = window.FutsalKit, P = window.FutsalPipeline, M = window.FutsalMatch, E = window.FutsalAnim;
+  const KB = window.FutsalKB, HG = window.FutsalHomography, K = window.FutsalKit, P = window.FutsalPipeline, M = window.FutsalMatch, E = window.FutsalAnim, D = window.FutsalDoubt;
   const $ = (id) => document.getElementById(id);
   const esc = App.esc;
   const video = App.video, api = App.api, state = App.state;
@@ -13,6 +13,8 @@
   let pts = [];              // repères en cours de placement : { id, label, ix, iy }
   let placing = null;        // identifiant du repère à placer
   let pickRole = null;       // rôle de tenue à choisir
+  let qGroup = null;         // proposition d'appliquer la même réponse aux pistes de la même personne : { team, q, group }
+  let qHighlight = null;     // personne désignée par une question : { t, b } (cadre orange sur la vidéo)
   let benchMark = null;      // marquage d'une zone de banc en cours : { t, H, first: [x, y] | null }
   let frames = [];           // trajectoires (format d'analyse)
   let abort = null;
@@ -82,16 +84,30 @@
     const a = state.project.ai;
     const t = video.currentTime || 0;
     // aperçu du terrain calibré
+    // (tracé seulement si la projection est fiable à cet instant ; sinon un message l'explique, pas de lignes absurdes)
     if (a && $("ov-court").checked) {
-      const cal = P.calibrationAt(a.calibrations, t);
-      if (cal) {
-        const Hi = HG.invert(cal.H);
+      const ch = P.courtH(frames, a.calibrations, a.camera || $("ai-camera").value, t, video.videoWidth, video.videoHeight);
+      if (ch && ch.H) {
+        const Hi = HG.invert(ch.H), o = toView(0, 0), e = toView(r.vw, r.vh), far = 4;
+        ctx.save(); ctx.beginPath(); ctx.rect(o[0], o[1], e[0] - o[0], e[1] - o[1]); ctx.clip();
         ctx.strokeStyle = "rgba(0,230,255,.9)"; ctx.lineWidth = 2;
         courtPolylines().forEach((pl) => {
+          let pen = false;
           ctx.beginPath();
-          pl.forEach((p, i) => { const q = HG.apply(Hi, p[0], p[1]); const v = toView(q[0], q[1]); if (i) ctx.lineTo(v[0], v[1]); else ctx.moveTo(v[0], v[1]); });
+          pl.forEach((p) => {
+            const q = HG.apply(Hi, p[0], p[1]);
+            if (!isFinite(q[0]) || !isFinite(q[1]) || Math.abs(q[0]) > far * r.vw || Math.abs(q[1]) > far * r.vh) { pen = false; return; }
+            const v = toView(q[0], q[1]);
+            if (pen) ctx.lineTo(v[0], v[1]); else ctx.moveTo(v[0], v[1]);
+            pen = true;
+          });
           ctx.stroke();
         });
+        ctx.restore();
+      } else if (ch) {
+        ctx.fillStyle = "rgba(11,18,32,.85)"; ctx.fillRect(8, 8, Math.min(520, boxSize().w - 16), 26);
+        ctx.fillStyle = "#fff"; ctx.font = "600 13px 'Segoe UI',Arial,sans-serif";
+        ctx.fillText("Terrain non tracé ici : la caméra a bougé depuis le calibrage.", 16, 26);
       }
     }
     // joueurs détectés
@@ -119,6 +135,20 @@
           ctx.fillStyle = "#fff"; ctx.fillText(label, a1[0] + 4, a1[1] - 4);
         }
       });
+    }
+    // personne d'une question du programme : cadre orange sur l'image exacte de la question
+    if (qHighlight && Math.abs((video.currentTime || 0) - qHighlight.t) < 0.4 && Array.isArray(qHighlight.polys)) {
+      ctx.strokeStyle = "#f97316"; ctx.lineWidth = 3; ctx.setLineDash([8, 5]);
+      qHighlight.polys.forEach((pl) => { ctx.beginPath(); pl.forEach((p, k) => { const v = toView(p[0] * r.vw, p[1] * r.vh); if (k) ctx.lineTo(v[0], v[1]); else ctx.moveTo(v[0], v[1]); }); ctx.closePath(); ctx.stroke(); });
+      ctx.setLineDash([]);
+    }
+    if (qHighlight && Math.abs((video.currentTime || 0) - qHighlight.t) < 0.4 && Array.isArray(qHighlight.b)) {
+      const b = qHighlight.b, a1 = toView((b[0] / 1000) * r.vw, (b[1] / 1000) * r.vh), a2 = toView((b[2] / 1000) * r.vw, (b[3] / 1000) * r.vh);
+      ctx.strokeStyle = "#f97316"; ctx.lineWidth = 4; ctx.strokeRect(a1[0], a1[1], a2[0] - a1[0], a2[1] - a1[1]);
+      ctx.font = "700 13px 'Segoe UI',Arial,sans-serif";
+      const label = qHighlight.label || "Question", tw = ctx.measureText(label).width + 10;
+      ctx.fillStyle = "#f97316"; ctx.fillRect(a1[0], a1[1] - 20, tw, 20);
+      ctx.fillStyle = "#fff"; ctx.fillText(label, a1[0] + 5, a1[1] - 5);
     }
     // repères de calibrage
     pts.forEach((p) => {
@@ -350,16 +380,17 @@
           : "Côté des bancs non déduit (trop peu de remplaçants visibles) : choisissez-le dans les réglages ; en attendant, les remplacements volants ne sont pas distingués.");
       }
     };
-    if (!items.length) { list.innerHTML = "<p class=\"muted\" style=\"padding:6px\">Aucune erreur en attente.</p>"; uncNote(); return; }
+    if (!items.length) { list.innerHTML = "<p class=\"muted\" style=\"padding:6px\">Aucune erreur en attente.</p>"; uncNote(); renderQuestions(); return; }
     items.forEach((e) => {
       const row = document.createElement("div"); row.className = "ev";
       row.innerHTML = "<button class=\"t\">" + App.fmt(e.t) + "</button><div><div class=\"lbl\"><span class=\"dot\" style=\"background:" + App.phaseColor(e.type) + "\"></span>" + esc(App.labelOf(e.type)) + "</div><div class=\"chips\">" + esc(e.note || "") + (typeof e.ballConf === "number" ? " · ballon vu sur " + Math.round(e.ballConf * 100) + " % des images" : "") + "</div></div><div class=\"btns\"><button data-a=\"ok\" title=\"Ajouter aux événements\">✔</button><button data-a=\"no\" title=\"Écarter\">✖</button></div>";
       row.querySelector(".t").addEventListener("click", () => App.seek(Math.max(0, e.t - 3)));
       row.querySelector("[data-a=ok]").addEventListener("click", () => acceptSuggestion(e));
-      row.querySelector("[data-a=no]").addEventListener("click", () => { a.suggestedEvents = a.suggestedEvents.filter((x) => x.sid !== e.sid); a.suggested = a.suggestedEvents.length; renderSuggestions(); App.changed(); });
+      row.querySelector("[data-a=no]").addEventListener("click", () => { D.reject(memory(), e); a.suggestedEvents = a.suggestedEvents.filter((x) => x.sid !== e.sid); a.suggested = a.suggestedEvents.length; renderSuggestions(); App.changed(); });
       list.appendChild(row);
     });
     uncNote();
+    renderQuestions();
   }
 
   /* Ajoute des suggestions aux événements du projet, avec une vignette de la vidéo à l'instant de l'erreur. */
@@ -546,13 +577,190 @@
     renderBenchZones(); updateOverlayMode(); App.changed();
   }
 
+  /* La mémoire du projet filtre un résultat d'analyse : les erreurs que le coach a écartées ne reviennent pas. */
+  const subAnswers = () => memory().answers.filter((x) => x.kind === "sub");
+  function applyMemory(res) {
+    const mem = memory();
+    if (state.project.ai) state.project.ai.subs = res.subs || [];
+    res.events = D.filterRejected(res.events, mem);
+    res.uncertain = (res.uncertain || []).filter((u) => !D.isRejected(mem, u));
+    return res;
+  }
+
+  /* ---------- questions du programme ---------- */
+  const qThumbs = new Map();
+  /* Zones de banc d'une question (terrain, en m) -> polygones en coordonnées d'image normalisées (0..1), via la projection mesurée à cet instant. */
+  function benchPolys(q) {
+    const f = frames.length ? P.frameNear(frames, q.t, 0.6) : null;
+    if (!f || !Array.isArray(f.h) || f.h.length !== 9 || !Array.isArray(q.zones)) return null;
+    const Hi = HG.invert(f.h);
+    return q.zones.map((z) => [[z.x1, z.y1], [z.x2, z.y1], [z.x2, z.y2], [z.x1, z.y2]].map((p) => HG.apply(Hi, p[0], p[1])));
+  }
+  const markBox = (url, b, polys) => new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const c = document.createElement("canvas"); c.width = img.width; c.height = img.height;
+      const g = c.getContext("2d"); g.drawImage(img, 0, 0);
+      if (polys) { g.strokeStyle = "#f97316"; g.lineWidth = 3; g.setLineDash([8, 5]); polys.forEach((pl) => { g.beginPath(); pl.forEach((p, k) => { if (k) g.lineTo(p[0] * c.width, p[1] * c.height); else g.moveTo(p[0] * c.width, p[1] * c.height); }); g.closePath(); g.stroke(); }); }
+      if (b) { g.strokeStyle = "#f97316"; g.lineWidth = 3; g.strokeRect((b[0] / 1000) * c.width, (b[1] / 1000) * c.height, ((b[2] - b[0]) / 1000) * c.width, ((b[3] - b[1]) / 1000) * c.height); }
+      resolve(c.toDataURL("image/jpeg", 0.7));
+    };
+    img.onerror = () => resolve(url);
+    img.src = url;
+  });
+  async function loadQuestionThumbs(qs) {
+    const todo = qs.filter((q) => !qThumbs.has(q.key));
+    if (!todo.length || !App.getVideoUrl() || !App.isVideoReady()) return;
+    let shots = [];
+    try { shots = await P.captureFrames(App.getVideoUrl(), todo.map((q) => q.t), 480); } catch (_e) { return; }
+    for (let i = 0; i < todo.length; i++) if (shots[i]) qThumbs.set(todo[i].key, await markBox(shots[i], todo[i].kind === "team" || todo[i].kind === "sub" ? todo[i].b : null, todo[i].kind === "bench" ? benchPolys(todo[i]) : null));
+    document.querySelectorAll("#ai-q img[data-k]").forEach((im) => { const u = qThumbs.get(im.dataset.k); if (u) im.src = u; });
+  }
+  function renderQuestions() {
+    const box = $("ai-q");
+    if (!box) return;
+    const a = state.project.ai;
+    renderAnswers();
+    const qs = a ? D.openQuestions({ doubts: a.doubts || [], subs: a.subs || [], uncertain: a.uncertain || [], memory: memory() }) : [];
+    $("ai-q-count").textContent = "(" + qs.length + ")";
+    box.innerHTML = "";
+    if (qGroup) {
+      const open = qGroup.group.filter((g) => qs.some((x) => x.kind === "team" && x.id === g.id));
+      if (open.length) {
+        const ban = document.createElement("div"); ban.className = "q"; ban.style.gridTemplateColumns = "1fr";
+        const tx = document.createElement("div"); tx.className = "qt";
+        tx.textContent = open.length + " autre(s) question(s) concernent peut-être la même personne (une piste qui commence juste après ou finit juste avant, au même endroit, avec la même équipe retenue). Appliquer la même réponse (« " + (D.TEAM_LABEL[qGroup.team] || qGroup.team) + " ») ?";
+        const bt = document.createElement("div"); bt.className = "qb";
+        const yes = document.createElement("button"); yes.className = "primary"; yes.textContent = "Oui, appliquer aux " + open.length; yes.addEventListener("click", () => applyGroup(open));
+        const no = document.createElement("button"); no.textContent = "Non, une par une"; no.addEventListener("click", () => { qGroup = null; renderQuestions(); });
+        bt.appendChild(yes); bt.appendChild(no); ban.appendChild(tx); ban.appendChild(bt); box.appendChild(ban);
+      } else qGroup = null;
+    }
+    if (!qs.length) { const p = document.createElement("p"); p.className = "muted"; p.style.padding = "6px"; p.textContent = "Aucune question en attente."; box.appendChild(p); return; }
+    qs.forEach((q) => {
+      const row = document.createElement("div"); row.className = "q";
+      const im = document.createElement("img"); im.dataset.k = q.key; im.alt = ""; if (qThumbs.has(q.key)) im.src = qThumbs.get(q.key);
+      im.title = "Voir cette image dans la vidéo"; im.style.cursor = "pointer";
+      im.addEventListener("click", () => showQuestion(q));
+      const col = document.createElement("div");
+      const tx = document.createElement("div"); tx.className = "qt";
+      const bt = document.createElement("div"); bt.className = "qb";
+      const add = (label, fn, cls) => { const b = document.createElement("button"); b.textContent = label; if (cls) b.className = cls; b.addEventListener("click", fn); bt.appendChild(b); };
+      add("▶ Voir dans la vidéo", () => showQuestion(q), "primary");
+      if (q.kind === "team") {
+        tx.textContent = App.fmt(q.t) + " — Qui est la personne dans le cadre orange ? (" + q.why + ")";
+        add("Mon équipe", () => answerTeam(q, "A")); add("Adversaire", () => answerTeam(q, "B"));
+        add("Gardien (nous)", () => answerTeam(q, "GKA")); add("Gardien adverse", () => answerTeam(q, "GKB"));
+        add("Ni joueur ni gardien", () => answerTeam(q, "NONE"));
+      } else if (q.kind === "sub") {
+        tx.textContent = App.fmt(q.t) + " — Cette personne passe par la zone de remplacement : remplaçant qui entre ou sort, ou joueur sur le terrain ? (je ne la compte pas comme joueur pendant 3 s)";
+        add("Remplaçant (entre / sort)", () => answerSub(q, "remplacant")); add("Joueur sur le terrain", () => answerSub(q, "joueur"));
+      } else if (q.kind === "bench") {
+        tx.textContent = App.fmt(q.t) + " — La zone du banc (en pointillé) a suivi la caméra sur " + String(q.d).replace(".", ",") + " m. Est-elle encore sur le banc ?";
+        add("Oui, sur le banc", () => answerBench(true)); add("Non, elle a dérivé", () => answerBench(false));
+      } else {
+        tx.textContent = App.fmt(q.t) + " — « " + App.labelOf(q.type) + " » a-t-elle eu lieu ? Je n'ai pas pu le confirmer (" + (q.reason || "ballon pas assez visible") + ").";
+        add("Oui, c'est arrivé", () => answerEvent(q, "oui")); add("Non", () => answerEvent(q, "non"));
+      }
+      col.appendChild(tx); col.appendChild(bt);
+      row.appendChild(im); row.appendChild(col); box.appendChild(row);
+    });
+    loadQuestionThumbs(qs);
+  }
+  /* Montre la question dans la vraie vidéo : image exacte (en pause) avec le cadre orange sur la personne concernée ;
+     pour une erreur incertaine, 2 s avant le moment, pour le voir se produire. */
+  function showQuestion(q) {
+    video.pause();
+    qHighlight = q.kind === "team" || q.kind === "sub" ? { t: q.t, b: q.b, label: q.kind === "sub" ? "Remplaçant ?" : "Question : qui est-ce ?" } : q.kind === "bench" ? { t: q.t, polys: benchPolys(q), label: "Zone du banc" } : null;
+    App.seek(q.kind === "team" || q.kind === "sub" || q.kind === "bench" ? q.t : Math.max(0, q.t - 2));
+    drawOverlay();
+  }
+  function answerTeam(q, team) {
+    const a = state.project.ai;
+    qHighlight = null;
+    const ans = D.answerTeam(memory(), q, team), r = D.applyOne(frames, ans);
+    if (r.ok) { ans.undo = r.undo; a.frames = P.compactFrames(frames); }
+    else App.toast("Je ne retrouve pas cette personne dans les images : votre réponse est retenue pour la prochaine analyse.", true);
+    const rest = D.openQuestions({ doubts: a.doubts || [], memory: memory() }).filter((x) => x.kind === "team");
+    const group = D.sameTrackHint(q, rest);
+    qGroup = group.length ? { team, q, group } : null;
+    reanalyzeSuggestions(); refreshLive(); App.changed(true);
+  }
+  /* Applique la réponse du coach aux pistes proposées (chacune reste une réponse distincte, annulable dans « Mes réponses »). */
+  function applyGroup(list) {
+    const a = state.project.ai, g = qGroup;
+    if (!g) return;
+    list.forEach((d) => {
+      const ans = D.answerTeam(memory(), d, g.team, App.fmt(g.q.t)), r = D.applyOne(frames, ans);
+      if (r.ok) ans.undo = r.undo;
+    });
+    a.frames = P.compactFrames(frames);
+    qGroup = null;
+    reanalyzeSuggestions(); refreshLive(); App.changed(true);
+  }
+  function answerSub(q, verdict) {
+    D.answerSub(memory(), q, verdict);
+    reanalyzeSuggestions(); App.changed();
+  }
+  function answerBench(ok) {
+    D.answerBench(memory(), ok);
+    App.toast(ok ? "Zone du banc confirmée." : "Noté : aux prochaines analyses, la zone du banc ne suivra plus la caméra. Relancez l'analyse pour l'appliquer.");
+    renderQuestions(); App.changed();
+  }
+
+  /* ---------- écran « Mes réponses » : tout ce qui a été répondu ou écarté, avec Annuler ---------- */
+  function renderAnswers() {
+    const box = $("ai-ans");
+    if (!box) return;
+    const mem = memory(), rows = [];
+    mem.answers.slice().reverse().forEach((a) => rows.push({ text: D.describeAnswer(a, App.fmt, App.labelOf), label: "Annuler", fn: () => cancelAnswer(a) }));
+    mem.rejected.slice().reverse().forEach((r) => rows.push({ text: App.fmt(r.t) + " — erreur écartée : " + App.labelOf(r.type), label: "Rétablir", fn: () => restoreRejected(r) }));
+    $("ai-ans-count").textContent = "(" + rows.length + ")";
+    box.innerHTML = "";
+    if (!rows.length) { const p = document.createElement("p"); p.className = "muted"; p.style.padding = "6px"; p.textContent = "Aucune réponse pour l'instant."; box.appendChild(p); return; }
+    rows.forEach((x) => {
+      const row = document.createElement("div"); row.className = "ev";
+      const t = document.createElement("div"); t.className = "chips"; t.style.gridColumn = "1 / 3"; t.textContent = x.text;
+      const b = document.createElement("button"); b.textContent = x.label; b.addEventListener("click", x.fn);
+      row.appendChild(t); row.appendChild(b); box.appendChild(row);
+    });
+  }
+  function cancelAnswer(a) {
+    const p = state.project, ai = p.ai, mem = memory();
+    if (a.kind === "team" && D.undoOne(frames, a)) ai.frames = P.compactFrames(frames);
+    if (a.kind === "event" && a.verdict === "oui") {
+      p.events = p.events.filter((e) => !(e.auto && e.type === a.type && Math.abs(e.t - a.t) < 2.5 && /confirmé par vous/.test(e.note || "")));
+      App.renderEvents(); App.renderTimeline(); App.renderPalette();
+    }
+    D.removeAnswer(mem, a);
+    reanalyzeSuggestions();
+    // la question d'une erreur incertaine revient même si le recalcul ne la retrouve pas (elle est gardée avec la réponse)
+    if (a.kind === "event" && a.event && !(ai.uncertain || []).some((u) => u.type === a.type && Math.abs(u.t - a.t) < 2)) {
+      ai.uncertain = (ai.uncertain || []).concat([{ t: a.t, type: a.type, reason: a.reason || "ballon non visible", event: a.event }]);
+      renderSuggestions();
+    }
+    refreshLive(); App.changed(true);
+  }
+  function restoreRejected(r) {
+    D.unreject(memory(), r);
+    reanalyzeSuggestions(); App.changed();
+  }
+  async function answerEvent(q, verdict) {
+    const a = state.project.ai, mem = memory();
+    D.answerEvent(mem, q, verdict);
+    a.uncertain = (a.uncertain || []).filter((u) => !(u.type === q.type && Math.abs(u.t - q.t) < 2));
+    if (verdict === "oui") await acceptSuggestions([Object.assign({ sid: "q" + Date.now().toString(36) }, q.event, { note: ((q.event && q.event.note) || "") + " — confirmé par vous" })]);
+    renderSuggestions(); App.changed();
+  }
+
   /* Recalcule les erreurs suggérées à partir des images déjà analysées (après un changement de réglage qui ne demande
      pas de nouvelle détection, comme le côté des bancs). */
   function reanalyzeSuggestions() {
     const a = state.project.ai;
     if (!a || !frames.length) return;
     const s = a.settings || {};
-    const res = M.analyze(frames, { L: L(), W: W(), dirAt, lost: a.lost || [], span: [s.t0 || frames[0].t, s.t1 || frames[frames.length - 1].t], bench: benchSetting(), benchSeen: a.benchSeen || null });
+    const res = applyMemory(M.analyze(frames, { L: L(), W: W(), dirAt, lost: a.lost || [], span: [s.t0 || frames[0].t, s.t1 || frames[frames.length - 1].t], bench: benchSetting(), benchSeen: a.benchSeen || null, subAnswers: subAnswers() }));
+    a.stats = Object.assign({}, res.stats); renderStats();
     a.suggestedEvents = res.events.filter((e) => !state.project.events.some((x) => x.type === e.type && Math.abs(x.t - e.t) < 2)).map((e, i) => Object.assign({ sid: "s" + Date.now().toString(36) + i }, e));
     a.suggested = a.suggestedEvents.length; a.uncertain = res.uncertain; a.context = res.context;
     renderSuggestions(); App.changed();
@@ -642,7 +850,7 @@
     try {
       const camera = $("ai-camera").value;
       const result = await P.analyseVideo({
-        url: App.getVideoUrl(), t0: range[0], t1: range[1], fps, tiles, camera, tol: tol(), L: L(), W: W(), calibrations: a.calibrations, refs: r, floorMarks: floorMarks(), benchZones: a.benchZones || [], dirAt, signal: abort.signal, api,
+        url: App.getVideoUrl(), t0: range[0], t1: range[1], fps, tiles, camera, tol: tol(), L: L(), W: W(), calibrations: a.calibrations, refs: r, floorMarks: floorMarks(), benchZones: a.benchZones || [], benchFollow: memory().benchFollow !== false, dirAt, signal: abort.signal, api,
         onProgress: (p) => {
           $("ai-bar").style.width = Math.round((p.done / p.total) * 100) + "%";
           msg.textContent = "Image " + p.done + " / " + p.total + " — reste environ " + fmtEta(p.eta) + (p.lost ? " (caméra perdue sur cette image)" : "");
@@ -653,10 +861,12 @@
       live = null; preview = null;
       const out = result.frames;
       frames = out;
+      a.doubts = result.doubts || [];
+      D.applyAnswers(frames, memory().answers);
       a.camera = camera; a.lost = result.lost; a.notes = result.notes;
       a.frames = P.compactFrames(frames);
       a.benchSeen = result.bench || null;
-      const res = M.analyze(frames, { L: L(), W: W(), dirAt, lost: result.lost, span: range, bench: benchSetting(), benchSeen: a.benchSeen });
+      const res = applyMemory(M.analyze(frames, { L: L(), W: W(), dirAt, lost: result.lost, span: range, bench: benchSetting(), benchSeen: a.benchSeen, subAnswers: subAnswers() }));
       a.stats = Object.assign({}, res.stats);
       a.suggestedEvents = res.events.map((e, i) => Object.assign({ sid: "s" + Date.now().toString(36) + i }, e));
       a.suggested = a.suggestedEvents.length;
@@ -775,7 +985,7 @@
       const a = state.project.ai; if (!a || !a.suggestedEvents.length) return;
       acceptSuggestions(a.suggestedEvents.slice());
     });
-    $("ai-clear-sugg").addEventListener("click", () => { const a = state.project.ai; if (!a) return; a.suggestedEvents = []; a.suggested = 0; renderSuggestions(); App.changed(); });
+    $("ai-clear-sugg").addEventListener("click", () => { const a = state.project.ai; if (!a) return; a.suggestedEvents.forEach((e) => D.reject(memory(), e)); a.suggestedEvents = []; a.suggested = 0; renderSuggestions(); App.changed(); });
     const inVideo = (e) => { const [ix, iy] = toVideo(e.offsetX, e.offsetY); return { ix, iy, ok: ix >= 0 && iy >= 0 && ix <= video.videoWidth && iy <= video.videoHeight }; };
     ["down", "move", "up"].forEach((n) => $("overlay").addEventListener("pointer" + n, (e) => {
       if (!pointer || !pointer[n]) return;
@@ -848,9 +1058,18 @@
     return { canvas: c, img: ctx.getImageData(0, 0, w, h), w, h, k, t: video.currentTime, id: "f" + Date.now().toString(36) };
   }
 
+  /* Mémoire du projet : ce que le coach a montré ou répondu (couleurs de but apprises, erreurs écartées, réponses aux questions).
+     Elle vit dans le projet seulement ; rien n'est réutilisé d'un autre projet. */
+  function memory() {
+    const a = ai();
+    if (!a.memory) a.memory = { goalPalettes: [], rejected: [], answers: [] };
+    ["goalPalettes", "rejected", "answers"].forEach((k) => { if (!Array.isArray(a.memory[k])) a.memory[k] = []; });
+    return a.memory;
+  }
+
   const FSAI = window.FSAI = {
     hooks: {}, segmentImpl: null,
-    ai, refs, kitWarnings, grabSam, renderKits, renderStats, renderCalibs, renderPoints, validateCalibration, runAnalysis, updateEstimate,
+    ai, memory, refs, kitWarnings, grabSam, renderKits, renderStats, renderCalibs, renderPoints, validateCalibration, runAnalysis, updateEstimate,
     addLayer: (fn) => { layers.push(fn); }, setPointer: (p) => { pointer = p; updateOverlayMode(); }, redraw: refreshLive,
     beginPlacing: (id) => { if (!App.isVideoReady()) return false; video.pause(); pickRole = null; pip = null; renderPipette(); placing = id; $("ai-landmark").value = id; updateOverlayMode(); return true; },
     cancelPlacing: () => { placing = null; updateOverlayMode(); },

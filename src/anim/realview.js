@@ -104,6 +104,77 @@
     this.raf = requestAnimationFrame(this._tick);
   };
 
+  /* ---------- export : la même correction, rendue image par image (hors temps réel) ---------- */
+  /* Chronologie de la correction affichée : { duration, play (durée de l'extrait réel en mode Séquencé), reveal } ou null (rien à exporter). */
+  RealView.prototype.timeline = function () {
+    const s = this.s;
+    if (!s || s.mapOnly) return null;
+    const hasCorr = !!s.ov.correction, v = this.el.video, last = s.frames.length ? s.frames[s.frames.length - 1].t : s.ev.t, first = s.frames.length ? s.frames[0].t : 0;
+    if (s.mode === "seq") {
+      const win = [Math.max(first, s.ev.t - SEQ_BEFORE), Math.min(last, s.ev.t + SEQ_AFTER, (v.duration || 1e9) - 0.05)], play = Math.max(0.5, win[1] - win[0]);
+      return { mode: "seq", win, play, duration: play + CORR_DUR + 2.5 };
+    }
+    const reveal = s.ov.items.length * STEP + 1;
+    return { mode: "fixed", reveal, duration: reveal + (hasCorr ? CORR_DUR + 2.5 : 1) };
+  };
+  /* État à l'instant T (s) de l'export : instant de la vidéo, nombre de dessins montrés, avancement de la correction (-1 = pas encore). */
+  RealView.prototype.clipState = function (T) {
+    const s = this.s, tl = this.timeline(), n = s.ov.items.length, hasCorr = !!s.ov.correction;
+    if (tl.mode === "seq") {
+      if (T < tl.play) return { t: tl.win[0] + T, shown: n, corr: -1 };
+      return { t: s.ev.t, shown: n, corr: Math.min(1, (T - tl.play) / CORR_DUR) };
+    }
+    if (T < tl.reveal) return { t: s.ev.t, shown: Math.min(n, Math.floor(T / STEP) + 1), corr: -1 };
+    return { t: s.ev.t, shown: n, corr: hasCorr ? Math.min(1, (T - tl.reveal) / CORR_DUR) : -1 };
+  };
+  /* Taille de l'export (paire, bornée par maxW × maxH) et nombre d'images à fps images par seconde. */
+  RealView.prototype.exportInfo = function (maxW, maxH, fps) {
+    const tl = this.timeline(), c = this.el.overlay;
+    if (!tl || !c.clientWidth || !c.clientHeight) return null;
+    const k = Math.min(1, maxW / c.clientWidth, maxH / c.clientHeight), ev = (n) => Math.max(2, Math.round(n / 2) * 2);
+    return { width: ev(c.clientWidth * k), height: ev(c.clientHeight * k), total: Math.ceil(tl.duration * fps) + 1, duration: tl.duration, fps };
+  };
+  /* Rend toutes les images : renderFrame(i) est appelé (et attendu) avec un canvas déjà composé (vidéo + dessins + petite carte). */
+  RealView.prototype.exportFrames = async function (info, onFrame, signal) {
+    const s = this.s;
+    if (!s || !info) throw new Error("Rien à exporter");
+    const gen = this.gen, v = this.el.video;
+    if (this.raf) cancelAnimationFrame(this.raf);
+    this.raf = 0; v.pause();
+    const out = document.createElement("canvas"); out.width = info.width; out.height = info.height;
+    const g = out.getContext("2d");
+    try {
+      for (let i = 0; i < info.total; i++) {
+        if (signal && signal.aborted) throw new Error("Export interrompu");
+        if (gen !== this.gen) throw new Error("La correction affichée a changé pendant l'export");
+        const T = Math.min(info.duration, i / info.fps), st = this.clipState(T);
+        await seek(v, st.t);
+        this.draw(st.t, st.shown, st.corr);
+        this.compose(g, info.width, info.height);
+        await onFrame(out, i, info.total);
+      }
+    } finally {
+      if (gen === this.gen) this.restart();
+    }
+  };
+  /* Compose l'image affichée (vidéo, dessins, petite carte) dans g, à la taille w × h. */
+  RealView.prototype.compose = function (g, w, h) {
+    const c = this.el.overlay, v = this.el.video, k = w / c.width, vw = v.videoWidth || 16, vh = v.videoHeight || 9;
+    g.fillStyle = "#000"; g.fillRect(0, 0, w, h);
+    const f = Math.min(c.width / vw, c.height / vh), rw = vw * f, rh = vh * f;
+    try { g.drawImage(v, ((c.width - rw) / 2) * k, ((c.height - rh) / 2) * k, rw * k, rh * k); } catch (_e) { /* image vidéo indisponible */ }
+    g.drawImage(c, 0, 0, w, h);
+    const m = this.el.map;
+    if (m.offsetParent && getComputedStyle(m).display !== "none") {
+      const a = c.getBoundingClientRect(), b = m.getBoundingClientRect();
+      if (a.width && b.width) {
+        const sx = w / a.width, sy = h / a.height, x = (b.left - a.left) * sx, y = (b.top - a.top) * sy, mw = b.width * sx, mh = b.height * sy;
+        g.drawImage(m, x, y, mw, mh);
+        g.strokeStyle = "#fff"; g.lineWidth = Math.max(1, 2 * sx); g.strokeRect(x, y, mw, mh);
+      }
+    }
+  };
+
   /* Phase en cours, aussi exposée sur la page (data-phase, data-ghost) pour les tests de bout en bout. */
   RealView.prototype.notify = function () {
     if (!this.s) return;
@@ -153,7 +224,8 @@
     this.message(null);
     const v = this.el.video, vw = v.videoWidth || 16, vh = v.videoHeight || 9;
     const k = Math.min(c.width / vw, c.height / vh), rw = vw * k, rh = vh * k, rx = (c.width - rw) / 2, ry = (c.height - rh) / 2;
-    const P = (x, y) => { const q = proj.project(x, y); return q ? [rx + q[0] * rw, ry + q[1] * rh] : null; };
+    const seen = [];                                 // points dessinés (pour placer la petite carte hors du chemin)
+    const P = (x, y) => { const q = proj.project(x, y); const r = q ? [rx + q[0] * rw, ry + q[1] * rh] : null; if (r) seen.push(r); return r; };
     const st = O.stateAt(s.frames, tNow), byId = new Map(st.players.map((p) => [p.id, p]));
     const posOf = (it) => { const p = it.id != null ? byId.get(it.id) : null; return p ? [p.x, p.y, p] : (it.id != null && s.mode === "seq" && Math.abs(tNow - s.ev.t) > 0.3 ? null : [it.x, it.y, null]); };
     const unit = Math.max(1, rh / 360);
@@ -184,6 +256,22 @@
     });
     if (corr >= 0 && s.ov.correction) this.drawCorrection(P, corr, unit, rx, ry, rw, rh);
     this.flushLabels(unit);
+    this.autoMap(c, st, seen, unit, rx, ry, rw, rh);
+  };
+
+  /* Mode « carte automatique » : la petite carte va dans le coin qui cache le moins les joueurs et les dessins (les marges noires
+     d'une vidéo verticale sont idéales). Le coin ne change que si le gain est net. */
+  RealView.prototype.autoMap = function (c, st, seen, unit, rx, ry, rw, rh) {
+    const r = this.el.root, mapEl = this.el.map;
+    if (!r || !r.dataset || r.dataset.mapMode !== "auto" || r.classList.contains("map-only") || r.classList.contains("map-big") || !mapEl.offsetParent) return;
+    const a = c.getBoundingClientRect(), b = mapEl.getBoundingClientRect();
+    if (!a.width || !a.height || !b.width) return;
+    const sx = c.width / a.width, sy = c.height / a.height, occ = [], pad = 18 * unit;
+    st.players.forEach((p) => { if (p.b) occ.push([rx + (p.b[0] / 1000) * rw, ry + (p.b[1] / 1000) * rh, rx + (p.b[2] / 1000) * rw, ry + (p.b[3] / 1000) * rh]); });
+    seen.forEach((q) => occ.push([q[0] - pad, q[1] - pad, q[0] + pad, q[1] + pad]));
+    const corners = ["br", "bl", "tl", "tr"], cur = corners.find((k) => r.classList.contains("map-" + k)) || null;
+    const best = O.chooseCorner({ w: c.width, h: c.height }, { w: b.width * sx, h: b.height * sy }, occ, cur, 10 * sx);
+    if (best !== cur) corners.forEach((k) => r.classList.toggle("map-" + k, k === best));
   };
 
   /* File des étiquettes : une demande = un texte, une couleur, un point d'attache ; prio basse = plus important. */

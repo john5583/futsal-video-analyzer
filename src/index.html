@@ -196,6 +196,13 @@
             <h3 class="ai-h">Erreurs suggérées <span id="ai-sugg-count" class="muted"></span></h3>
             <div class="ai-run"><button id="ai-accept-all">Tout accepter</button><button id="ai-clear-sugg" class="ghost">Tout écarter</button></div>
             <div id="ai-sugg" class="events"></div>
+            <h3 class="ai-h">Questions du programme <span id="ai-q-count" class="muted"></span></h3>
+            <p class="muted" style="padding:0 4px">Ce que le programme ne peut pas trancher seul : il vous le demande au lieu de le deviner. Vos réponses sont retenues dans ce projet. Sans réponse, le cas reste « non analysé ».</p>
+            <div id="ai-q" class="events"></div>
+            <details id="ai-ans-box"><summary class="ai-h" style="cursor:pointer">Mes réponses <span id="ai-ans-count" class="muted"></span></summary>
+              <p class="muted" style="padding:0 4px">Ce que vous avez répondu ou écarté dans ce projet. « Annuler » remet la situation comme avant et la question réapparaît.</p>
+              <div id="ai-ans" class="events"></div>
+            </details>
           </details>
         </div>
       </div>
@@ -238,6 +245,8 @@
           <button id="cr-fixed" title="La vidéo s'arrête sur l'erreur, les dessins apparaissent un par un">Figé</button>
           <button id="cr-seq" title="Quelques secondes réelles autour de l'erreur, dessins collés au sol">Séquencé</button>
           <button id="cr-replay">⏮ Rejouer</button>
+          <button id="cr-exp-video" title="Enregistrer cette correction (avec la vraie vidéo, les dessins et la petite carte) en MP4 ou WebM">Exporter en vidéo</button>
+          <button id="cr-exp-gif" title="Enregistrer cette correction en GIF animé, léger et facile à partager">Exporter en GIF</button>
           <button id="cr-prev" title="Occurrence précédente">◀</button><span id="cr-label" class="time"></span><button id="cr-next" title="Occurrence suivante">▶</button>
           <button id="cr-map-pos" title="Déplacer ou masquer la petite carte">Carte : bas droite</button>
           <button id="cr-catalog" class="ghost" title="Animation type, vue de dessus">Animation du catalogue</button>
@@ -285,7 +294,7 @@
         <li><strong>Analyse IA</strong> (panneau de droite) : cliquez sur le grand bouton <strong>« ▶ Analyser une vidéo »</strong>, choisissez une ou plusieurs vidéos, puis suivez l'assistant :
           <ol>
             <li><em>Plusieurs vidéos</em> : indiquez si elles sont du <strong>même match</strong> (les tenues sont apprises une seule fois) ou de <strong>matchs différents</strong> (tout est redemandé pour chaque vidéo).</li>
-            <li><em>Terrain</em> (automatique) : le programme cherche tout seul un <strong>but</strong> (poteaux rayés rouge et blanc) dans la vidéo et le repère en vert. S'il y a plusieurs couleurs de lignes au sol, il vous demande la <strong>couleur des lignes du futsal</strong> ; ces lignes sont alors surlignées. Cliquez ensuite sur la <strong>ligne des 6 m juste devant le milieu du but</strong> (la ligne pointillée verticale blanche vous guide), puis, si elles existent, sur la ligne pointillée des 9 m et sur les deux bouts de la ligne des 6 m (un cercle rouge indique où ils devraient être). Les lignes bleues et jaunes tracées par le programme doivent recouvrir les lignes du terrain ; terminez en indiquant si ce but est celui que vous <strong>défendez</strong> ou que vous <strong>attaquez</strong>. Précision de l'ordre de 0,5 à 1 m près du but, moins loin de lui. Si aucun but n'est repéré, ou pour les terrains sans but visible, utilisez « Placer les repères moi-même ». Pour une caméra tenue à la main, le programme suit ensuite le mouvement de la caméra.</li>
+            <li><em>Terrain</em> (automatique) : le programme cherche tout seul un <strong>but</strong> (poteaux à bandes de couleur : rouge, bleu, vert, ou une couleur que vous lui avez déjà montrée) dans la vidéo et le repère en vert. Si le sien n&rsquo;est pas reconnu, « Je montre le but moi-même » (3 clics) lui apprend son aspect pour ce projet : il ne devine jamais une couleur. S'il y a plusieurs couleurs de lignes au sol, il vous demande la <strong>couleur des lignes du futsal</strong> ; ces lignes sont alors surlignées. Cliquez ensuite sur la <strong>ligne des 6 m juste devant le milieu du but</strong> (la ligne pointillée verticale blanche vous guide), puis, si elles existent, sur la ligne pointillée des 9 m et sur les deux bouts de la ligne des 6 m (un cercle rouge indique où ils devraient être). Les lignes bleues et jaunes tracées par le programme doivent recouvrir les lignes du terrain ; terminez en indiquant si ce but est celui que vous <strong>défendez</strong> ou que vous <strong>attaquez</strong>. Précision de l'ordre de 0,5 à 1 m près du but, moins loin de lui. Si aucun but n'est repéré, ou pour les terrains sans but visible, utilisez « Placer les repères moi-même ». Pour une caméra tenue à la main, le programme suit ensuite le mouvement de la caméra.</li>
             <li><em>Silhouettes</em> : cliquez « Découper les joueurs de cette image » : l'IA dessine la silhouette de chaque personne. Cliquez la silhouette de <strong>vos joueurs</strong> (2 à 3 suffisent), puis <strong>« Valider »</strong> ; faites de même pour les <strong>adversaires</strong>, puis le <strong>gardien</strong>, le <strong>gardien adverse</strong> et l'<strong>arbitre</strong> (« Passer » s'ils ne sont pas visibles). Le programme apprend la vareuse, les manches, le short et les bas à partir de la silhouette seule (sans le décor). « ＋ Joueur non détecté » : tracez un rectangle autour d'un joueur oublié. « ↺ Autre image » : refaire la découpe sur une autre image.</li>
             <li><em>Analyse</em> : choisissez la plage et la précision, puis lancez. Le programme détecte les joueurs, reconnaît les équipes, suit le ballon et relève les erreurs tactiques.</li>
             <li><em>Résultats</em> : voir les joueurs sur la vidéo, la vue de dessus, le rapport, les corrections animées, corriger les équipes ou enregistrer. Chaque analyse est enregistrée automatiquement à côté de la vidéo (fichier <code>.fsal</code>).</li>
@@ -337,10 +346,12 @@
 <script src="vendor/mp4-muxer.js"></script>
 <script src="vendor/webm-muxer.js"></script>
 <script src="anim/player.js"></script>
+<script src="anim/gif.js"></script>
 <script src="ai/yolox.js"></script>
 <script src="ai/homography.js"></script>
 <script src="ai/kit.js"></script>
 <script src="ai/tracker.js"></script>
+<script src="ai/doubt.js"></script>
 <script src="ai/camera.js"></script>
 <script src="ai/context.js"></script>
 <script src="ai/match.js"></script>

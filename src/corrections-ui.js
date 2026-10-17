@@ -138,18 +138,54 @@
     $("corr-real").hidden = true; $("corr-canvas").hidden = false; $("cr-text").hidden = true;
     sceneControls().hidden = false;
     $("cr-bar").hidden = !(real.catalog && real.events.length);
-    ["cr-fixed", "cr-seq", "cr-replay", "cr-prev", "cr-next", "cr-label", "cr-map-pos"].forEach((x) => { $(x).hidden = true; });
+    ["cr-fixed", "cr-seq", "cr-replay", "cr-exp-video", "cr-exp-gif", "cr-prev", "cr-next", "cr-label", "cr-map-pos"].forEach((x) => { $(x).hidden = true; });
     $("cr-catalog").textContent = "Vraie vidéo";
   }
   /* Petite carte : coin choisi (ou masquée), mémorisé pour ce poste. */
-  const MAP_POS = ["br", "bl", "tl", "tr", "off"];
-  const MAP_LABEL = { br: "bas droite", bl: "bas gauche", tl: "haut gauche", tr: "haut droite", off: "masquée" };
-  function mapPos() { try { const v = localStorage.getItem("fsal.corrMap"); return MAP_POS.includes(v) ? v : "br"; } catch (_e) { return "br"; } }
+  const MAP_POS = ["auto", "br", "bl", "tl", "tr", "off"];          // + « free » (carte déplacée à la main, hors de la boucle)
+  const MAP_LABEL = { auto: "automatique", br: "bas droite", bl: "bas gauche", tl: "haut gauche", tr: "haut droite", off: "masquée", free: "libre" };
+  function mapPos() { try { const v = localStorage.getItem("fsal.corrMap"); return MAP_POS.includes(v) || v === "free" ? v : "auto"; } catch (_e) { return "auto"; } }
+  function mapFree() { try { const v = JSON.parse(localStorage.getItem("fsal.corrMapFree") || "null"); return v && isFinite(v.fx) && isFinite(v.fy) ? v : { fx: 1, fy: 1 }; } catch (_e) { return { fx: 1, fy: 1 }; } }
+  /* Carte « libre » : position en parts de l'espace disponible (0 = bord gauche/haut, 1 = bord droit/bas). */
+  function placeFree() {
+    const r = $("corr-real"), m = $("cr-map"), a = r.getBoundingClientRect(), w = m.offsetWidth, h = m.offsetHeight, f = mapFree();
+    m.style.right = "auto"; m.style.bottom = "auto";
+    m.style.left = Math.round(Math.max(0, f.fx * (a.width - w))) + "px"; m.style.top = Math.round(Math.max(0, f.fy * (a.height - h))) + "px";
+  }
   function setMapPos(p) {
-    const r = $("corr-real");
-    MAP_POS.forEach((x) => r.classList.toggle("map-" + x, x === p));
+    const r = $("corr-real"), m = $("cr-map");
+    r.dataset.mapMode = p === "auto" ? "auto" : "fixed";
+    ["br", "bl", "tl", "tr", "off"].forEach((x) => r.classList.toggle("map-" + x, x === p));
+    if (p === "auto" && !["br", "bl", "tl", "tr"].some((x) => r.classList.contains("map-" + x))) r.classList.add("map-br");
+    if (p === "free") placeFree(); else { m.style.left = m.style.top = m.style.right = m.style.bottom = ""; }
     $("cr-map-pos").textContent = "Carte : " + MAP_LABEL[p];
     try { localStorage.setItem("fsal.corrMap", p); } catch (_e) { /* stockage indisponible */ }
+  }
+  /* Déplacement de la carte à la main : on la saisit et on la dépose où l'on veut ; la position est mémorisée. */
+  function bindMapDrag() {
+    const m = $("cr-map"), r = $("corr-real");
+    let drag = null;
+    m.addEventListener("pointerdown", (e) => {
+      if (r.classList.contains("map-only") || r.classList.contains("map-big")) return;
+      const a = r.getBoundingClientRect(), b = m.getBoundingClientRect();
+      drag = { dx: e.clientX - b.left, dy: e.clientY - b.top, a, w: b.width, h: b.height };
+      m.setPointerCapture(e.pointerId); e.preventDefault();
+    });
+    m.addEventListener("pointermove", (e) => {
+      if (!drag) return;
+      const x = Math.max(0, Math.min(drag.a.width - drag.w, e.clientX - drag.a.left - drag.dx)), y = Math.max(0, Math.min(drag.a.height - drag.h, e.clientY - drag.a.top - drag.dy));
+      ["br", "bl", "tl", "tr", "off"].forEach((k) => r.classList.remove("map-" + k));
+      r.dataset.mapMode = "fixed";
+      m.style.right = "auto"; m.style.bottom = "auto"; m.style.left = Math.round(x) + "px"; m.style.top = Math.round(y) + "px";
+    });
+    const end = (e) => {
+      if (!drag) return;
+      const a = drag.a, x = m.offsetLeft, y = m.offsetTop, fx = a.width > drag.w ? x / (a.width - drag.w) : 1, fy = a.height > drag.h ? y / (a.height - drag.h) : 1;
+      drag = null;
+      try { localStorage.setItem("fsal.corrMapFree", JSON.stringify({ fx: Math.max(0, Math.min(1, fx)), fy: Math.max(0, Math.min(1, fy)) })); } catch (_e) { /* stockage indisponible */ }
+      setMapPos("free");
+    };
+    m.addEventListener("pointerup", end); m.addEventListener("pointercancel", end);
   }
   function sceneControls() { return document.querySelector(".corr-main .corr-controls:not(#cr-bar)"); }
   function showReal() {
@@ -158,8 +194,9 @@
     $("corr-pip").hidden = true; $("corr-pip-video").pause();
     $("corr-canvas").hidden = true; $("corr-real").hidden = false; $("cr-bar").hidden = false; $("cr-text").hidden = false;
     sceneControls().hidden = true;
-    ["cr-fixed", "cr-seq", "cr-replay", "cr-prev", "cr-next", "cr-label", "cr-map-pos"].forEach((x) => { $(x).hidden = false; });
+    ["cr-fixed", "cr-seq", "cr-replay", "cr-exp-video", "cr-exp-gif", "cr-prev", "cr-next", "cr-label", "cr-map-pos"].forEach((x) => { $(x).hidden = false; });
     $("cr-catalog").textContent = "Animation du catalogue";
+    if (mapPos() === "free") placeFree();
     openReal();
   }
   function openReal() {
@@ -208,6 +245,63 @@
     }
   }
 
+  /* Export de la correction affichée sur la vraie vidéo : MP4/WebM (image par image, hors temps réel) ou GIF animé.
+     La page doit rester visible pendant l'export (les dessins sont calculés à la taille de l'écran). */
+  async function exportReal(kind) {
+    if (exporting) return;
+    if (!api) { App.toast("Export disponible dans l'application uniquement.", true); return; }
+    const view = real.view, GIF = window.FutsalGif, fps = kind === "gif" ? 10 : 30;
+    if (!view || !view.s) { App.toast("Choisissez d'abord une erreur à exporter.", true); return; }
+    const info = view.exportInfo(kind === "gif" ? 560 : 1280, kind === "gif" ? 360 : 720, fps);
+    if (!info) { App.toast("Cette correction n'est pas montrée sur la vraie vidéo (plan seul) : rien à exporter ici.", true); return; }
+    const ev = view.s.ev, name = "correction-" + (ev.type || "erreur") + "-" + App.fmt(ev.t).replace(":", "m");
+    setExporting(true, kind === "gif" ? "Création du GIF…" : "Création de la vidéo…");
+    $("cp-bar").style.width = "0%";
+    try {
+      let out;
+      if (kind === "gif") {
+        if (!GIF) throw new Error("Encodeur GIF indisponible.");
+        const frames = [];
+        await view.exportFrames(info, async (canvas, i, total) => {
+          frames.push(canvas.getContext("2d").getImageData(0, 0, info.width, info.height).data);
+          if (i % 3 === 0) { $("cp-bar").style.width = Math.round((i / total) * 90) + "%"; await new Promise((r) => setTimeout(r, 0)); }
+        });
+        $("cp-msg").textContent = "Compression du GIF…"; await new Promise((r) => setTimeout(r, 30));
+        out = { buffer: GIF.encodeGif({ width: info.width, height: info.height, frames, fps }), ext: "gif" };
+      } else {
+        // le rendu produit les images dans l'ordre (en mémoire, au plus 6 d'avance) ; l'encodeur les consomme dans l'ordre
+        const queue = [];
+        let renderErr = null;
+        const render = view.exportFrames(info, async (canvas) => {
+          queue.push(await createImageBitmap(canvas));
+          while (queue.length > 6) await new Promise((r) => setTimeout(r, 4));
+        }).catch((e) => { renderErr = e; });
+        const tmp = document.createElement("canvas"); tmp.width = info.width; tmp.height = info.height;
+        const tg = tmp.getContext("2d");
+        out = await PL.encodeSequence({
+          width: info.width, height: info.height, fps, total: info.total,
+          renderFrame: async () => {
+            while (!queue.length) { if (renderErr) throw renderErr; await new Promise((r) => setTimeout(r, 4)); }
+            const bmp = queue.shift(); tg.drawImage(bmp, 0, 0); bmp.close();
+            return tmp;
+          },
+          onProgress: (p) => { $("cp-bar").style.width = Math.round(p * 100) + "%"; }
+        });
+        await render;
+        if (renderErr) throw renderErr;
+      }
+      const r = await api.saveAnimation(out.buffer, name, out.ext);
+      if (r.canceled) { setExporting(false, ""); return; }
+      if (r.error) { setExporting(false, ""); App.toast(r.error, true); return; }
+      setExporting(false, (kind === "gif" ? "GIF" : out.ext.toUpperCase()) + " enregistré : " + r.path);
+      if (kind !== "gif" && out.ext !== "mp4") App.toast("Format WebM utilisé (MP4 non pris en charge sur cet ordinateur). Lisible avec Chrome, Edge ou VLC.");
+      if (api.showItem) api.showItem(r.path);
+    } catch (e) {
+      setExporting(false, "");
+      App.toast("Export impossible : " + e.message, true);
+    }
+  }
+
   function fullSequence() {
     let analysis;
     try { analysis = A.analyze(state.project); } catch (_e) { return null; }
@@ -229,8 +323,10 @@
     $("cr-fixed").addEventListener("click", () => { real.mode = "fixed"; if (real.view && real.events.length) openReal(); });
     $("cr-seq").addEventListener("click", () => { real.mode = "seq"; if (real.view && real.events.length) openReal(); });
     $("cr-replay").addEventListener("click", () => { if (real.view) real.view.restart(); });
+    $("cr-exp-video").addEventListener("click", () => exportReal("video"));
+    $("cr-exp-gif").addEventListener("click", () => exportReal("gif"));
     $("cr-map-pos").addEventListener("click", () => { setMapPos(MAP_POS[(MAP_POS.indexOf(mapPos()) + 1) % MAP_POS.length]); });
-    setMapPos(mapPos());
+    setMapPos(mapPos()); bindMapDrag();
     $("cr-prev").addEventListener("click", () => { real.idx = (real.idx + real.events.length - 1) % real.events.length; openReal(); });
     $("cr-next").addEventListener("click", () => { real.idx = (real.idx + 1) % real.events.length; openReal(); });
     $("cr-catalog").addEventListener("click", () => {

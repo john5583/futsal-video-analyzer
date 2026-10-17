@@ -80,6 +80,24 @@ function makeFrames() {
   const text = await win.evaluate(() => document.getElementById("cr-text").textContent);
   must(/Conseil tiré du catalogue/.test(text), "le texte précise que la correction est un conseil du catalogue");
 
+  // 1b. export de la correction sur la vraie vidéo : GIF puis vidéo (la boîte « Enregistrer sous » est remplacée par un chemin d'essai)
+  const outGif = path.join(dir, "sortie.gif"), outVid = path.join(dir, "sortie.bin");
+  await app.evaluate(({ shell }) => { shell.showItemInFolder = () => {}; });
+  for (const [btn, out, label] of [["#cr-exp-gif", outGif, "GIF"], ["#cr-exp-video", outVid, "vidéo"]]) {
+    await app.evaluate(({ dialog }, f) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath: f }); }, out);
+    await win.evaluate(() => { document.getElementById("cp-msg").textContent = ""; });
+    await win.click(btn);
+    must(await waitFor(win, () => /enregistré/.test(document.getElementById("cp-msg").textContent), 120000), "export " + label + " : enregistré");
+  }
+  const gif = fs.readFileSync(outGif), vid = fs.readFileSync(outVid);
+  must(gif.slice(0, 6).toString() === "GIF89a" && gif[gif.length - 1] === 0x3b && gif.length > 5000, "le GIF est un vrai GIF animé (" + gif.length + " octets)");
+  let nImg = 0; for (let i = 0; i < gif.length; i++) if (gif[i] === 0x21 && gif[i + 1] === 0xf9 && gif[i + 2] === 4) nImg++;
+  must(nImg > 20, "le GIF contient plusieurs images (" + nImg + ")");
+  const isMp4 = vid.slice(4, 8).toString() === "ftyp", isWebm = vid[0] === 0x1a && vid[1] === 0x45 && vid[2] === 0xdf && vid[3] === 0xa3;
+  must((isMp4 || isWebm) && vid.length > 10000, "la vidéo est un vrai fichier " + (isMp4 ? "MP4" : "WebM") + " (" + vid.length + " octets)");
+  if (process.env.E2E_KEEP) { fs.copyFileSync(outGif, path.join(process.env.E2E_KEEP, "sortie.gif")); fs.copyFileSync(outVid, path.join(process.env.E2E_KEEP, "sortie." + (isMp4 ? "mp4" : "webm"))); }
+  must(await waitFor(win, () => document.getElementById("corr-real").dataset.phase === "done" || document.getElementById("corr-real").dataset.phase === "correct" || document.getElementById("corr-real").dataset.phase === "reveal", 20000), "la correction reprend après l'export");
+
   // 2. occurrence dans le passage où la caméra est perdue : image figée SANS dessin, message, plan agrandi
   await win.click("#cr-next");
   must(await waitFor(win, () => /caméra a été perdue/.test(document.getElementById("cr-msg").textContent) && document.getElementById("corr-real").classList.contains("map-big"), 15000), "caméra perdue : message clair et plan agrandi");
@@ -93,9 +111,14 @@ function makeFrames() {
   await sleep(800);
   await win.click("#cr-seq");
   must(await waitFor(win, () => document.getElementById("corr-real").dataset.phase === "play", 20000), "mode Séquencé : lecture des secondes réelles autour de l'erreur");
-  await win.click("#cr-map-pos");
-  must(await win.evaluate(() => document.getElementById("corr-real").classList.contains("map-bl") && /bas gauche/.test(document.getElementById("cr-map-pos").textContent)), "petite carte déplacée en bas à gauche");
-  for (let i = 0; i < 4; i++) await win.click("#cr-map-pos");   // retour en bas à droite
+  must(await win.evaluate(() => /automatique/.test(document.getElementById("cr-map-pos").textContent) && document.getElementById("corr-real").dataset.mapMode === "auto"), "petite carte : mode automatique par défaut");
+  await win.click("#cr-map-pos"); await win.click("#cr-map-pos");
+  must(await win.evaluate(() => document.getElementById("corr-real").classList.contains("map-bl") && /bas gauche/.test(document.getElementById("cr-map-pos").textContent) && document.getElementById("corr-real").dataset.mapMode === "fixed"), "petite carte déplacée en bas à gauche (coin fixe)");
+  // déplacement à la main : on saisit la carte et on la dépose en haut à gauche
+  const mb = await win.evaluate(() => { const r = document.getElementById("cr-map").getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
+  await win.mouse.move(mb.x, mb.y); await win.mouse.down(); await win.mouse.move(mb.x + 60, mb.y - 120, { steps: 8 }); await win.mouse.up();
+  must(await win.evaluate(() => /libre/.test(document.getElementById("cr-map-pos").textContent) && document.getElementById("cr-map").style.left !== ""), "petite carte déplacée à la main (position libre)");
+  for (let i = 0; i < 1; i++) await win.click("#cr-map-pos");   // libre -> automatique
 
   // 4. erreur du catalogue sans occurrence confirmée : comportement d'avant (animation vue de dessus)
   await win.evaluate(() => window.FSApp.openAnimation("error", "repli_tardif"));

@@ -45,6 +45,7 @@
   const BENCH_RATIO = 3;             // …et au moins 3 fois plus d'un côté que de l'autre
   const SUB_LINE = 3;                // m : zone de remplacement le long de la ligne de touche des bancs
   const SUB_ZONE = 10;               // m : de part et d'autre de la ligne médiane
+  const SUB_ASK_MIN = 6;             // s : on ne questionne que les personnes suivies au moins ce temps (une silhouette qui ne fait que passer n'est pas un joueur)
   const SUB_WINDOW = 3;              // s : durée pendant laquelle le joueur qui entre ou sort n'est pas compté
   const PRESS_DIST = 3;              // m : adversaire qui presse le porteur
   const LONG_POSSESSION = 8;         // s : au-delà, attaque placée
@@ -135,15 +136,27 @@
 
   /* Remplacements volants : piste qui commence ou finit dans la zone de remplacement (près de la ligne de touche des bancs,
      à moins de SUB_ZONE m de la ligne médiane) -> écartée des erreurs de placement pendant SUB_WINDOW s. */
-  function substitutions(frames, L, bench, span) {
+  function substitutions(frames, L, bench, span, answers) {
     const subs = new Map();
+    subs.list = [];                    // chaque passage repéré, pour poser la question au coach : { id, t, x, y, b, answered }
     if (!bench || !frames.length) return subs;
     const first = new Map(), last = new Map();
     frames.forEach((f) => f.players.forEach((p) => { if (!first.has(p.id)) first.set(p.id, [f.t, p]); last.set(p.id, [f.t, p]); }));
     const inZone = (p) => Math.abs(p.y - bench.y) <= SUB_LINE && Math.abs(p.x - L / 2) <= SUB_ZONE;
-    const add = (id, a, b) => { if (!subs.has(id)) subs.set(id, []); subs.get(id).push([a, b]); };
-    first.forEach(([t, p], id) => { if (t > span[0] + 1 && inZone(p)) add(id, t, t + SUB_WINDOW); });
-    last.forEach(([t, p], id) => { if (t < span[1] - 1 && inZone(p)) add(id, t - SUB_WINDOW, t); });
+    // Une réponse du coach vaut pour la PERSONNE (son entrée comme sa sortie) : elle est retrouvée par l'instant et l'endroit de
+    // l'un de ses deux bouts de piste. « joueur » = compté comme joueur ; « remplaçant » = écarté comme avant.
+    // Une question par personne, seulement si elle est suivie assez longtemps (SUB_ASK_MIN).
+    const near = (x, pt) => pt && Math.abs(x.t - pt[0]) <= 1.5 && Math.hypot(x.x - pt[1].x, x.y - pt[1].y) <= 3;
+    const ansOf = (id) => (answers || []).find((x) => x && x.kind === "sub" && (near(x, first.get(id)) || near(x, last.get(id))));
+    const add = (id, a, b, t, p) => {
+      const ans = ansOf(id);
+      if (!subs.list.some((q) => q.id === id) && last.get(id)[0] - first.get(id)[0] >= SUB_ASK_MIN) subs.list.push({ id, t, x: p.x, y: p.y, b: Array.isArray(p.b) ? p.b : null, answered: !!ans });
+      if (ans && ans.verdict === "joueur") return;
+      if (!subs.has(id)) subs.set(id, []);
+      subs.get(id).push([a, b]);
+    };
+    first.forEach(([t, p], id) => { if (t > span[0] + 1 && inZone(p)) add(id, t, t + SUB_WINDOW, t, p); });
+    last.forEach(([t, p], id) => { if (t < span[1] - 1 && inZone(p)) add(id, t - SUB_WINDOW, t, t, p); });
     return subs;
   }
 
@@ -338,7 +351,8 @@
     const sorted = (frames || []).filter((f) => f && isFinite(f.t)).slice().sort((a, b) => a.t - b.t);
     const span = opts.span || (sorted.length ? [sorted[0].t, sorted[sorted.length - 1].t] : [0, 0]);
     const bench = sorted.length ? benchSide(Object.assign({}, opts, { W }), sorted[0].t) : null;
-    const nf = normalize(sorted, L, W, opts.dirAt, substitutions(sorted, L, bench, span));
+    const subsInfo = substitutions(sorted, L, bench, span, opts.subAnswers);
+    const nf = normalize(sorted, L, W, opts.dirAt, subsInfo);
     const poss = possessionSeries(nf);
     const ctx = C.analyzeContext(nf, { L, W, lost: opts.lost, span: opts.span });
     // toutes les erreurs reposent sur la possession, donc sur le ballon : sans ballon fiable, ou hors du jeu en cours
@@ -348,9 +362,10 @@
       e.ballConf = ballConfidence(nf, e.t);
       const blocked = e.blocked || contextAt(nf, ctx.states, e.t);
       delete e.blocked;
-      if (blocked) uncertain.push({ t: e.t, type: e.type, ballConf: e.ballConf, reason: blocked });
+      // l'erreur écartée est gardée avec la question qu'elle soulève : le coach peut la confirmer ou l'écarter
+      if (blocked) uncertain.push({ t: e.t, type: e.type, ballConf: e.ballConf, reason: blocked, event: Object.assign({}, e) });
       else if (e.ballConf >= BALL_CONF_MIN) events.push(e);
-      else uncertain.push({ t: e.t, type: e.type, ballConf: e.ballConf, reason: "ballon pas assez visible" });
+      else uncertain.push({ t: e.t, type: e.type, ballConf: e.ballConf, reason: "ballon pas assez visible", event: Object.assign({}, e) });
     });
     // possession affichée : un ballon tenu (déduit, confiance suffisante) compte pour l'équipe du joueur qui le tient ;
     // cette déduction ne sert jamais à déclarer une perte (les erreurs ci-dessus reposent sur le ballon vu)
@@ -358,7 +373,7 @@
       const h = ctx.states[i] && ctx.states[i].held;
       return !r.team && h && h.conf >= C.CONF_MIN ? Object.assign({}, r, { team: h.team, held: h }) : r;
     });
-    return { events, uncertain, possession: shown, context: { passages: ctx.passages, reliable: ctx.reliable, bench: bench ? { side: bench.side, source: bench.source } : null }, stats: stats(nf, shown, L, W), normalized: nf };
+    return { events, uncertain, subs: subsInfo.list, possession: shown, context: { passages: ctx.passages, reliable: ctx.reliable, bench: bench ? { side: bench.side, source: bench.source } : null }, stats: stats(nf, shown, L, W), normalized: nf };
   }
 
   /* Raison de ne pas suggérer une erreur à l'instant t : arrêt de jeu ou ballon non visible dans la seconde qui précède. */
