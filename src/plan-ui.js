@@ -65,7 +65,7 @@
       bench: s.bench || "auto", benchSeen: a.benchSeen || null, subAnswers: mem.answers.filter((x) => x.kind === "sub")
     });
     res.events = D.filterRejected(res.events, mem);
-    return { frames, L, W, out: CP.evaluate(plan().answers, res, { L, W }) };
+    return { frames, L, W, out: CP.evaluate(plan().answers, res, { L, W, events: p.events }) };
   }
 
   const fmt = (t) => App.fmt(t);

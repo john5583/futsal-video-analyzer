@@ -146,8 +146,10 @@
     // Une réponse du coach vaut pour la PERSONNE (son entrée comme sa sortie) : elle est retrouvée par l'instant et l'endroit de
     // l'un de ses deux bouts de piste. « joueur » = compté comme joueur ; « remplaçant » = écarté comme avant.
     // Une question par personne, seulement si elle est suivie assez longtemps (SUB_ASK_MIN).
-    const near = (x, pt) => pt && Math.abs(x.t - pt[0]) <= 1.5 && Math.hypot(x.x - pt[1].x, x.y - pt[1].y) <= 3;
-    const ansOf = (id) => (answers || []).find((x) => x && x.kind === "sub" && (near(x, first.get(id)) || near(x, last.get(id))));
+    const near = (x, pt) => pt && Math.abs(x.t - pt[0]) <= 1.0 && Math.hypot(x.x - pt[1].x, x.y - pt[1].y) <= 1.5;
+    const idsOf = (x) => [...first.keys()].filter((id) => near(x, first.get(id)) || near(x, last.get(id)));
+    // une réponse qui correspond à deux personnes (l'entrant et le sortant d'un même échange) n'est appliquée à aucune : on ne devine pas
+    const ansOf = (id) => (answers || []).find((x) => x && x.kind === "sub" && (near(x, first.get(id)) || near(x, last.get(id))) && idsOf(x).length === 1);
     const add = (id, a, b, t, p) => {
       const ans = ansOf(id);
       if (!subs.list.some((q) => q.id === id) && last.get(id)[0] - first.get(id)[0] >= SUB_ASK_MIN) subs.list.push({ id, t, x: p.x, y: p.y, b: Array.isArray(p.b) ? p.b : null, answered: !!ans });

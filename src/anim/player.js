@@ -127,8 +127,9 @@
     let encError = null;
     const encoder = new VideoEncoder({ output: (chunk, meta) => mux.addVideoChunk(chunk, meta), error: (e) => { encError = e; } });
     encoder.configure({ codec: pick.codec, width: w, height: h, bitrate: 6000000, framerate: fps });
+    try {
     for (let i = 0; i < o.total; i++) {
-      if (o.signal && o.signal.aborted) { encoder.close(); throw new Error("Export interrompu"); }
+      if (o.signal && o.signal.aborted) throw new Error("Export interrompu");
       if (encError) throw new Error("Erreur d'encodage : " + encError.message);
       const canvas = await o.renderFrame(i);
       const frame = new VideoFrame(canvas, { timestamp: Math.round((i * 1000000) / fps), duration: Math.round(1000000 / fps) });
@@ -138,6 +139,7 @@
       if (o.onProgress && i % 5 === 0) { o.onProgress(i / o.total); await new Promise((r) => setTimeout(r, 0)); }
     }
     await encoder.flush();
+    } catch (e) { try { encoder.close(); } catch (_e) { /* déjà fermé */ } throw e; }
     encoder.close();
     if (encError) throw new Error("Erreur d'encodage : " + encError.message);
     mux.finalize();

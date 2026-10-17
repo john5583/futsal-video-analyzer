@@ -23,7 +23,7 @@
   const D_TOL = 3;             // m : une question répondue est retrouvée à cette distance au plus
   const D_APPLY = 1.5;         // m : une réponse ne s'applique qu'à la personne trouvée à cette distance au plus (les joueurs se touchent souvent)
   const D_AMBIG = 0.6;         // m : si deux personnes sont presque aussi proches, on ne devine pas laquelle
-  const SUB_TOL = 1.5;         // s : tolérance de temps d'une réponse « remplaçant »
+  const SUB_TOL = 1.0;         // s : tolérance de temps d'une réponse « remplaçant »
   const REJ_TOL = 2;           // s : une erreur écartée ne revient pas dans cette fenêtre
   const OK = { A: 1, B: 1, GKA: 1, GKB: 1 };
   const SIDE = { A: "A", GKA: "A", B: "B", GKB: "B" };   // côté d'une lecture : un gardien compte pour son équipe
@@ -74,7 +74,7 @@
     return out.sort((a, b) => b.n - a.n);
   }
 
-  const sameSpot = (a, b) => Math.abs(a.t - b.t) <= T_TOL && Math.hypot(a.x - b.x, a.y - b.y) <= D_TOL;
+  const sameSpot = (a, b) => Math.abs(a.t - b.t) <= T_TOL && Math.hypot(a.x - b.x, a.y - b.y) <= D_APPLY;
 
   /* Image la plus proche de t (images triées par temps) à moins de tol s, sinon null. */
   function nearestFrame(frames, t, tol) {
@@ -140,7 +140,11 @@
   /* Applique toutes les réponses « team » (nouvelle analyse du projet). Renvoie le nombre appliquées. */
   function applyAnswers(frames, answers) {
     let applied = 0;
-    (answers || []).forEach((a) => { if (applyOne(frames, a).ok) applied++; });
+    (answers || []).forEach((a) => {
+      if (!a || a.kind !== "team") return;
+      const r = applyOne(frames, a);
+      if (r.ok) { a.undo = r.undo; applied++; } else delete a.undo;           // non appliquée cette fois : rien à annuler
+    });
     return applied;
   }
 
@@ -189,9 +193,9 @@
   const isRejected = (mem, e) => !!(mem && Array.isArray(mem.rejected) && mem.rejected.some((r) => r.type === e.type && Math.abs(r.t - e.t) < REJ_TOL));
   const filterRejected = (list, mem) => (list || []).filter((e) => !isRejected(mem, e));
   function reject(mem, e) { if (!isRejected(mem, e)) mem.rejected.push({ type: e.type, t: Math.round(e.t * 10) / 10 }); }
-  function unreject(mem, r) { mem.rejected = mem.rejected.filter((x) => !(x.type === r.type && Math.abs(x.t - r.t) < 0.05)); }
+  function unreject(mem, r) { mem.rejected = mem.rejected.filter((x) => !(x.type === r.type && Math.abs(x.t - r.t) <= 0.051)); }
 
-  const subMatch = (a, s) => a.kind === "sub" && Math.abs(a.t - s.t) <= SUB_TOL && Math.hypot(a.x - s.x, a.y - s.y) <= D_TOL;
+  const subMatch = (a, s) => a.kind === "sub" && Math.abs(a.t - s.t) <= SUB_TOL && Math.hypot(a.x - s.x, a.y - s.y) <= D_APPLY;
 
   /* Questions encore ouvertes : doutes d'équipe, zone de banc, remplacements, erreurs incertaines — sans celles déjà répondues. */
   function openQuestions(src) {
@@ -207,7 +211,7 @@
       qs.push(Object.assign({ key: "team|" + d.t + "|" + d.x + "|" + d.y }, d));
     });
     (src.subs || []).forEach((s) => {
-      if (s.answered || answers.some((a) => subMatch(a, s))) return;
+      if (s.answered) return;                                    // « répondue » est décidé par l'analyse (une réponse ambiguë entre deux personnes n'est pas comptée)
       qs.push(Object.assign({ key: "sub|" + s.t + "|" + s.id, kind: "sub" }, s));
     });
     (src.uncertain || []).forEach((u) => {

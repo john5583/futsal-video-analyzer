@@ -197,7 +197,8 @@ test("remplaçants : une personne qui entre par la zone de remplacement est ques
   const mem = { answers: [], rejected: [] };
   assert.equal(D.openQuestions({ subs: r0.subs, memory: mem }).filter((q) => q.kind === "sub").length >= 1, true);
   const ans = D.answerSub(mem, s, "joueur");
-  assert.equal(D.openQuestions({ subs: r0.subs, memory: mem }).filter((q) => q.kind === "sub" && q.id === 5).length, 0);
+  const r2 = M.analyze(frames, Object.assign({ subAnswers: mem.answers }, base));
+  assert.equal(D.openQuestions({ subs: r2.subs, memory: mem }).filter((q) => q.kind === "sub" && q.id === 5).length, 0, "la question est répondue une fois l'analyse refaite avec la réponse");
   assert.equal(ans.verdict, "joueur");
 });
 
@@ -276,4 +277,39 @@ test("annuler utilise l'identifiant de la personne modifiée (même si une autre
   frames.forEach((f) => f.players.push({ id: 77, team: "A", x: 20.5, y: 8, b: B }));          // un nouvel arrivant se place exactement sur le point
   assert.ok(D.undoOne(frames, ans));
   assert.ok(frames.every((f) => f.players.filter((p) => p.id === 2).every((p) => p.team === "A")), "la personne 2 est rétablie");
+});
+
+test("rétablir une erreur écartée marche quel que soit l'arrondi du temps (12,25 s)", () => {
+  const mem = { goalPalettes: [], rejected: [], answers: [] };
+  const a = D.answerEvent(mem, { type: "perte_zone_def", t: 12.25 }, "non");
+  assert.equal(mem.rejected.length, 1);
+  D.removeAnswer(mem, a);
+  assert.equal(mem.rejected.length, 0, "plus écartée");
+});
+
+test("nouvelle analyse : l'annulation (undo) est celle de la nouvelle analyse, jamais l'ancienne", () => {
+  const frames1 = toFrames(track(7, 30, ["A"], 20, 8));
+  const ans = { kind: "team", t: 2, x: 20.5, y: 8, team: "B" };
+  assert.equal(D.applyAnswers(frames1, [ans]), 1);
+  const undo1 = ans.undo;
+  assert.equal(undo1.id, 7);
+  // 2e analyse : la même personne porte maintenant l'identifiant 3
+  const frames2 = toFrames(track(3, 30, ["A"], 20, 8));
+  assert.equal(D.applyAnswers(frames2, [ans]), 1);
+  assert.equal(ans.undo.id, 3, "undo remis à jour");
+  // 3e analyse : plus personne à cet endroit -> pas d'annulation à garder
+  assert.equal(D.applyAnswers(toFrames(track(4, 30, ["A"], 5, 5)), [ans]), 0);
+  assert.equal(ans.undo, undefined);
+});
+
+test("remplaçants : une réponse qui correspond à deux personnes (l'entrant et le sortant d'un échange) n'est appliquée à aucune", () => {
+  const mk = (id, t0, t1, x, y) => Array.from({ length: Math.round((t1 - t0) / 0.2) }, (_v, i) => ({ t: t0 + i * 0.2, p: { id, team: "A", x, y, b: B } }));
+  // 5 entre à 5 s au même endroit où 6 sort à 5,2 s ; les deux restent longtemps suivis
+  const frames = toFrames(mk(1, 0, 40, 10, 10), mk(2, 0, 40, 30, 12), mk(5, 5, 25, 20, 0.5), mk(6, 0, 5.2, 20.3, 0.6));
+  const base = { L: 40, W: 20, bench: "left" };
+  const r0 = M.analyze(frames, base);
+  assert.ok(r0.subs.some((s) => s.id === 5), "l'entrée de 5 est questionnée");
+  const q = r0.subs.find((s) => s.id === 5);
+  const r1 = M.analyze(frames, Object.assign({ subAnswers: [{ kind: "sub", t: q.t, x: q.x, y: q.y, verdict: "joueur" }] }, base));
+  assert.equal(r1.subs.find((s) => s.id === 5).answered, false, "réponse ambiguë entre deux personnes : non appliquée, la question reste ouverte");
 });

@@ -174,7 +174,8 @@
 
     // ----- écarts au plan tactique (event : { t, type: "plan_…", expected, observed, target, shift, … }) -----
     if (type === "plan_forme") {
-      const sorted = A.slice().sort((a, b) => a.x - b.x), want = (event.expected || []).join("-"), got = (event.observed || []).join("-");
+      const pool = Array.isArray(event.ids) ? players.filter((p) => event.ids.includes(p.id)) : A;       // les joueurs mesurés (gardien monté compris, remplaçants exclus)
+      const sorted = pool.slice().sort((a, b) => a.x - b.x), want = (event.expected || []).join("-"), got = (event.observed || []).join("-");
       sorted.forEach((p, i) => ring(p, "err", i === 0 && got ? "Forme " + got + " au lieu de " + want : null));
       const fix = shapeFix(sorted, event.expected || []);
       if (fix) ghost(fix.player, fix.x, fix.player.y, "Reprendre le " + want);
@@ -183,8 +184,9 @@
     if (type === "plan_bloc") {
       const lo = ((event.target || [0, 1])[0]) * L, hi = ((event.target || [0, 1])[1]) * L, shift = event.shift || 0;
       items.push({ type: "zone", pts: [R(lo, 0), R(hi, 0), R(hi, W), R(lo, W)], color: "opp", label: "Bloc visé" });
-      A.forEach((p, i) => ring(p, "err", i === 0 ? (shift > 0 ? "Bloc trop bas" : "Bloc trop haut") : null));
-      A.forEach((p) => { const nx = Math.max(0.5, Math.min(L - 0.5, p.x + shift)); corr.arrows.push({ pts: [R(p.x, p.y), R(nx, p.y)], label: null }); });
+      const blocPool = Array.isArray(event.ids) ? players.filter((p) => event.ids.includes(p.id)) : A;
+      blocPool.forEach((p, i) => ring(p, "err", i === 0 ? (shift > 0 ? "Bloc trop bas" : "Bloc trop haut") : null));
+      blocPool.forEach((p) => { const nx = Math.max(0.5, Math.min(L - 0.5, p.x + shift)); corr.arrows.push({ pts: [R(p.x, p.y), R(nx, p.y)], label: null }); });
       return out("plan");
     }
     if (type === "plan_pressing") {

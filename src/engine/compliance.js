@@ -101,18 +101,18 @@
       const settled = sinceChange[i] >= TRANS;
       // forme : à quatre joueurs de champ (ou cinq avec le gardien monté pour les systèmes « gardien-joueur »)
       if (shape && settled) {
-        let xs = null;
-        if (gkSys) { if (gk && gk.x > 0.4 * L && field.length === 4) xs = field.concat([gk]).map((p) => p.x).sort((a, b) => a - b); }
-        else if (field.length === 4) xs = field.map((p) => p.x).sort((a, b) => a - b);
-        const m = xs ? shapeMismatch(xs, shape) : null;
-        if (m) series.forme.push({ t: f.t, dt, ok: m.mismatch === 0, badness: m.mismatch, info: { counts: m.counts } });
+        let ps = null;
+        if (gkSys) { if (gk && gk.x > 0.4 * L && field.length === 4) ps = field.concat([gk]).sort((a, b) => a.x - b.x); }
+        else if (field.length === 4) ps = field.slice().sort((a, b) => a.x - b.x);
+        const m = ps ? shapeMismatch(ps.map((p) => p.x), shape) : null;
+        if (m) series.forme.push({ t: f.t, dt, ok: m.mismatch === 0, badness: m.mismatch, info: { counts: m.counts, ids: ps.map((p) => p.id) } });
       }
-      if (field.length >= 3 && opp && settled) {
+      if (field.length === 4 && opp && settled) {
         const xs = field.map((p) => p.x), mean = xs.reduce((a, b) => a + b, 0) / xs.length;
         const r = BLOC[plan.defense];
         if (r) {
           const lo = r[0] * L - BLOC_TOL, hi = r[1] * L + BLOC_TOL, off = mean < lo ? lo - mean : mean > hi ? mean - hi : 0;
-          series.bloc.push({ t: f.t, dt, ok: off === 0, badness: off, info: { mean, dir: mean < lo ? "bas" : "haut", target: r } });
+          series.bloc.push({ t: f.t, dt, ok: off === 0, badness: off, info: { mean, dir: mean < lo ? "bas" : "haut", target: r, ids: field.map((p) => p.id) } });
         }
         const maxD = COMPACT_MAX[plan.compact];
         if (maxD) {
@@ -142,7 +142,7 @@
           rule: "forme", type: "plan_forme", t: r.worst.t, t0: r.t0, t1: r.t1, dur: r.dur, severity: severity(r.dur),
           avoid: "Forme " + o + " pendant " + Math.round(r.dur) + " s (de " + fmt(r.t0) + " à " + fmt(r.t1) + ") au lieu du " + want + " voulu.",
           todo: "Reprendre la structure " + want + (sys.structure ? " : " + sys.structure : "") + ". Un joueur doit changer de ligne pour retrouver " + want + ".",
-          data: { expected: shape, observed: r.worst.info.counts }
+          data: { expected: shape, observed: r.worst.info.counts, ids: r.worst.info.ids }
         });
       });
     }
@@ -156,7 +156,7 @@
           rule: "bloc", type: "plan_bloc", t: run.worst.t, t0: run.t0, t1: run.t1, dur: run.dur, severity: severity(run.dur),
           avoid: "Bloc " + (tooLow ? "trop bas" : "trop haut") + " pendant " + Math.round(run.dur) + " s (de " + fmt(run.t0) + " à " + fmt(run.t1) + ") : " + r1(w.mean) + " m de ton but en moyenne, alors que ton plan demande un bloc " + names[plan.defense] + ".",
           todo: (tooLow ? "Faire monter" : "Faire reculer") + " tout le bloc d'environ " + move + " m dès que l'adversaire a le ballon, en gardant les distances entre joueurs.",
-          data: { mean: w.mean, target: w.target, dir: w.dir, shift: tooLow ? move : -move }
+          data: { mean: w.mean, target: w.target, dir: w.dir, shift: tooLow ? move : -move, ids: w.ids }
         });
       });
     }
@@ -179,16 +179,17 @@
       for (let i = 1; i < nf.length; i++) {
         if (!(poss[i - 1] && poss[i] && poss[i - 1].team === "A" && poss[i].team === "B")) continue;
         if ((states[i] || "jeu") !== "jeu") continue;
-        let pressed = false, withBall = 0, total = 0, stopped = false, last = i, bestD = Infinity, bestF = null;
+        let pressed = false, withBall = 0, withBoth = 0, total = 0, stopped = false, last = i, bestD = Infinity, bestF = null;
         for (let j = i; j < nf.length && nf[j].t - nf[i].t <= PRESS_WINDOW; j++) {
           last = j; total++;
           if ((states[j] || "jeu") === "arret") { stopped = true; break; }
           const b = nf[j].ball;
           if (!b) continue;
           withBall++;
+          if (nf[j].A.some((p) => !p.gk && !p.sub)) withBoth++;
           nf[j].A.filter((p) => !p.gk && !p.sub).forEach((p) => { const d = Math.hypot(p.x - b.x, p.y - b.y); if (d < bestD) { bestD = d; bestF = nf[j]; } if (d <= PRESS_DIST) pressed = true; });
         }
-        if (stopped || nf[last].t - nf[i].t < PRESS_WINDOW - 1 || withBall < total * 0.5) continue;       // fenêtre incomplète ou ballon peu visible : non jugé
+        if (stopped || nf[last].t - nf[i].t < PRESS_WINDOW - 1 || withBall < total * 0.5 || withBoth < total * 0.4 || !isFinite(bestD)) continue;       // fenêtre incomplète, ballon ou joueurs peu visibles : non jugé
         losses.push({ t: nf[i].t, pressed, bestD, frame: nf[i] });
       }
       const ev = losses.length, okN = losses.filter((l) => l.pressed).length;
@@ -206,9 +207,14 @@
     }
     // 5. pertes de balle en zone défensive (erreurs déjà mesurées, hors ballon non fiable)
     if (plan.noLossOwnZone === "oui") {
-      const losses = (res.events || []).filter((e) => e.type === "perte_zone_def");
+      const fromAnalysis = (res.events || []).filter((e) => e.type === "perte_zone_def");
+      const confirmed = ((opts && opts.events) || []).filter((e) => e && e.type === "perte_zone_def" && isFinite(Number(e.t)) && !fromAnalysis.some((x) => Math.abs(x.t - Number(e.t)) < 2)).map((e) => ({ type: e.type, t: Number(e.t), note: (e.note || "") + " (confirmée par vous)" }));
+      const losses = fromAnalysis.concat(confirmed);
+      let ballSec = 0;
+      nf.forEach((f, i) => { if ((states[i] || "jeu") === "jeu" && f.ball) ballSec += dtOf(i); });
+      const ballCover = inPlaySec > 0 ? ballSec / inPlaySec : 0, weakLoss = inPlaySec < MIN_EVAL || ballCover < MIN_COVER;
       const err = (KB.ERRORS || []).find((e) => e.id === "perte_zone_def");
-      rules.push({ id: "pertes", label: LABEL.pertes, plan: "Aucune perte de balle près de ton but", evaluated: losses.length, respected: 0, count: losses.length, share: losses.length ? 0 : 1, status: losses.length === 0 ? "ok" : losses.length < 3 ? "attention" : "ecart", unit: "pertes" });
+      rules.push({ id: "pertes", label: LABEL.pertes, plan: "Aucune perte de balle près de ton but", evaluated: losses.length, respected: 0, count: losses.length, share: losses.length ? 0 : 1, coverage: Math.round(ballCover * 100) / 100, status: weakLoss && losses.length === 0 ? "indicatif" : losses.length === 0 ? "ok" : losses.length < 3 ? "attention" : "ecart", unit: "pertes" });
       losses.forEach((e) => {
         deviations.push({
           rule: "pertes", type: "perte_zone_def", t: e.t, t0: e.t, t1: e.t + 3, dur: 3, severity: 3,
