@@ -136,11 +136,16 @@
       });
     }
     // personne d'une question du programme : cadre orange sur l'image exacte de la question
+    if (qHighlight && Math.abs((video.currentTime || 0) - qHighlight.t) < 0.4 && Array.isArray(qHighlight.polys)) {
+      ctx.strokeStyle = "#f97316"; ctx.lineWidth = 3; ctx.setLineDash([8, 5]);
+      qHighlight.polys.forEach((pl) => { ctx.beginPath(); pl.forEach((p, k) => { const v = toView(p[0] * r.vw, p[1] * r.vh); if (k) ctx.lineTo(v[0], v[1]); else ctx.moveTo(v[0], v[1]); }); ctx.closePath(); ctx.stroke(); });
+      ctx.setLineDash([]);
+    }
     if (qHighlight && Math.abs((video.currentTime || 0) - qHighlight.t) < 0.4 && Array.isArray(qHighlight.b)) {
       const b = qHighlight.b, a1 = toView((b[0] / 1000) * r.vw, (b[1] / 1000) * r.vh), a2 = toView((b[2] / 1000) * r.vw, (b[3] / 1000) * r.vh);
       ctx.strokeStyle = "#f97316"; ctx.lineWidth = 4; ctx.strokeRect(a1[0], a1[1], a2[0] - a1[0], a2[1] - a1[1]);
       ctx.font = "700 13px 'Segoe UI',Arial,sans-serif";
-      const label = "Question : qui est-ce ?", tw = ctx.measureText(label).width + 10;
+      const label = qHighlight.label || "Question", tw = ctx.measureText(label).width + 10;
       ctx.fillStyle = "#f97316"; ctx.fillRect(a1[0], a1[1] - 20, tw, 20);
       ctx.fillStyle = "#fff"; ctx.fillText(label, a1[0] + 5, a1[1] - 5);
     }
@@ -572,8 +577,10 @@
   }
 
   /* La mémoire du projet filtre un résultat d'analyse : les erreurs que le coach a écartées ne reviennent pas. */
+  const subAnswers = () => memory().answers.filter((x) => x.kind === "sub");
   function applyMemory(res) {
     const mem = memory();
+    if (state.project.ai) state.project.ai.subs = res.subs || [];
     res.events = D.filterRejected(res.events, mem);
     res.uncertain = (res.uncertain || []).filter((u) => !D.isRejected(mem, u));
     return res;
@@ -581,11 +588,19 @@
 
   /* ---------- questions du programme ---------- */
   const qThumbs = new Map();
-  const markBox = (url, b) => new Promise((resolve) => {
+  /* Zones de banc d'une question (terrain, en m) -> polygones en coordonnées d'image normalisées (0..1), via la projection mesurée à cet instant. */
+  function benchPolys(q) {
+    const f = frames.length ? P.frameNear(frames, q.t, 0.6) : null;
+    if (!f || !Array.isArray(f.h) || f.h.length !== 9 || !Array.isArray(q.zones)) return null;
+    const Hi = HG.invert(f.h);
+    return q.zones.map((z) => [[z.x1, z.y1], [z.x2, z.y1], [z.x2, z.y2], [z.x1, z.y2]].map((p) => HG.apply(Hi, p[0], p[1])));
+  }
+  const markBox = (url, b, polys) => new Promise((resolve) => {
     const img = new Image();
     img.onload = () => {
       const c = document.createElement("canvas"); c.width = img.width; c.height = img.height;
       const g = c.getContext("2d"); g.drawImage(img, 0, 0);
+      if (polys) { g.strokeStyle = "#f97316"; g.lineWidth = 3; g.setLineDash([8, 5]); polys.forEach((pl) => { g.beginPath(); pl.forEach((p, k) => { if (k) g.lineTo(p[0] * c.width, p[1] * c.height); else g.moveTo(p[0] * c.width, p[1] * c.height); }); g.closePath(); g.stroke(); }); }
       if (b) { g.strokeStyle = "#f97316"; g.lineWidth = 3; g.strokeRect((b[0] / 1000) * c.width, (b[1] / 1000) * c.height, ((b[2] - b[0]) / 1000) * c.width, ((b[3] - b[1]) / 1000) * c.height); }
       resolve(c.toDataURL("image/jpeg", 0.7));
     };
@@ -597,14 +612,15 @@
     if (!todo.length || !App.getVideoUrl() || !App.isVideoReady()) return;
     let shots = [];
     try { shots = await P.captureFrames(App.getVideoUrl(), todo.map((q) => q.t), 480); } catch (_e) { return; }
-    for (let i = 0; i < todo.length; i++) if (shots[i]) qThumbs.set(todo[i].key, await markBox(shots[i], todo[i].kind === "team" ? todo[i].b : null));
+    for (let i = 0; i < todo.length; i++) if (shots[i]) qThumbs.set(todo[i].key, await markBox(shots[i], todo[i].kind === "team" || todo[i].kind === "sub" ? todo[i].b : null, todo[i].kind === "bench" ? benchPolys(todo[i]) : null));
     document.querySelectorAll("#ai-q img[data-k]").forEach((im) => { const u = qThumbs.get(im.dataset.k); if (u) im.src = u; });
   }
   function renderQuestions() {
     const box = $("ai-q");
     if (!box) return;
     const a = state.project.ai;
-    const qs = a ? D.openQuestions({ doubts: a.doubts || [], uncertain: a.uncertain || [], memory: memory() }) : [];
+    renderAnswers();
+    const qs = a ? D.openQuestions({ doubts: a.doubts || [], subs: a.subs || [], uncertain: a.uncertain || [], memory: memory() }) : [];
     $("ai-q-count").textContent = "(" + qs.length + ")";
     box.innerHTML = "";
     if (!qs.length) { const p = document.createElement("p"); p.className = "muted"; p.style.padding = "6px"; p.textContent = "Aucune question en attente."; box.appendChild(p); return; }
@@ -623,6 +639,12 @@
         add("Mon équipe", () => answerTeam(q, "A")); add("Adversaire", () => answerTeam(q, "B"));
         add("Gardien (nous)", () => answerTeam(q, "GKA")); add("Gardien adverse", () => answerTeam(q, "GKB"));
         add("Ni joueur ni gardien", () => answerTeam(q, "NONE"));
+      } else if (q.kind === "sub") {
+        tx.textContent = App.fmt(q.t) + " — Cette personne passe par la zone de remplacement : remplaçant qui entre ou sort, ou joueur sur le terrain ? (je ne la compte pas comme joueur pendant 3 s)";
+        add("Remplaçant (entre / sort)", () => answerSub(q, "remplacant")); add("Joueur sur le terrain", () => answerSub(q, "joueur"));
+      } else if (q.kind === "bench") {
+        tx.textContent = App.fmt(q.t) + " — La zone du banc (en pointillé) a suivi la caméra sur " + String(q.d).replace(".", ",") + " m. Est-elle encore sur le banc ?";
+        add("Oui, sur le banc", () => answerBench(true)); add("Non, elle a dérivé", () => answerBench(false));
       } else {
         tx.textContent = App.fmt(q.t) + " — « " + App.labelOf(q.type) + " » a-t-elle eu lieu ? Je n'ai pas pu le confirmer (" + (q.reason || "ballon pas assez visible") + ").";
         add("Oui, c'est arrivé", () => answerEvent(q, "oui")); add("Non", () => answerEvent(q, "non"));
@@ -636,18 +658,58 @@
      pour une erreur incertaine, 2 s avant le moment, pour le voir se produire. */
   function showQuestion(q) {
     video.pause();
-    qHighlight = q.kind === "team" ? { t: q.t, b: q.b } : null;
-    App.seek(q.kind === "team" ? q.t : Math.max(0, q.t - 2));
+    qHighlight = q.kind === "team" || q.kind === "sub" ? { t: q.t, b: q.b, label: q.kind === "sub" ? "Remplaçant ?" : "Question : qui est-ce ?" } : q.kind === "bench" ? { t: q.t, polys: benchPolys(q), label: "Zone du banc" } : null;
+    App.seek(q.kind === "team" || q.kind === "sub" || q.kind === "bench" ? q.t : Math.max(0, q.t - 2));
     drawOverlay();
   }
   function answerTeam(q, team) {
     const a = state.project.ai;
     qHighlight = null;
-    D.answerTeam(memory(), q, team);
-    D.applyAnswers(frames, [{ kind: "team", t: q.t, x: q.x, y: q.y, team }]);
-    a.frames = P.compactFrames(frames);
-    a.doubts = (a.doubts || []).filter((d) => d.key !== q.key && !(d.kind === "team" && d.id === q.id));
+    const ans = D.answerTeam(memory(), q, team), r = D.applyOne(frames, ans);
+    if (r.ok) { ans.undo = r.undo; a.frames = P.compactFrames(frames); }
+    else App.toast("Je ne retrouve pas cette personne dans les images : votre réponse est retenue pour la prochaine analyse.", true);
     reanalyzeSuggestions(); refreshLive(); App.changed(true);
+  }
+  function answerSub(q, verdict) {
+    D.answerSub(memory(), q, verdict);
+    reanalyzeSuggestions(); App.changed();
+  }
+  function answerBench(ok) {
+    D.answerBench(memory(), ok);
+    App.toast(ok ? "Zone du banc confirmée." : "Noté : aux prochaines analyses, la zone du banc ne suivra plus la caméra. Relancez l'analyse pour l'appliquer.");
+    renderQuestions(); App.changed();
+  }
+
+  /* ---------- écran « Mes réponses » : tout ce qui a été répondu ou écarté, avec Annuler ---------- */
+  function renderAnswers() {
+    const box = $("ai-ans");
+    if (!box) return;
+    const mem = memory(), rows = [];
+    mem.answers.slice().reverse().forEach((a) => rows.push({ text: D.describeAnswer(a, App.fmt, App.labelOf), label: "Annuler", fn: () => cancelAnswer(a) }));
+    mem.rejected.slice().reverse().forEach((r) => rows.push({ text: App.fmt(r.t) + " — erreur écartée : " + App.labelOf(r.type), label: "Rétablir", fn: () => restoreRejected(r) }));
+    $("ai-ans-count").textContent = "(" + rows.length + ")";
+    box.innerHTML = "";
+    if (!rows.length) { const p = document.createElement("p"); p.className = "muted"; p.style.padding = "6px"; p.textContent = "Aucune réponse pour l'instant."; box.appendChild(p); return; }
+    rows.forEach((x) => {
+      const row = document.createElement("div"); row.className = "ev";
+      const t = document.createElement("div"); t.className = "chips"; t.style.gridColumn = "1 / 3"; t.textContent = x.text;
+      const b = document.createElement("button"); b.textContent = x.label; b.addEventListener("click", x.fn);
+      row.appendChild(t); row.appendChild(b); box.appendChild(row);
+    });
+  }
+  function cancelAnswer(a) {
+    const p = state.project, ai = p.ai, mem = memory();
+    if (a.kind === "team" && D.undoOne(frames, a)) ai.frames = P.compactFrames(frames);
+    if (a.kind === "event" && a.verdict === "oui") {
+      p.events = p.events.filter((e) => !(e.auto && e.type === a.type && Math.abs(e.t - a.t) < 2.5 && /confirmé par vous/.test(e.note || "")));
+      App.renderEvents(); App.renderTimeline(); App.renderPalette();
+    }
+    D.removeAnswer(mem, a);
+    reanalyzeSuggestions(); refreshLive(); App.changed(true);
+  }
+  function restoreRejected(r) {
+    D.unreject(memory(), r);
+    reanalyzeSuggestions(); App.changed();
   }
   async function answerEvent(q, verdict) {
     const a = state.project.ai, mem = memory();
@@ -663,7 +725,7 @@
     const a = state.project.ai;
     if (!a || !frames.length) return;
     const s = a.settings || {};
-    const res = applyMemory(M.analyze(frames, { L: L(), W: W(), dirAt, lost: a.lost || [], span: [s.t0 || frames[0].t, s.t1 || frames[frames.length - 1].t], bench: benchSetting(), benchSeen: a.benchSeen || null }));
+    const res = applyMemory(M.analyze(frames, { L: L(), W: W(), dirAt, lost: a.lost || [], span: [s.t0 || frames[0].t, s.t1 || frames[frames.length - 1].t], bench: benchSetting(), benchSeen: a.benchSeen || null, subAnswers: subAnswers() }));
     a.stats = Object.assign({}, res.stats); renderStats();
     a.suggestedEvents = res.events.filter((e) => !state.project.events.some((x) => x.type === e.type && Math.abs(x.t - e.t) < 2)).map((e, i) => Object.assign({ sid: "s" + Date.now().toString(36) + i }, e));
     a.suggested = a.suggestedEvents.length; a.uncertain = res.uncertain; a.context = res.context;
@@ -754,7 +816,7 @@
     try {
       const camera = $("ai-camera").value;
       const result = await P.analyseVideo({
-        url: App.getVideoUrl(), t0: range[0], t1: range[1], fps, tiles, camera, tol: tol(), L: L(), W: W(), calibrations: a.calibrations, refs: r, floorMarks: floorMarks(), benchZones: a.benchZones || [], dirAt, signal: abort.signal, api,
+        url: App.getVideoUrl(), t0: range[0], t1: range[1], fps, tiles, camera, tol: tol(), L: L(), W: W(), calibrations: a.calibrations, refs: r, floorMarks: floorMarks(), benchZones: a.benchZones || [], benchFollow: memory().benchFollow !== false, dirAt, signal: abort.signal, api,
         onProgress: (p) => {
           $("ai-bar").style.width = Math.round((p.done / p.total) * 100) + "%";
           msg.textContent = "Image " + p.done + " / " + p.total + " — reste environ " + fmtEta(p.eta) + (p.lost ? " (caméra perdue sur cette image)" : "");
@@ -770,7 +832,7 @@
       a.camera = camera; a.lost = result.lost; a.notes = result.notes;
       a.frames = P.compactFrames(frames);
       a.benchSeen = result.bench || null;
-      const res = applyMemory(M.analyze(frames, { L: L(), W: W(), dirAt, lost: result.lost, span: range, bench: benchSetting(), benchSeen: a.benchSeen }));
+      const res = applyMemory(M.analyze(frames, { L: L(), W: W(), dirAt, lost: result.lost, span: range, bench: benchSetting(), benchSeen: a.benchSeen, subAnswers: subAnswers() }));
       a.stats = Object.assign({}, res.stats);
       a.suggestedEvents = res.events.map((e, i) => Object.assign({ sid: "s" + Date.now().toString(36) + i }, e));
       a.suggested = a.suggestedEvents.length;

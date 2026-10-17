@@ -135,15 +135,23 @@
 
   /* Remplacements volants : piste qui commence ou finit dans la zone de remplacement (près de la ligne de touche des bancs,
      à moins de SUB_ZONE m de la ligne médiane) -> écartée des erreurs de placement pendant SUB_WINDOW s. */
-  function substitutions(frames, L, bench, span) {
+  function substitutions(frames, L, bench, span, answers) {
     const subs = new Map();
+    subs.list = [];                    // chaque passage repéré, pour poser la question au coach : { id, t, x, y, b, answered }
     if (!bench || !frames.length) return subs;
     const first = new Map(), last = new Map();
     frames.forEach((f) => f.players.forEach((p) => { if (!first.has(p.id)) first.set(p.id, [f.t, p]); last.set(p.id, [f.t, p]); }));
     const inZone = (p) => Math.abs(p.y - bench.y) <= SUB_LINE && Math.abs(p.x - L / 2) <= SUB_ZONE;
-    const add = (id, a, b) => { if (!subs.has(id)) subs.set(id, []); subs.get(id).push([a, b]); };
-    first.forEach(([t, p], id) => { if (t > span[0] + 1 && inZone(p)) add(id, t, t + SUB_WINDOW); });
-    last.forEach(([t, p], id) => { if (t < span[1] - 1 && inZone(p)) add(id, t - SUB_WINDOW, t); });
+    // le coach a déjà répondu pour cette personne à cet endroit : « joueur » = compté comme joueur, « remplaçant » = écarté comme avant
+    const add = (id, a, b, t, p) => {
+      const ans = (answers || []).find((x) => x && x.kind === "sub" && Math.abs(x.t - t) <= 1.5 && Math.hypot(x.x - p.x, x.y - p.y) <= 3);
+      subs.list.push({ id, t, x: p.x, y: p.y, b: Array.isArray(p.b) ? p.b : null, answered: !!ans });
+      if (ans && ans.verdict === "joueur") return;
+      if (!subs.has(id)) subs.set(id, []);
+      subs.get(id).push([a, b]);
+    };
+    first.forEach(([t, p], id) => { if (t > span[0] + 1 && inZone(p)) add(id, t, t + SUB_WINDOW, t, p); });
+    last.forEach(([t, p], id) => { if (t < span[1] - 1 && inZone(p)) add(id, t - SUB_WINDOW, t, t, p); });
     return subs;
   }
 
@@ -338,7 +346,8 @@
     const sorted = (frames || []).filter((f) => f && isFinite(f.t)).slice().sort((a, b) => a.t - b.t);
     const span = opts.span || (sorted.length ? [sorted[0].t, sorted[sorted.length - 1].t] : [0, 0]);
     const bench = sorted.length ? benchSide(Object.assign({}, opts, { W }), sorted[0].t) : null;
-    const nf = normalize(sorted, L, W, opts.dirAt, substitutions(sorted, L, bench, span));
+    const subsInfo = substitutions(sorted, L, bench, span, opts.subAnswers);
+    const nf = normalize(sorted, L, W, opts.dirAt, subsInfo);
     const poss = possessionSeries(nf);
     const ctx = C.analyzeContext(nf, { L, W, lost: opts.lost, span: opts.span });
     // toutes les erreurs reposent sur la possession, donc sur le ballon : sans ballon fiable, ou hors du jeu en cours
@@ -359,7 +368,7 @@
       const h = ctx.states[i] && ctx.states[i].held;
       return !r.team && h && h.conf >= C.CONF_MIN ? Object.assign({}, r, { team: h.team, held: h }) : r;
     });
-    return { events, uncertain, possession: shown, context: { passages: ctx.passages, reliable: ctx.reliable, bench: bench ? { side: bench.side, source: bench.source } : null }, stats: stats(nf, shown, L, W), normalized: nf };
+    return { events, uncertain, subs: subsInfo.list, possession: shown, context: { passages: ctx.passages, reliable: ctx.reliable, bench: bench ? { side: bench.side, source: bench.source } : null }, stats: stats(nf, shown, L, W), normalized: nf };
   }
 
   /* Raison de ne pas suggérer une erreur à l'instant t : arrêt de jeu ou ballon non visible dans la seconde qui précède. */

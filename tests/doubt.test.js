@@ -98,3 +98,105 @@ test("équipe retenue contredite par les images : question avec la raison", () =
   assert.equal(q.length, 1);
   assert.match(q[0].why, /contredit|équipe lue/);
 });
+
+/* ---------- annulation, personnes jamais identifiées, remplaçants, zone du banc ---------- */
+const snap = (frames) => JSON.stringify(frames.map((f) => [f.t, f.players.map((p) => [p.id, p.team, p.x, p.y])]));
+
+test("annuler une réponse « équipe » remet l'équipe d'avant", () => {
+  const frames = toFrames(track(2, 30, ["A", "B"], 20, 8));
+  frames.forEach((f) => f.players.forEach((p) => { p.team = "A"; }));
+  const before = snap(frames);
+  const ans = { kind: "team", t: 2, x: 20.5, y: 8, team: "B" };
+  const r = D.applyOne(frames, ans);
+  assert.ok(r.ok);
+  ans.undo = r.undo;
+  assert.ok(frames.every((f) => f.players.every((p) => p.team === "B")));
+  assert.ok(D.undoOne(frames, ans));
+  assert.equal(snap(frames), before);
+});
+
+test("annuler « ni joueur ni gardien » réintroduit la personne avec ses images", () => {
+  const frames = toFrames(track(2, 20, ["A"], 20, 8));
+  const before = snap(frames);
+  const ans = { kind: "team", t: 1, x: 20.2, y: 8, team: "NONE" };
+  const r = D.applyOne(frames, ans);
+  ans.undo = r.undo;
+  assert.ok(frames.every((f) => f.players.length === 0));
+  D.undoOne(frames, ans);
+  assert.equal(snap(frames), before);
+});
+
+test("personne jamais identifiée : sa question porte ses points, la réponse la réintroduit, l'annulation la retire", () => {
+  const all = toFrames(track(3, 40, ["UNK"], 5, 5), track(1, 40, ["A"], 30, 12));
+  const doubts = D.trackDoubts(all, { 3: "UNK", 1: "A" });
+  assert.equal(doubts.length, 1);
+  assert.ok(Array.isArray(doubts[0].pts) && doubts[0].pts.length >= 25);
+  // images finales : la piste 3 n'y est pas (jamais identifiée)
+  const finals = all.map((f) => ({ t: f.t, players: f.players.filter((p) => p.id !== 3) }));
+  const mem = { answers: [], rejected: [] };
+  const ans = D.answerTeam(mem, doubts[0], "B");
+  const r = D.applyOne(finals, ans);
+  assert.ok(r.ok && r.undo.kind === "injected");
+  assert.equal(finals.filter((f) => f.players.some((p) => p.id === r.undo.id && p.team === "B")).length, doubts[0].pts.length);
+  ans.undo = r.undo;
+  D.undoOne(finals, ans);
+  assert.ok(finals.every((f) => f.players.every((p) => p.id !== r.undo.id)));
+});
+
+test("réponses : « Mes réponses » les décrit, annuler retire la réponse et rétablit l'erreur écartée", () => {
+  const mem = { goalPalettes: [], rejected: [], answers: [] };
+  const a = D.answerEvent(mem, { type: "perte_zone_def", t: 15 }, "non");
+  assert.ok(D.isRejected(mem, { type: "perte_zone_def", t: 15 }));
+  assert.match(D.describeAnswer(a, (t) => "00:" + t, (x) => x), /écartée/);
+  D.removeAnswer(mem, a);
+  assert.equal(mem.answers.length, 0);
+  assert.ok(!D.isRejected(mem, { type: "perte_zone_def", t: 15 }), "l'erreur n'est plus écartée");
+  // ✖ simple : rétablissement par unreject
+  D.reject(mem, { type: "x", t: 4 });
+  D.unreject(mem, mem.rejected[0]);
+  assert.equal(mem.rejected.length, 0);
+});
+
+test("zone de banc : question une seule fois ; « non » coupe le suivi de dérive, annuler le rétablit", () => {
+  const mem = { goalPalettes: [], rejected: [], answers: [] };
+  const doubts = [{ kind: "bench", t: 80, d: 4.2, zones: [{ x1: 10, y1: -5, x2: 18, y2: -1 }] }];
+  assert.equal(D.openQuestions({ doubts, memory: mem }).length, 1);
+  const a = D.answerBench(mem, false);
+  assert.equal(mem.benchFollow, false);
+  assert.equal(D.openQuestions({ doubts, memory: mem }).length, 0);
+  D.removeAnswer(mem, a);
+  assert.equal(mem.benchFollow, undefined);
+  assert.equal(D.openQuestions({ doubts, memory: mem }).length, 1, "la question revient après annulation");
+});
+
+test("pipeline : la dérive maximale d'un banc est retenue avec l'instant et les zones décalées", () => {
+  const bench = { y0: 0, yW: 0 };
+  const zones = [{ x1: 10, y1: -5, x2: 18, y2: -1 }];
+  P.trackDrift(bench, [{ dx: 1, dy: 0 }], zones, 10);
+  P.trackDrift(bench, [{ dx: 3, dy: 4 }], zones, 20);
+  P.trackDrift(bench, [{ dx: 2, dy: 0 }], zones, 30);
+  assert.equal(bench.drift.d, 5);
+  assert.equal(bench.drift.t, 20);
+  assert.equal(bench.drift.zones[0].x1, 13);
+});
+
+test("remplaçants : une personne qui entre par la zone de remplacement est questionnée ; « joueur » la compte, « remplaçant » l'écarte", () => {
+  const mk = (id, t0, t1, x, y) => Array.from({ length: Math.round((t1 - t0) / 0.2) }, (_v, i) => ({ t: t0 + i * 0.2, p: { id, team: "A", x, y, b: B } }));
+  const frames = toFrames(mk(1, 0, 20, 10, 10), mk(2, 0, 20, 30, 12), mk(5, 5, 20, 20, 0.5));
+  const base = { L: 40, W: 20, bench: "left" };
+  const r0 = M.analyze(frames, base);
+  const s = r0.subs.find((x) => x.id === 5);
+  assert.ok(s && !s.answered, "l'entrée de la piste 5 est un passage par la zone de remplacement");
+  assert.ok(r0.normalized.some((f) => f.t >= 5 && f.t <= 8 && f.A.some((p) => p.id === 5 && p.sub)), "écartée comme remplaçant par défaut");
+  const rJ = M.analyze(frames, Object.assign({ subAnswers: [{ kind: "sub", t: s.t, x: s.x, y: s.y, verdict: "joueur" }] }, base));
+  assert.ok(rJ.subs.find((x) => x.id === 5).answered);
+  assert.ok(rJ.normalized.every((f) => f.A.every((p) => !p.sub)), "joueur : compté comme joueur");
+  const rR = M.analyze(frames, Object.assign({ subAnswers: [{ kind: "sub", t: s.t, x: s.x, y: s.y, verdict: "remplacant" }] }, base));
+  assert.ok(rR.normalized.some((f) => f.A.some((p) => p.id === 5 && p.sub)), "remplaçant : écarté comme avant");
+  // questions ouvertes
+  const mem = { answers: [], rejected: [] };
+  assert.equal(D.openQuestions({ subs: r0.subs, memory: mem }).filter((q) => q.kind === "sub").length >= 1, true);
+  const ans = D.answerSub(mem, s, "joueur");
+  assert.equal(D.openQuestions({ subs: r0.subs, memory: mem }).filter((q) => q.kind === "sub" && q.id === 5).length, 0);
+  assert.equal(ans.verdict, "joueur");
+});

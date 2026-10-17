@@ -197,7 +197,7 @@
       if (ctx.refs && ctx.refs.A && ctx.refs.B) item.f = K.classify(feat, { A: ctx.refs.A, B: ctx.refs.B }, close ? { reject: ctx.reject, close } : { reject: ctx.reject }).team;
       list.push(item);
     });
-    if (zones && ctx.benchDrift) followBenches(ctx.benchDrift, seatedIn);
+    if (zones && ctx.benchDrift) { followBenches(ctx.benchDrift, seatedIn); if (ctx.bench) trackDrift(ctx.bench, ctx.benchDrift, ctx.benchZones, ctx.t); }
     ctx.tracker.update(ctx.t, list);
     const bc = [];
     balls.sort((a, b) => b.score - a.score).forEach((d) => {
@@ -238,6 +238,14 @@
   function shiftedZones(zones, drift) {
     if (!Array.isArray(zones) || !zones.length) return null;
     return zones.map((z, i) => { const d = drift && drift[i] ? drift[i] : { dx: 0, dy: 0 }; return { x1: z.x1 + d.dx, y1: z.y1 + d.dy, x2: z.x2 + d.dx, y2: z.y2 + d.dy }; });
+  }
+  /* Plus forte dérive vue sur un banc (en m) et l'instant où elle a eu lieu, avec les zones décalées à cet instant : sert à demander
+     au coach si la zone est encore sur le banc (dérive >= BENCH_ASK). */
+  const BENCH_ASK = 3;
+  function trackDrift(bench, drift, zones, t) {
+    let d = 0;
+    drift.forEach((z) => { if (z) d = Math.max(d, Math.hypot(z.dx, z.dy)); });
+    if (d > (bench.drift ? bench.drift.d : 0) + 1e-9) bench.drift = { d: Math.round(d * 10) / 10, t, zones: shiftedZones(zones, drift) };
   }
   function followBenches(drift, seatedIn) {
     seatedIn.forEach((list, i) => {
@@ -521,7 +529,7 @@
     let lostStart = null, lastBall = null;
     const doubts = [];                   // pistes dont l'équipe est douteuse (questions au coach)
     const bench = { y0: 0, yW: 0 };      // personnes vues le long de chaque ligne de touche (côté des bancs)
-    const benchDrift = [];               // décalage de chaque zone de banc (suivi de la dérive de la caméra)
+    const benchDrift = opts.benchFollow === false ? null : [];   // décalage de chaque zone de banc (suivi de la dérive de la caméra) ; null = coupé par le coach
     const trk = { anchor: null, M: IDENTITY, prev: null, t: 0, boxes: [], keys: [], failCount: 0 };
     const STEP = 0.1;
     const grabSmall = (boxes) => { gctx.drawImage(video, 0, 0, gw, gh); return Cam.prepare(gctx.getImageData(0, 0, gw, gh).data, gw, gh, boxes, 4); };
@@ -616,7 +624,9 @@
     if (lostStart != null) lost.push([lostStart, times[times.length - 1]]);
     video.removeAttribute("src"); video.load();
     if (lost.length) notes.push("Suivi de la caméra perdu sur " + lost.length + " passage(s) : ces images sont ignorées. Ajoutez un calibrage dans ces passages (flou, caméra trop rapide ou sol sans détails).");
-    return { frames: finalizeFrames(frames, { L: opts.L, W: opts.W, dirAt: opts.dirAt, roles: amb.close || amb.roles, doubts }), lost, notes, bench, doubts };
+    const finalFrames = finalizeFrames(frames, { L: opts.L, W: opts.W, dirAt: opts.dirAt, roles: amb.close || amb.roles, doubts });
+    if (bench.drift && bench.drift.d >= BENCH_ASK) doubts.push({ kind: "bench", t: bench.drift.t, d: bench.drift.d, zones: bench.drift.zones });
+    return { frames: finalFrames, lost, notes, bench, doubts };
   }
 
   /* Vignettes JPEG de la vidéo à des instants donnés (illustrations des erreurs acceptées). */
@@ -653,5 +663,5 @@
     return { dets, scale, img: ctx.getImageData(0, 0, cw, ch), width: cw, height: ch };
   }
 
-  return { courtH, inBenchZone, shiftedZones, followBenches, tileRects, courtRegion, zoomRects, tileToFrame, mergeTiles, isFloorMark, dropFloorMarks, calibrationAt, processDetections, finalizeFrames, compactFrames, expandFrames, frameNear, sampleTimes, startTime, estimateDuration, learnFactor, FACTOR_MIN, FACTOR_MAX, analyseVideo, detectAt, detectCanvas, captureFrames, TEAM_CODE };
+  return { courtH, trackDrift, inBenchZone, shiftedZones, followBenches, tileRects, courtRegion, zoomRects, tileToFrame, mergeTiles, isFloorMark, dropFloorMarks, calibrationAt, processDetections, finalizeFrames, compactFrames, expandFrames, frameNear, sampleTimes, startTime, estimateDuration, learnFactor, FACTOR_MIN, FACTOR_MAX, analyseVideo, detectAt, detectCanvas, captureFrames, TEAM_CODE };
 });
