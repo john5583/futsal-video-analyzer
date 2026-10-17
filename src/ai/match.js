@@ -52,7 +52,7 @@
   const MIN_PROGRESS = 4;            // m : avancée adverse minimale pour parler de repli tardif
   const LOSS_NOTE = {
     pressing: (n) => "Perte sous le pressing adverse (" + n + " adversaires à moins de 3 m) : chercher une solution courte, un appui ou jouer en un temps",
-    attaque_placee: (_n, d) => "Perte en attaque placée après " + Math.round(d) + " s de possession : garder l'équilibre défensif derrière le ballon (couverture du fixo)",
+    attaque_placee: (_n, d) => "Perte en attaque placée après " + Math.round(d) + " s de possession : garder l'équilibre défensif derrière le ballon (couverture du défenseur central)",
     transition: () => "Perte en transition : sécuriser la première passe et soutenir le porteur"
   };
   const CONF_CTX = 1.0;              // s : l'erreur est écartée si le jeu est arrêté ou incertain dans la seconde qui précède

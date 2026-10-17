@@ -10,8 +10,8 @@
   const square = (s, k, x, y, w, h) => s.cone(k + "a", x, y).cone(k + "b", x + w, y).cone(k + "c", x + w, y + h).cone(k + "d", x, y + h);
 
   D.relance_pression = () => {
-    const s = mk("relance_pression", "Relance sous pression gardien + fixo");
-    s.gka(2, 10).a(5, 9, 10, "Fixo").a(2, 8, 3, "Ala").a(3, 8, 17, "Ala").b(9, 14, 8).b(7, 14, 12).cone(1, 20, 0.5).cone(2, 20, 19.5);
+    const s = mk("relance_pression", "Relance sous pression gardien + défenseur central");
+    s.gka(2, 10).a(5, 9, 10, "Défenseur").a(2, 8, 3, "Ailier").a(3, 8, 17, "Ailier").b(9, 14, 8).b(7, 14, 12).cone(1, 20, 0.5).cone(2, 20, 19.5);
     s.ball(0.5, 2.6, 10).pass("good", "GKA", "A2", 1, 2, "Côté faible").go("B9", [1, 14, 8], [2.6, 9, 5]).go("B7", [1, 14, 12], [2.6, 12, 9]).pass("good", "A2", "A5", 2.8, 3.6).pass("good", "A5", "A3", 4.4, 5.4, "Changement d'aile");
     s.go("A3", [5.4, 8, 17], [8, 19, 14]).carry("A3", 5.4, 8).arrow("goodrun", "A3", [19, 14], 5.4, 8, "Sortie").zone("target", [20, 0, 2, 20], 5, 12, "Ligne médiane en < 8 s");
     return steps(s, "Le gardien relance contre deux attaquants qui pressent ; 3 joueurs offrent des solutions.", "Passe d'abord vers le côté faible, puis changement d'aile et conduite pour franchir la ligne médiane.", "Pas de passe dans l'axe sous pression ; appel de dégagement à chaque relance ; relance en 4 s maximum.").done();
@@ -81,10 +81,10 @@
 
   D.pivot_appui = () => {
     const s = mk("pivot_appui", "Pivot : jeu de dos et soutien");
-    s.a(5, 16, 10, "Fixo").a(4, 28, 10, "Pivot").a(2, 22, 4, "Ala").a(3, 22, 16, "Ala").b(6, 30, 10).b(9, 18, 10);
+    s.a(5, 16, 10, "Défenseur").a(4, 28, 10, "Pivot").a(2, 22, 4, "Ailier").a(3, 22, 16, "Ailier").b(6, 30, 10).b(9, 18, 10);
     s.ball(0.3, 16.6, 10).pass("good", "A5", "A4", 0.8, 1.8, "Pivot reçoit dos au but").go("A2", [1.5, 22, 4], [3, 25, 6]).arrow("goodrun", "A2", [25, 6], 1.5, 3, "Soutien à 3–4 m").zone("free", [24, 4, 8, 8], 1.5, 5, "Protéger le ballon");
     s.pass("good", "A4", "A2", 3.4, 4.2, "Remise de première").go("A4", [4.2, 28, 10], [5.4, 31, 11]).arrow("goodrun", "A4", [31, 11], 4.2, 5.4, "Appel dans le dos").pass("good", "A2", "A4", 5.8, 6.6);
-    return steps(s, "Le pivot reçoit dos au but, un ala vient en soutien.", "Protection du ballon, remise immédiate à l'ala qui monte, puis passe et va dans le dos du défenseur.", "Protège avec le corps, remise en une touche, soutien à 3–4 m.").done();
+    return steps(s, "Le pivot reçoit dos au but, un ailier vient en soutien.", "Protection du ballon, remise immédiate à l'ailier qui monte, puis passe et va dans le dos du défenseur.", "Protège avec le corps, remise en une touche, soutien à 3–4 m.").done();
   };
 
   D.rotation_4_0 = () => {
@@ -173,7 +173,7 @@
     s.gka(2, 10).a(5, 12, 10).a(2, 14, 4).a(3, 14, 16).b(6, 20, 8).b(7, 22, 12).gkb(38, 10);
     s.ball(0.3, 2.5, 10).label(14, 18.6, "Ballon récupéré", 0.3, 2, "#ffb020", 0.9).pass("good", "GKA", "A2", 0.8, 1.6, "Vers l'avant").go("A2", [1.6, 14, 4], [3.2, 26, 4]).carry("A2", 1.6, 3.2).arrow("goodrun", "A5", [24, 10], 1, 3.2, "Course dans l'axe").go("A5", [1, 12, 10], [3.2, 24, 10]).go("A3", [1, 14, 16], [3.2, 24, 16]);
     s.go("B6", [0.5, 20, 8], [3, 30, 8]).go("B7", [0.5, 22, 12], [3, 31, 12]).pass("good", "A2", "A5", 3.4, 4.1).pass("good", "A5", "A3", 4.6, 5.4).pass("good", "A3", [40, 9.4], 6, 6.8, "Finition en ≤ 8 s");
-    return steps(s, "Récupération du ballon par le gardien, 3 attaquants contre 2 défenseurs.", "Ouverture vers l'ala, course dans l'axe, passes décisives et finition.", "Première passe vers l'avant, course dans l'espace libéré, soutien à 5 m maximum.").done();
+    return steps(s, "Récupération du ballon par le gardien, 3 attaquants contre 2 défenseurs.", "Ouverture vers l'ailier, course dans l'axe, passes décisives et finition.", "Première passe vers l'avant, course dans l'espace libéré, soutien à 5 m maximum.").done();
   };
 
   D.largeur_profondeur = () => {

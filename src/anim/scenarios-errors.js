@@ -20,7 +20,7 @@
     s.pass("good", "GKA", "A2", 7.2, 8.2, "Côté faible").go("B9", [7.2, 13, 10], [8.6, 10, 6]);
     s.go("A4", [8.5, 25, 10], [9.5, 21, 10]).pass("good", "A2", "A4", 9.0, 10.4);
     s.zone("free", [2, 0, 10, 7], 7.2, 10.6, "Passe sûre");
-    return steps(s, "Relance courte dans l'axe sous pression : le ballon est perdu à 8 m du but.", "Jouer d'abord sur le côté faible : l'ala redescend, la passe est sûre et sort du pressing.", "Ensuite seulement la passe vers le pivot. En cas de doute : relance longue.").done();
+    return steps(s, "Relance courte dans l'axe sous pression : le ballon est perdu à 8 m du but.", "Jouer d'abord sur le côté faible : l'ailier redescend, la passe est sûre et sort du pressing.", "Ensuite seulement la passe vers le pivot. En cas de doute : relance longue.").done();
   };
 
   S.perte_zone_def = () => {
@@ -43,7 +43,7 @@
     s.jumpAll(JT, { A5: [14, 10], A4: [22, 10], A2: [14, 4], A3: [14, 16], B9: [19, 13], B6: [25, 9], B7: [26, 4], B8: [25, 16] }).ballJump(JT, 14.6, 10);
     s.pass("good", "A5", "A3", 7.3, 8.1, "Passe tendue").go("A4", [8, 22, 10], [8.9, 21, 12]).pass("good", "A3", "A4", 8.9, 9.8);
     s.zone("target", [10, 6, 8, 8], 7.2, 11, "Un joueur derrière le ballon");
-    return steps(s, "Passe verticale dans l'axe interceptée : la transition adverse démarre.", "Passes tendues vers l'ala, appel du pivot, un joueur reste derrière le ballon.", "Contrôle orienté, passe tendue, la rotation se fait ballon sécurisé.").done();
+    return steps(s, "Passe verticale dans l'axe interceptée : la transition adverse démarre.", "Passes tendues vers l'ailier, appel du pivot, un joueur reste derrière le ballon.", "Contrôle orienté, passe tendue, la rotation se fait ballon sécurisé.").done();
   };
 
   S.passe_imprecise = () => {
@@ -75,7 +75,7 @@
     s.jumpAll(JT, { A5: [10, 10], A4: [26, 10], A2: [21, 5], A3: [21, 15], B6: [28.5, 10], B9: [22.5, 10], B7: [20, 5], B8: [20, 15] }).ballJump(JT, 10.6, 10);
     s.pass("good", "A5", "A4", 7.4, 8.4).pass("good", "A4", "A2", 8.8, 9.6, "Remise").go("A2", [9.6, 21, 5], [10.6, 28, 4]).arrow("goodrun", "A2", [28, 4], 9.6, 10.6);
     s.zone("free", [22, 6, 8, 8], 7.2, 9.6, "Soutien à 4 m");
-    return steps(s, "Balle longue vers le pivot sans soutien : il est pris à deux et perd le ballon.", "Un ala monte en soutien à 3–4 m ; le pivot remet en une touche.", "Pivot : protège avec le corps ; ala : viens en soutien.").done();
+    return steps(s, "Balle longue vers le pivot sans soutien : il est pris à deux et perd le ballon.", "Un ailier monte en soutien à 3–4 m ; le pivot remet en une touche.", "Pivot : protège avec le corps ; ailier : viens en soutien.").done();
   };
 
   S.attaque_statique = () => {
@@ -86,7 +86,7 @@
     s.jumpAll(JT, { A5: [17, 10], A2: [20, 4], A3: [20, 16], A4: [28, 10], B6: [30, 10], B7: [27, 6], B8: [27, 14], B9: [24, 10] }).ballJump(JT, 17.6, 10);
     s.go("A4", [8, 28, 10], [9, 21, 10]).arrow("goodrun", "A4", [21, 10], 7.6, 9, "Décroche").go("A2", [8.4, 20, 4], [10.4, 29, 6]).arrow("goodrun", "A2", [29, 6], 8.4, 10.4, "Plonge");
     s.pass("good", "A5", "A4", 7.4, 8.4).pass("good", "A4", "A2", 9.4, 10.6).zone("target", [27, 2, 8, 8], 9, 11.4, "Espace libéré");
-    return steps(s, "Toujours le même circuit vers le même côté : la défense anticipe sans effort.", "Permutation ala–pivot : le pivot décroche, l'ala plonge dans son dos.", "Change de rythme, permute après la passe, fais bouger le bloc adverse.").done();
+    return steps(s, "Toujours le même circuit vers le même côté : la défense anticipe sans effort.", "Permutation ailier–pivot : le pivot décroche, l'ailier plonge dans son dos.", "Change de rythme, permute après la passe, fais bouger le bloc adverse.").done();
   };
 
   S.tir_precipite = () => {
@@ -125,7 +125,7 @@
     s.jumpAll(JT, { A5: [20, 10], A2: [28, 2], A3: [28, 18], A4: [30, 10], B6: [31, 10], B7: [30, 6.5], B8: [30, 13.5], B9: [28.5, 9] }).ballJump(JT, 20.6, 10);
     s.pass("good", "A5", "A2", 7.4, 8.4).go("B7", [8, 30, 6.5], [9, 30, 3.5]).go("B8", [8, 30, 13.5], [9, 30, 10.5]).pass("good", "A2", "A3", 9.0, 10.2, "Changement d'aile");
     s.zone("free", [26, 0, 10, 5], 7.4, 9.4, "Largeur").zone("free", [26, 15, 10, 5], 9.4, 11.4, "Largeur");
-    return steps(s, "Les alas se resserrent vers l'axe : la défense se compacte et bloque tout.", "Un joueur par couloir, un en profondeur : on étire puis on change d'aile.", "Largeur tenue, profondeur sans se placer sur la même ligne.").done();
+    return steps(s, "Les ailiers se resserrent vers l'axe : la défense se compacte et bloque tout.", "Un joueur par couloir, un en profondeur : on étire puis on change d'aile.", "Largeur tenue, profondeur sans se placer sur la même ligne.").done();
   };
 
   S.contre_attaque_subie = () => {
@@ -144,12 +144,12 @@
     const s = std("repli_tardif", "Repli défensif tardif");
     s.set("A4", 24, 10).set("A2", 28, 4).set("A3", 28, 16).set("A5", 14, 10).set("B6", 26, 10).set("B7", 22, 6).set("B8", 22, 14).set("B9", 18, 10);
     s.ball(0, 24.6, 10).pass("bad", "A4", "B6", 0.4, 1.0).go("B6", [1, 26, 10], [4.4, 8, 10]).carry("B6", 1, 4.4);
-    s.label(28, 10, "Les alas restent hauts", 1, 6.4, "#ff5a5f", 0.95).mark("x", 14, 10, 4.4, 6.4).arrow("bad", "B6", [8, 10], 1.2, 4.2);
+    s.label(28, 10, "Les ailiers restent hauts", 1, 6.4, "#ff5a5f", 0.95).mark("x", 14, 10, 4.4, 6.4).arrow("bad", "B6", [8, 10], 1.2, 4.2);
     s.jumpAll(JT, { A4: [24, 10], A2: [28, 4], A3: [28, 16], A5: [14, 10], B6: [26, 10], B7: [22, 6], B8: [22, 14], B9: [18, 10] }).ballJump(JT, 24.6, 10);
     s.pass("good", "A4", "B6", 7.1, 7.7).go("B6", [7.7, 26, 10], [11, 14, 10]).carry("B6", 7.7, 11);
     s.go("A2", [7.7, 28, 4], [10.2, 15, 5]).arrow("goodrun", "A2", [15, 5], 7.7, 10.2, "Repli immédiat").go("A3", [7.7, 28, 16], [10.2, 15, 15]).arrow("goodrun", "A3", [15, 15], 7.7, 10.2);
     s.go("A5", [7.7, 14, 10], [11, 16, 10]).mark("check", 17, 10, 11.2, 14.2);
-    return steps(s, "Après la perte, les alas restent en haut : le défenseur est seul face à l'attaque.", "Repli immédiat dès la perte ; un joueur temporise pendant que les autres reviennent.", "Perte → repli immédiat, reviens dans l'axe.").done();
+    return steps(s, "Après la perte, les ailiers restent en haut : le défenseur est seul face à l'attaque.", "Repli immédiat dès la perte ; un joueur temporise pendant que les autres reviennent.", "Perte → repli immédiat, reviens dans l'axe.").done();
   };
 
   S.transition_off_lente = () => {
@@ -160,7 +160,7 @@
     s.jumpAll(JT, { A5: [10, 10], A2: [16, 4], A3: [16, 16], A4: [26, 10], B6: [28, 10], B7: [26, 5], B8: [26, 15], B9: [20, 10] }).ballJump(JT, 2.8, 10);
     s.pass("good", "GKA", "A2", 7.3, 8.1, "Vers l'avant").go("A2", [7.3, 16, 4], [8.8, 25, 4]).arrow("goodrun", "A2", [25, 4], 7.3, 8.8).go("B6", [7, 28, 10], [9.5, 31, 10]).go("B7", [7, 26, 5], [9.5, 33, 6]).go("B8", [7, 26, 15], [9.5, 33, 14]);
     s.pass("good", "A2", "A4", 8.8, 9.6).pass("good", "A4", [40, 9.4], 10.2, 11, "Tir en 8 s");
-    return steps(s, "Ballon récupéré mais circulation lente : l'adversaire a le temps de se replacer.", "Première passe vers l'avant, l'ala est lancé en profondeur : attaque en 3 contre 2.", "Ballon récupéré = regarde devant, cours dans l'espace.").done();
+    return steps(s, "Ballon récupéré mais circulation lente : l'adversaire a le temps de se replacer.", "Première passe vers l'avant, l'ailier est lancé en profondeur : attaque en 3 contre 2.", "Ballon récupéré = regarde devant, cours dans l'espace.").done();
   };
 
   S.superiorite_non_convertie = () => {
@@ -203,7 +203,7 @@
     s.jumpAll(JT, { A5: [20, 10], A2: [22, 5], A3: [22, 15], A4: [26, 10], B9: [12, 10], B8: [24, 14], B7: [26, 6], B6: [30, 10] }).ballJump(JT, 24.5, 14);
     s.go("A5", [7.2, 20, 10], [8.2, 14, 10]).go("A2", [7.2, 22, 5], [8.5, 15, 4]).line([14, 0], [14, 20], 7.3, 12, "Ligne à 14 m", "#3ddc84");
     s.pass("bad", "B8", [12, 10], 8.4, 9.4, "Même balle").ball(10, 13.4, 10).go("A5", [9.4, 14, 10], [10, 13.5, 10]).label(4, 2.5, "Monte / reste !", 7.4, 12, "#3ddc84", 0.9).mark("check", 13.5, 10, 10, 14.2);
-    return steps(s, "Ligne défensive trop haute : une balle dans le dos lance l'attaquant seul vers le gardien.", "Le fixo se cale à 14 m, un ala couvre son dos, le gardien dirige : la même balle est interceptée.", "Garde le ballon et l'espace dans ton champ de vision ; pressing haut seulement si la couverture suit.").done();
+    return steps(s, "Ligne défensive trop haute : une balle dans le dos lance l'attaquant seul vers le gardien.", "Le défenseur central se cale à 14 m, un ailier couvre son dos, le gardien dirige : la même balle est interceptée.", "Garde le ballon et l'espace dans ton champ de vision ; pressing haut seulement si la couverture suit.").done();
   };
 
   S.equipe_etiree = () => {
@@ -225,7 +225,7 @@
     s.jumpAll(JT, { B8: [14, 14], A3: [14, 11.5], A5: [11, 9.5], A2: [20, 4], A4: [26, 10], B9: [22, 10], B7: [20, 16], B6: [28, 10] }).ballJump(JT, 14.5, 14);
     s.go("A5", [7.2, 11, 9.5], [8.2, 11.5, 12.2]).arrow("press", "A5", [11.5, 12.2], 7.3, 8).go("B8", [7.2, 14, 14], [8.4, 12.5, 13]).carry("B8", 7.2, 8.4).ball(9.2, 12.8, 12.8).mark("check", 12.5, 12.5, 9.2, 14.2);
     s.label(12, 17, "Doublement", 7.5, 12, "#3ddc84", 0.9);
-    return steps(s, "Le défenseur est battu en 1 contre 1 et aucun partenaire ne couvre : tir.", "Le fixo se rapproche à 3–4 m et double : le dribbleur est stoppé.", "Couvre ton partenaire, prépare-toi à aider, parle !").done();
+    return steps(s, "Le défenseur est battu en 1 contre 1 et aucun partenaire ne couvre : tir.", "Le défenseur central se rapproche à 3–4 m et double : le dribbleur est stoppé.", "Couvre ton partenaire, prépare-toi à aider, parle !").done();
   };
 
   S.faute_evitable = () => {

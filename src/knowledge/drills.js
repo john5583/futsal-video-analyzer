@@ -2,8 +2,8 @@
 (function (target) {
   const D = (id, name, goal, players, duration, description, criteria) => ({ id, name, goal, players, duration, description, criteria });
   target.DRILLS = [
-    D("relance_pression", "Relance sous pression gardien + fixo", "Sécuriser la relance courte", "GB + 3 contre 2 pressants", 12,
-      "Le gardien relance à la main ou au pied vers fixo/alas contre 2 attaquants qui pressent. L'équipe doit franchir la ligne médiane en moins de 8 s. Si l'attaquant récupère, il marque dans un mini-but.",
+    D("relance_pression", "Relance sous pression gardien + défenseur central", "Sécuriser la relance courte", "GB + 3 contre 2 pressants", 12,
+      "Le gardien relance à la main ou au pied vers le défenseur central ou les ailiers contre 2 attaquants qui pressent. L'équipe doit franchir la ligne médiane en moins de 8 s. Si l'attaquant récupère, il marque dans un mini-but.",
       ["Pas de passe dans l'axe sous pression", "Appel de dégagement à chaque relance", "Relance en ≤ 4 s"]),
     D("rondo_4v2", "Rondo 4 contre 2", "Conserver le ballon sous pression", "6 joueurs", 10,
       "Carré 8 × 8 m. Quatre joueurs conservent contre deux défenseurs. En cas de perte, le perdant devient défenseur.",
@@ -27,7 +27,7 @@
       "Construire 3 schémas (corner court, coup franc écran, touche avec appel). Répéter jusqu'à l'automatisme.",
       ["Exécution en moins de 4 s", "Une option de tir et une option de remise", "Écran sans faute"]),
     D("pivot_appui", "Pivot : jeu de dos et soutien", "Améliorer le jeu autour du pivot", "4 contre 3", 12,
-      "Le pivot reçoit dos au but, protège, remet à l'ala qui monte. L'ala qui a donné plonge dans l'espace libéré pour la remise (passe et va).",
+      "Le pivot reçoit dos au but, protège, remet à l'ailier qui monte. L'ailier qui a donné plonge dans l'espace libéré pour la remise (passe et va).",
       ["Protéger le ballon avec le corps", "Remise en une touche", "Soutien à 3–4 m du pivot"]),
     D("rotation_4_0", "Circulation et rotations", "Rotations sécurisées sans perdre l'équilibre", "5 contre 0 puis 5 contre 4", 15,
       "Circulation du ballon avec permutation systématique (le passeur prend la place du receveur). Introduire un défenseur passif puis actif.",
@@ -60,7 +60,7 @@
       "Jeu à 2 contre 2. Toute faute donne un coup franc direct à l'adversaire. Le coach insiste sur le placement du pied et l'interception.",
       ["Pas de tacle par derrière", "Intercepter plutôt que charger", "Arrêter le porteur avec le corps, pas avec les bras"]),
     D("transition_off", "Contre-attaque 3 contre 2 / 4 contre 3", "Accélérer à la récupération", "7 joueurs", 12,
-      "Récupération du ballon, ouverture vers l'ala opposé, course de l'axe. Finition en ≤ 8 s.",
+      "Récupération du ballon, ouverture vers l'ailier opposé, course de l'axe. Finition en ≤ 8 s.",
       ["Première passe vers l'avant", "Course dans l'espace libéré", "Soutien à 5 m maximum"]),
     D("largeur_profondeur", "Jeu à 4 contre 3 : changements d'aile", "Étirer la défense", "7 joueurs", 12,
       "L'équipe attaque avec 4 contre 3, avec obligation de passer par chaque couloir avant de tirer.",
