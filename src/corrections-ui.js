@@ -138,7 +138,7 @@
     $("corr-real").hidden = true; $("corr-canvas").hidden = false; $("cr-text").hidden = true;
     sceneControls().hidden = false;
     $("cr-bar").hidden = !(real.catalog && real.events.length);
-    ["cr-fixed", "cr-seq", "cr-replay", "cr-exp-video", "cr-exp-gif", "cr-prev", "cr-next", "cr-label", "cr-map-pos"].forEach((x) => { $(x).hidden = true; });
+    ["cr-fixed", "cr-seq", "cr-replay", "cr-exp-video", "cr-exp-gif", "cr-prev", "cr-next", "cr-label", "cr-fov", "cr-map-pos"].forEach((x) => { $(x).hidden = true; });
     $("cr-catalog").textContent = "Vraie vidéo";
   }
   /* Petite carte : coin choisi (ou masquée), mémorisé pour ce poste. */
@@ -190,14 +190,17 @@
     };
     m.addEventListener("pointerup", end); m.addEventListener("pointercancel", end);
   }
+  /* Zone filmée sur la petite carte : choix mémorisé. */
+  function fovOn() { try { return localStorage.getItem("fsal.corrFov") !== "0"; } catch (_e) { return true; } }
+  function setFovButton() { const b = $("cr-fov"); if (b) b.textContent = "Zone filmée : " + (fovOn() ? "oui" : "non"); }
   function sceneControls() { return document.querySelector(".corr-main .corr-controls:not(#cr-bar)"); }
   function showReal() {
-    if (!real.view) real.view = new window.FutsalRealView.RealView({ root: $("corr-real"), video: $("cr-video"), overlay: $("cr-overlay"), map: $("cr-map"), msg: $("cr-msg") });
+    if (!real.view) { real.view = new window.FutsalRealView.RealView({ root: $("corr-real"), video: $("cr-video"), overlay: $("cr-overlay"), map: $("cr-map"), msg: $("cr-msg") }); real.view.setFov(fovOn()); }
     if (player) player.pause();
     $("corr-pip").hidden = true; $("corr-pip-video").pause();
     $("corr-canvas").hidden = true; $("corr-real").hidden = false; $("cr-bar").hidden = false; $("cr-text").hidden = false;
     sceneControls().hidden = true;
-    ["cr-fixed", "cr-seq", "cr-replay", "cr-exp-video", "cr-exp-gif", "cr-prev", "cr-next", "cr-label", "cr-map-pos"].forEach((x) => { $(x).hidden = false; });
+    ["cr-fixed", "cr-seq", "cr-replay", "cr-exp-video", "cr-exp-gif", "cr-prev", "cr-next", "cr-label", "cr-fov", "cr-map-pos"].forEach((x) => { $(x).hidden = false; });
     $("cr-catalog").textContent = "Animation du catalogue";
     if (mapPos() === "free") placeFree();
     openReal();
@@ -333,7 +336,8 @@
     $("cr-exp-video").addEventListener("click", () => exportReal("video"));
     $("cr-exp-gif").addEventListener("click", () => exportReal("gif"));
     $("cr-map-pos").addEventListener("click", () => { setMapPos(MAP_POS[(MAP_POS.indexOf(mapPos()) + 1) % MAP_POS.length]); });
-    setMapPos(mapPos()); bindMapDrag();
+    setMapPos(mapPos()); bindMapDrag(); setFovButton();
+    $("cr-fov").addEventListener("click", () => { try { localStorage.setItem("fsal.corrFov", fovOn() ? "0" : "1"); } catch (_e) { /* stockage indisponible */ } setFovButton(); if (real.view) { real.view.setFov(fovOn()); if (real.view.s) real.view.draw(real.view.s.ev.t, real.view.s.ov.items.length, -1); } });
     $("cr-prev").addEventListener("click", () => { if (exporting) return; real.idx = (real.idx + real.events.length - 1) % real.events.length; openReal(); });
     $("cr-next").addEventListener("click", () => { if (exporting) return; real.idx = (real.idx + 1) % real.events.length; openReal(); });
     $("cr-catalog").addEventListener("click", () => {

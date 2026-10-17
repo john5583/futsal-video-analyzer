@@ -78,7 +78,7 @@
     const w = a && b && b.t > a.t ? (t - a.t) / (b.t - a.t) : (a ? 0 : 1);
     const Ha = a ? a.p.H : null, Hb = b ? b.p.H : null;
     return {
-      ok: true, reason: null, err: Math.max(a ? a.p.err : 0, b ? b.p.err : 0),
+      ok: true, reason: null, err: Math.max(a ? a.p.err : 0, b ? b.p.err : 0), H: Ha && Hb ? (w < 0.5 ? Ha : Hb) : (Ha || Hb),       // projection la plus proche (terrain -> image normalisée)
       project(x, y) {
         // interpolation des points projetés (et non des matrices) : stable même si la caméra tourne vite
         const pa = Ha ? HG.apply(Ha, x, y) : null, pb = Hb ? HG.apply(Hb, x, y) : null;
@@ -87,6 +87,34 @@
       }
     };
   };
+
+  /* Zone du terrain réellement vue par la caméra : polygone convexe (en mètres) des points du terrain qui tombent DANS l'image et DEVANT la caméra.
+     H : terrain -> image normalisée (0..1). Renvoie null si la projection est inutilisable ou si rien du terrain n'est visible : aucune zone n'est inventée. */
+  function visibleZone(H, L, W, step) {
+    if (!Array.isArray(H) || H.length !== 9 || !H.every(Number.isFinite) || !(L > 0) || !(W > 0)) return null;
+    let Hi;
+    try { Hi = HG.invert(H); } catch (_e) { return null; }
+    const c = HG.apply(Hi, 0.5, 0.5);
+    if (!isFinite(c[0]) || !isFinite(c[1])) return null;
+    const sgn = Math.sign(H[6] * c[0] + H[7] * c[1] + H[8]);            // côté « devant la caméra » : celui du centre de l'image
+    if (!sgn) return null;
+    const st = step || 0.5, nx = Math.max(1, Math.ceil(L / st)), ny = Math.max(1, Math.ceil(W / st)), pts = [];
+    for (let i = 0; i <= nx; i++) {
+      for (let j = 0; j <= ny; j++) {
+        const x = (L * i) / nx, y = (W * j) / ny, w = H[6] * x + H[7] * y + H[8];
+        if (w * sgn <= 1e-9) continue;
+        const u = (H[0] * x + H[1] * y + H[2]) / w, v = (H[3] * x + H[4] * y + H[5]) / w;
+        if (u >= 0 && u <= 1 && v >= 0 && v <= 1) pts.push([x, y]);
+      }
+    }
+    if (pts.length < 3) return null;
+    pts.sort((p, q) => p[0] - q[0] || p[1] - q[1]);
+    const cross = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]), lo = [], up = [];
+    pts.forEach((p) => { while (lo.length >= 2 && cross(lo[lo.length - 2], lo[lo.length - 1], p) <= 0) lo.pop(); lo.push(p); });
+    for (let i = pts.length - 1; i >= 0; i--) { const p = pts[i]; while (up.length >= 2 && cross(up[up.length - 2], up[up.length - 1], p) <= 0) up.pop(); up.push(p); }
+    const hull = lo.slice(0, -1).concat(up.slice(0, -1));
+    return hull.length >= 3 ? hull : null;
+  }
 
   /* Joueurs (et ballon) à l'instant t, interpolés entre les deux images analysées voisines. */
   function stateAt(frames, t) {
@@ -335,5 +363,5 @@
     return best;
   }
 
-  return { shapeFix, chooseCorner, frameProjection, Projector, stateAt, buildOverlay, footOf, MIN_PLAYERS, MAX_ERR, MAX_GAP };
+  return { visibleZone, shapeFix, chooseCorner, frameProjection, Projector, stateAt, buildOverlay, footOf, MIN_PLAYERS, MAX_ERR, MAX_GAP };
 });

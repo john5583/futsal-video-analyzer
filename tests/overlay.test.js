@@ -123,3 +123,54 @@ test("plan : repère inversé à la 2e période (mon équipe attaque vers x déc
   assert.equal(o.items.filter((i) => i.type === "ring").length, 4);
   assert.ok(o.correction.ghost.to[0] > 23, "dans le repère réel, le joueur se rapproche de sa ligne");
 });
+
+/* ---------- zone du terrain réellement vue par la caméra ---------- */
+const CFz = require("../src/ai/court-fit");
+const HGz = require("../src/ai/homography");
+const POSEZ = [24, 13, 5.5, 188, 24, 70];
+function camH(pose, w, h, L, W) {          // terrain -> image normalisée, à partir d'une caméra connue
+  const B = CFz.cameraBasis(pose), f = CFz.focalPx(w, pose[5]), src = [], dst = [];
+  for (let x = 2; x <= L - 2; x += 4) for (let y = 2; y <= W - 2; y += 4) { const q = CFz.project(B, f, w, h, x, y, 0); if (q && q.u >= 0 && q.u <= w && q.v >= 0 && q.v <= h) { src.push([x, y]); dst.push([q.u / w, q.v / h]); } }
+  return src.length >= 4 ? HGz.solve(src, dst) : null;
+}
+const area = (poly) => Math.abs(poly.reduce((s, p, i) => { const q = poly[(i + 1) % poly.length]; return s + (p[0] * q[1] - q[0] * p[1]); }, 0)) / 2;
+const inPoly = (poly, x, y) => { let c = false; for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) { const a = poly[i], b = poly[j]; if ((a[1] > y) !== (b[1] > y) && x < ((b[0] - a[0]) * (y - a[1])) / (b[1] - a[1]) + a[0]) c = !c; } return c; };
+
+test("zone vue : caméra qui ne voit qu'une partie du terrain -> polygone plus petit que le terrain, qui contient les points visibles et exclut les autres", () => {
+  const L = 40, W = 20, H = camH(POSEZ, 960, 540, L, W);
+  assert.ok(H, "calibrage de la scène d'essai");
+  const z = O.visibleZone(H, L, W);
+  assert.ok(z && z.length >= 3);
+  assert.ok(area(z) > 20 && area(z) < L * W, "surface " + area(z));
+  // un point projeté dans l'image est dans la zone ; un point projeté hors de l'image n'y est pas
+  const B = CFz.cameraBasis(POSEZ), f = CFz.focalPx(960, POSEZ[5]);
+  let ins = 0, outs = 0;
+  for (let x = 1; x < L; x += 3) for (let y = 1; y < W; y += 3) {
+    const q = CFz.project(B, f, 960, 540, x, y, 0), seen = q && q.u >= 8 && q.u <= 952 && q.v >= 8 && q.v <= 532;
+    const hid = !q || q.u < -8 || q.u > 968 || q.v < -8 || q.v > 548;
+    if (seen) { assert.ok(inPoly(z, x, y), "visible mais hors zone : " + x + "," + y); ins++; }
+    if (hid) { assert.ok(!inPoly(z, x, y), "caché mais dans la zone : " + x + "," + y); outs++; }
+  }
+  assert.ok(ins > 5 && outs > 5, "le test couvre des points visibles (" + ins + ") et cachés (" + outs + ")");
+});
+
+test("zone vue : projection inutilisable ou rien de visible -> aucune zone inventée", () => {
+  assert.equal(O.visibleZone(null, 40, 20), null);
+  assert.equal(O.visibleZone([1, 0, 0, 0, 1, 0, 0, 0], 40, 20), null);
+  assert.equal(O.visibleZone([NaN, 0, 0, 0, 1, 0, 0, 0, 1], 40, 20), null);
+  assert.equal(O.visibleZone([1, 0, 5, 0, 1, 5, 0, 0, 1], 40, 20), null, "image entièrement ailleurs : pas de zone");
+});
+
+test("zone vue : caméra qui voit tout le terrain -> la zone couvre (presque) tout", () => {
+  const L = 40, W = 20, H = [1 / 48, 0, 0.1 / 1, 0, 1 / 26, 0.1 / 1, 0, 0, 1];     // terrain tout entier dans l'image
+  const z = O.visibleZone(H, L, W);
+  assert.ok(z && area(z) > 0.95 * L * W, "surface " + (z ? area(z) : 0));
+});
+
+test("zone vue : un projecteur renvoie la projection la plus proche (H) pour calculer la zone", () => {
+  const L = 40, W = 20, H = camH(POSEZ, 960, 540, L, W), Hinv = HGz.invert(H);
+  const frames = [{ t: 0, players: [], h: Hinv }, { t: 1, players: [], h: Hinv }];
+  const at = new O.Projector(frames, {}).at(0.2);
+  assert.ok(at.ok && Array.isArray(at.H) && at.H.length === 9);
+  assert.ok(O.visibleZone(at.H, L, W));
+});
