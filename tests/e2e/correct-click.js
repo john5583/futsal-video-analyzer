@@ -127,6 +127,17 @@ function makeFrames() {
   await win.click("#ai-bs-stop");
   must(await waitFor(win, () => document.getElementById("ai-bs-box").hidden, 3000), "la session se termine");
 
+    // 7. zoom de la vidéo : boutons, molette, retour à la vue entière ; un clic reste exact (la personne cliquée est toujours la bonne)
+  const tf = () => win.evaluate(() => document.getElementById("video").style.transform);
+  must((await tf()) === "", "vue entière au départ");
+  await win.click("#zm-in"); await win.click("#zm-in");
+  must(/scale\(2\.25\)/.test(await tf()), "deux fois « + » : zoom 2,25 (" + (await tf()) + ")");
+  const bx = await (await win.$("#video-box")).boundingBox();
+  await win.mouse.move(bx.x + bx.width / 2, bx.y + bx.height / 2); await win.mouse.wheel(0, 300);
+  must(await waitFor(win, () => /scale\(1\.8\)/.test(document.getElementById("video").style.transform), 3000), "la molette vers le bas réduit le zoom");
+  await win.click("#zm-reset");
+  must((await tf()) === "" && (await win.evaluate(() => document.getElementById("zm-reset").textContent)) === "1×", "« 1× » revient à la vue entière");
+
   must(errors.length === 0, "aucune erreur dans l'interface " + JSON.stringify(errors));
   await app.close();
   fs.rmSync(dir, { recursive: true, force: true });

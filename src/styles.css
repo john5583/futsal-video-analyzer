@@ -274,3 +274,11 @@ fieldset.plan-q label.plan-opt{display:flex;flex-direction:row;gap:8px;align-ite
 .wiz-pre li.ok{color:#86efac}
 .plan-qual{border:1px solid #f59e0b;border-radius:8px;padding:8px 12px;margin:8px 0;background:#1f1a0b;font-size:13px}
 .plan-qual ul{margin:4px 0 0 18px;padding:0}
+
+/* zoom de la vidéo : boutons en haut à droite, cachés tant qu'aucune vidéo n'est affichée */
+.zoom-ctl{position:absolute;top:8px;right:8px;display:flex;gap:4px;z-index:5}
+.video-box video[hidden] ~ .zoom-ctl{display:none}
+.zoom-ctl button{min-width:34px;padding:4px 8px;background:rgba(15,23,42,.78);border:1px solid rgba(148,163,184,.5);color:#fff;border-radius:6px;cursor:pointer;font-weight:700}
+.zoom-ctl button:hover{background:rgba(30,41,59,.95)}
+.video-box.zoomed{cursor:grab}
+.video-box.zoomed.panning{cursor:grabbing}
