@@ -114,6 +114,19 @@ function makeFrames() {
   must(await waitFor(win, () => { const l = window.FSAI.memory().ballLabels || []; return l.length === 1 && l[0].none === true; }, 4000), "l'image sans ballon remplace l'étiquette de la même image");
   must(await win.evaluate(() => /sans ballon/.test(document.getElementById("ai-bl-count").textContent) && !document.getElementById("ai-bl-export").disabled), "le compteur et le bouton d'export sont à jour");
 
+  // 6. session d'étiquetage : images une à une, le programme propose, la réponse est la tienne
+  const n0 = await win.evaluate(() => (window.FSAI.memory().ballLabels || []).length);
+  await win.click("#ai-bs-start");
+  must(await waitFor(win, () => !document.getElementById("ai-bs-box").hidden && /Image 1 sur/.test(document.getElementById("ai-bs-text").textContent), 5000), "la session d'étiquetage s'ouvre sur la première image");
+  await win.click("#ai-bs-none");
+  must(await waitFor(win, () => /Image 2 sur/.test(document.getElementById("ai-bs-text").textContent), 5000), "après une réponse, l'image suivante est proposée");
+  must((await win.evaluate(() => (window.FSAI.memory().ballLabels || []).length)) === n0 + 1, "la réponse est retenue comme étiquette");
+  await win.click("#ai-bs-skip");
+  must(await waitFor(win, () => /Image 3 sur/.test(document.getElementById("ai-bs-text").textContent), 5000), "« je ne sais pas » passe sans étiquette");
+  must((await win.evaluate(() => (window.FSAI.memory().ballLabels || []).length)) === n0 + 1, "passer n'enregistre rien");
+  await win.click("#ai-bs-stop");
+  must(await waitFor(win, () => document.getElementById("ai-bs-box").hidden, 3000), "la session se termine");
+
   must(errors.length === 0, "aucune erreur dans l'interface " + JSON.stringify(errors));
   await app.close();
   fs.rmSync(dir, { recursive: true, force: true });

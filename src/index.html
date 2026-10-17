@@ -202,7 +202,17 @@
             <p class="muted" style="padding:0 4px">Ce que le programme ne peut pas trancher seul : il vous le demande au lieu de le deviner. Vos réponses sont retenues dans ce projet. Sans réponse, le cas reste « non analysé ».</p>
             <div id="ai-q" class="events"></div>
             <div class="muted" style="padding:4px">Étiquettes du ballon (clic droit ou clic sur la vidéo puis « Le ballon est ici ») : <span id="ai-bl-count">aucune étiquette</span>
-              <button id="ai-bl-export" class="ghost" disabled title="Enregistre les images étiquetées dans un dossier de ton choix, pour entraîner le détecteur plus tard. Rien n'est envoyé sur Internet.">Exporter les images</button></div>
+              <button id="ai-bl-export" class="ghost" disabled title="Enregistre les images étiquetées dans un dossier de ton choix, pour entraîner le détecteur plus tard. Rien n'est envoyé sur Internet.">Exporter les images</button>
+              <button id="ai-bs-start" class="ghost" title="Le programme te montre des images une à une avec le ballon qu'il propose : tu valides, tu corriges ou tu dis « aucun ballon visible ». Seules tes réponses servent à entraîner le détecteur.">Session d'étiquetage</button></div>
+            <div id="ai-bs-box" hidden style="padding:6px;border:1px solid var(--line,#334);border-radius:8px;margin:4px 0">
+              <div id="ai-bs-text" style="margin-bottom:6px"></div>
+              <button id="ai-bs-ok" class="primary">Oui, c'est le ballon</button>
+              <button id="ai-bs-none">Aucun ballon visible</button>
+              <button id="ai-bs-skip" class="ghost">Je ne sais pas (passer)</button>
+              <button id="ai-bs-prev" class="ghost">Image précédente</button>
+              <button id="ai-bs-stop" class="ghost">Terminer</button>
+              <div class="muted" style="margin-top:4px">Pour placer le ballon ailleurs, clique dessus dans la vidéo puis « Le ballon est ici ».</div>
+            </div>
             <details id="ai-ans-box"><summary class="ai-h" style="cursor:pointer">Mes réponses <span id="ai-ans-count" class="muted"></span></summary>
               <p class="muted" style="padding:0 4px">Ce que vous avez répondu ou écarté dans ce projet. « Annuler » remet la situation comme avant et la question réapparaît.</p>
               <div id="ai-ans" class="events"></div>
