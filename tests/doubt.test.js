@@ -436,3 +436,25 @@ test("remplaçants : dire qui est la personne (gardien, équipe) répond aussi �
   const rN = M.analyze(frames, Object.assign({ subAnswers: [{ kind: "team", t: s.t, x: s.x, y: s.y, team: "NONE" }] }, base));
   assert.ok(rN.subs.find((x) => x.id === 5).answered && rN.normalized.some((f) => f.A.some((p) => p.id === 5 && p.sub)), "écartée : traitée comme remplaçant");
 });
+
+test("remplaçants : trois personnes au même endroit au même instant — chaque réponse ne vaut que pour sa personne (l'identifiant exact), les autres questions restent ouvertes", () => {
+  const mk = (id, t0, t1, x, y) => Array.from({ length: Math.round((t1 - t0) / 0.2) }, (_v, i) => ({ t: t0 + i * 0.2, p: { id, team: "A", x, y, b: B } }));
+  const frames = toFrames(mk(1, 0, 20, 10, 10), mk(2, 0, 20, 30, 12), mk(5, 5, 20, 20, 0.5), mk(6, 5, 20, 20.6, 0.5), mk(7, 5, 20, 21.2, 0.5));
+  const base = { L: 40, W: 20, bench: "left" };
+  const subs = M.analyze(frames, base).subs.filter((x) => [5, 6, 7].includes(x.id));
+  assert.equal(subs.length, 3, "trois questions de remplacement");
+  const mem = { answers: [], rejected: [] };
+  D.answerSub(mem, subs[0], "joueur");
+  const r1 = M.analyze(frames, Object.assign({ subAnswers: mem.answers }, base));
+  const st = (r) => Object.fromEntries(r.subs.filter((x) => [5, 6, 7].includes(x.id)).map((x) => [x.id, x.answered]));
+  assert.deepEqual(st(r1), Object.fromEntries([5, 6, 7].map((i) => [i, i === subs[0].id])), "seule la personne répondue est marquée répondue");
+  D.answerSub(mem, subs[1], "joueur");
+  D.answerSub(mem, subs[2], "remplacant");
+  assert.equal(mem.answers.length, 3, "les trois réponses coexistent (aucune n'efface l'autre)");
+  const r3 = M.analyze(frames, Object.assign({ subAnswers: mem.answers }, base));
+  assert.ok(Object.values(st(r3)).every(Boolean), "les trois questions sont répondues");
+  assert.equal(D.openQuestions({ subs: r3.subs, memory: mem }).filter((q) => q.kind === "sub").length, 0);
+  // sans identifiant (ancienne réponse) et plusieurs personnes au même endroit : on ne devine toujours pas
+  const old = [{ kind: "sub", t: subs[0].t, x: subs[0].x, y: subs[0].y, verdict: "joueur" }];
+  assert.ok(Object.values(st(M.analyze(frames, Object.assign({ subAnswers: old }, base)))).every((v) => !v), "ancienne réponse ambiguë : refusée");
+});
