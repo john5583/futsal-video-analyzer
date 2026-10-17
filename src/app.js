@@ -16,7 +16,7 @@
   const errById = Object.fromEntries(KB.ERRORS.map((e) => [e.id, e]));
 
   let state = { project: newProject(), projectPath: null, videoOk: false, aiDirty: false };
-  const hooks = { onLoad() {}, onCorrections() {}, onTime() {} };
+  const hooks = { onLoad() {}, onCorrections() {}, onPlan() {}, onTime() {} };
   let saveTimer = null;
   let editingId = null;
 
@@ -482,6 +482,7 @@
     if (name === "rapport") renderReport();
     if (name === "kb") showKb();
     if (name === "corrections") hooks.onCorrections();
+    if (name === "plan") hooks.onPlan();
   }
 
   /* ---------- initialisation ---------- */

@@ -43,6 +43,24 @@ réutilisé d'un autre projet. Le détecteur lui-même **n'apprend pas** : il ne
 
 Une question sans réponse reste **non analysée** : elle n'entre ni dans les statistiques ni dans le rapport.
 
+## 3 bis. Mon plan tactique (page dédiée)
+
+Le coach répond à quelques questions (système de jeu, hauteur du bloc, compacité, pressing après une perte, pertes en zone défensive,
+gardien-joueur). Le programme compare ensuite ce plan à ce qu'il a **mesuré** sur le match analysé :
+
+| Consigne | Ce qui est mesuré | Limite |
+|---|---|---|
+| Système (3-1, 2-2, 1-2-1…) | forme du bloc (lignes séparées à partir de 3,5 m d'écart), au moins 4 s d'écart | n'est jugé que quand les 4 joueurs de champ sont visibles et identifiés |
+| Hauteur du bloc | position moyenne du bloc quand l'adversaire a le ballon | idem |
+| Compacité | profondeur entre le joueur le plus haut et le plus bas | idem |
+| Pressing | un joueur à 3 m du porteur dans les 5 s après une perte | pertes sans ballon visible non jugées |
+| Pertes en zone défensive | pertes déjà détectées par l'analyse | ballon non fiable : aucune perte déclarée |
+| Gardien-joueur | gardien monté au-delà de 22 m | « seulement quand on est menés » : le score n'est pas lu, donc non évalué |
+
+Quand il y a trop peu d'images exploitables (moins de 15 s, ou moins de 25 % du jeu analysé), la consigne est dite **indicative** : jamais
+un écart en rouge sur quelques secondes. Ne sont **pas** vérifiés : sortie de balle, coups de pied arrêtés, rôles individuels, intentions.
+Chaque écart est montré sur la vraie vidéo, avec la correction à faire.
+
 ## 4. Ce qu'il ne fait jamais
 
 - Lire ce qui est invisible : sifflet, fautes cumulées, chronomètre officiel, score.
