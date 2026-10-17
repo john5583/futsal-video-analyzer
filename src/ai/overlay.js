@@ -266,5 +266,27 @@
     return out("generique");
   }
 
-  return { frameProjection, Projector, stateAt, buildOverlay, footOf, MIN_PLAYERS, MAX_ERR, MAX_GAP };
+  /* Coin où poser la petite carte pour gêner le moins possible : area { w, h }, size { w, h } de la carte, occ = rectangles
+     [x1, y1, x2, y2] à ne pas couvrir (joueurs, dessins), current = coin actuel (gardé s'il est presque aussi bon : pas de
+     sautillement). Renvoie "br" | "bl" | "tr" | "tl". */
+  function chooseCorner(area, size, occ, current, margin) {
+    const m = margin == null ? 10 : margin;
+    const pos = { br: [area.w - size.w - m, area.h - size.h - m], bl: [m, area.h - size.h - m], tr: [area.w - size.w - m, m], tl: [m, m] };
+    const cost = (k) => {
+      const r = [pos[k][0], pos[k][1], pos[k][0] + size.w, pos[k][1] + size.h];
+      let c = 0;
+      (occ || []).forEach((o) => {
+        const iw = Math.min(r[2], o[2]) - Math.max(r[0], o[0]), ih = Math.min(r[3], o[3]) - Math.max(r[1], o[1]);
+        if (iw > 0 && ih > 0) c += iw * ih;
+      });
+      return c / Math.max(1, size.w * size.h);
+    };
+    const order = ["br", "bl", "tr", "tl"];
+    let best = order[0], bc = Infinity;
+    order.forEach((k) => { const c = cost(k); if (c < bc - 1e-9) { bc = c; best = k; } });
+    if (current && pos[current] && cost(current) <= bc + 0.03) return current;
+    return best;
+  }
+
+  return { chooseCorner, frameProjection, Projector, stateAt, buildOverlay, footOf, MIN_PLAYERS, MAX_ERR, MAX_GAP };
 });

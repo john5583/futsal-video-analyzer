@@ -82,16 +82,30 @@
     const a = state.project.ai;
     const t = video.currentTime || 0;
     // aperçu du terrain calibré
+    // (tracé seulement si la projection est fiable à cet instant ; sinon un message l'explique, pas de lignes absurdes)
     if (a && $("ov-court").checked) {
-      const cal = P.calibrationAt(a.calibrations, t);
-      if (cal) {
-        const Hi = HG.invert(cal.H);
+      const ch = P.courtH(frames, a.calibrations, a.camera || $("ai-camera").value, t, video.videoWidth, video.videoHeight);
+      if (ch && ch.H) {
+        const Hi = HG.invert(ch.H), o = toView(0, 0), e = toView(r.vw, r.vh), far = 4;
+        ctx.save(); ctx.beginPath(); ctx.rect(o[0], o[1], e[0] - o[0], e[1] - o[1]); ctx.clip();
         ctx.strokeStyle = "rgba(0,230,255,.9)"; ctx.lineWidth = 2;
         courtPolylines().forEach((pl) => {
+          let pen = false;
           ctx.beginPath();
-          pl.forEach((p, i) => { const q = HG.apply(Hi, p[0], p[1]); const v = toView(q[0], q[1]); if (i) ctx.lineTo(v[0], v[1]); else ctx.moveTo(v[0], v[1]); });
+          pl.forEach((p) => {
+            const q = HG.apply(Hi, p[0], p[1]);
+            if (!isFinite(q[0]) || !isFinite(q[1]) || Math.abs(q[0]) > far * r.vw || Math.abs(q[1]) > far * r.vh) { pen = false; return; }
+            const v = toView(q[0], q[1]);
+            if (pen) ctx.lineTo(v[0], v[1]); else ctx.moveTo(v[0], v[1]);
+            pen = true;
+          });
           ctx.stroke();
         });
+        ctx.restore();
+      } else if (ch) {
+        ctx.fillStyle = "rgba(11,18,32,.85)"; ctx.fillRect(8, 8, Math.min(520, boxSize().w - 16), 26);
+        ctx.fillStyle = "#fff"; ctx.font = "600 13px 'Segoe UI',Arial,sans-serif";
+        ctx.fillText("Terrain non tracé ici : la caméra a bougé depuis le calibrage.", 16, 26);
       }
     }
     // joueurs détectés

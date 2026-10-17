@@ -225,3 +225,5 @@ input[type=range]{accent-color:var(--blue)}
 .q .qt{font-size:13px}
 .q .qb{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}
 .q .qb button{font-size:12px;padding:3px 8px}
+.corr-stage .corr-real canvas.cr-map{cursor:grab;touch-action:none}
+.corr-stage .corr-real canvas.cr-map:active{cursor:grabbing}

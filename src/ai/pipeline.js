@@ -130,6 +130,21 @@
     return cur;
   }
 
+  /* Projection (pixels vidéo -> terrain) à utiliser pour tracer le terrain à l'instant t, ou null si elle n'est pas fiable :
+     1. la projection mesurée sur l'image analysée la plus proche (à 0,3 s), qui suit la caméra ;
+     2. sinon le calibrage, mais seulement si la caméra est fixe ou si le calibrage date de moins de 0,5 s (une caméra à la main
+        a bougé depuis : tracer le terrain avec un vieux calibrage donnerait des lignes dans tous les sens). */
+  function courtH(frames, calibs, camera, t, vw, vh) {
+    const f = frames && frames.length ? frameNear(frames, t, 0.3) : null;
+    if (f && Array.isArray(f.h) && f.h.length === 9 && vw > 0 && vh > 0) {
+      try { return { H: HG.mul3(f.h, [1 / vw, 0, 0, 0, 1 / vh, 0, 0, 0, 1]), source: "image" }; } catch (_e) { /* projection inutilisable */ }
+    }
+    const cal = calibrationAt(calibs, t);
+    if (!cal) return null;
+    if (camera !== "fixed" && Math.abs(cal.t - t) > 0.5) return { H: null, source: "calibrage-ancien" };
+    return { H: cal.H, source: "calibrage" };
+  }
+
   /* Détections d'une image -> joueurs sur le terrain + ballon.
      ctx : { frameW, frameH, scale (px analysés / px vidéo), img ({data,width,height}), H, L, W, refs, tracker, t,
              close (tenues A et B trop proches : reconnaissance adaptée) }
@@ -638,5 +653,5 @@
     return { dets, scale, img: ctx.getImageData(0, 0, cw, ch), width: cw, height: ch };
   }
 
-  return { inBenchZone, shiftedZones, followBenches, tileRects, courtRegion, zoomRects, tileToFrame, mergeTiles, isFloorMark, dropFloorMarks, calibrationAt, processDetections, finalizeFrames, compactFrames, expandFrames, frameNear, sampleTimes, startTime, estimateDuration, learnFactor, FACTOR_MIN, FACTOR_MAX, analyseVideo, detectAt, detectCanvas, captureFrames, TEAM_CODE };
+  return { courtH, inBenchZone, shiftedZones, followBenches, tileRects, courtRegion, zoomRects, tileToFrame, mergeTiles, isFloorMark, dropFloorMarks, calibrationAt, processDetections, finalizeFrames, compactFrames, expandFrames, frameNear, sampleTimes, startTime, estimateDuration, learnFactor, FACTOR_MIN, FACTOR_MAX, analyseVideo, detectAt, detectCanvas, captureFrames, TEAM_CODE };
 });

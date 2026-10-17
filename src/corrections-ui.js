@@ -142,14 +142,50 @@
     $("cr-catalog").textContent = "Vraie vidéo";
   }
   /* Petite carte : coin choisi (ou masquée), mémorisé pour ce poste. */
-  const MAP_POS = ["br", "bl", "tl", "tr", "off"];
-  const MAP_LABEL = { br: "bas droite", bl: "bas gauche", tl: "haut gauche", tr: "haut droite", off: "masquée" };
-  function mapPos() { try { const v = localStorage.getItem("fsal.corrMap"); return MAP_POS.includes(v) ? v : "br"; } catch (_e) { return "br"; } }
+  const MAP_POS = ["auto", "br", "bl", "tl", "tr", "off"];          // + « free » (carte déplacée à la main, hors de la boucle)
+  const MAP_LABEL = { auto: "automatique", br: "bas droite", bl: "bas gauche", tl: "haut gauche", tr: "haut droite", off: "masquée", free: "libre" };
+  function mapPos() { try { const v = localStorage.getItem("fsal.corrMap"); return MAP_POS.includes(v) || v === "free" ? v : "auto"; } catch (_e) { return "auto"; } }
+  function mapFree() { try { const v = JSON.parse(localStorage.getItem("fsal.corrMapFree") || "null"); return v && isFinite(v.fx) && isFinite(v.fy) ? v : { fx: 1, fy: 1 }; } catch (_e) { return { fx: 1, fy: 1 }; } }
+  /* Carte « libre » : position en parts de l'espace disponible (0 = bord gauche/haut, 1 = bord droit/bas). */
+  function placeFree() {
+    const r = $("corr-real"), m = $("cr-map"), a = r.getBoundingClientRect(), w = m.offsetWidth, h = m.offsetHeight, f = mapFree();
+    m.style.right = "auto"; m.style.bottom = "auto";
+    m.style.left = Math.round(Math.max(0, f.fx * (a.width - w))) + "px"; m.style.top = Math.round(Math.max(0, f.fy * (a.height - h))) + "px";
+  }
   function setMapPos(p) {
-    const r = $("corr-real");
-    MAP_POS.forEach((x) => r.classList.toggle("map-" + x, x === p));
+    const r = $("corr-real"), m = $("cr-map");
+    r.dataset.mapMode = p === "auto" ? "auto" : "fixed";
+    ["br", "bl", "tl", "tr", "off"].forEach((x) => r.classList.toggle("map-" + x, x === p));
+    if (p === "auto" && !["br", "bl", "tl", "tr"].some((x) => r.classList.contains("map-" + x))) r.classList.add("map-br");
+    if (p === "free") placeFree(); else { m.style.left = m.style.top = m.style.right = m.style.bottom = ""; }
     $("cr-map-pos").textContent = "Carte : " + MAP_LABEL[p];
     try { localStorage.setItem("fsal.corrMap", p); } catch (_e) { /* stockage indisponible */ }
+  }
+  /* Déplacement de la carte à la main : on la saisit et on la dépose où l'on veut ; la position est mémorisée. */
+  function bindMapDrag() {
+    const m = $("cr-map"), r = $("corr-real");
+    let drag = null;
+    m.addEventListener("pointerdown", (e) => {
+      if (r.classList.contains("map-only") || r.classList.contains("map-big")) return;
+      const a = r.getBoundingClientRect(), b = m.getBoundingClientRect();
+      drag = { dx: e.clientX - b.left, dy: e.clientY - b.top, a, w: b.width, h: b.height };
+      m.setPointerCapture(e.pointerId); e.preventDefault();
+    });
+    m.addEventListener("pointermove", (e) => {
+      if (!drag) return;
+      const x = Math.max(0, Math.min(drag.a.width - drag.w, e.clientX - drag.a.left - drag.dx)), y = Math.max(0, Math.min(drag.a.height - drag.h, e.clientY - drag.a.top - drag.dy));
+      ["br", "bl", "tl", "tr", "off"].forEach((k) => r.classList.remove("map-" + k));
+      r.dataset.mapMode = "fixed";
+      m.style.right = "auto"; m.style.bottom = "auto"; m.style.left = Math.round(x) + "px"; m.style.top = Math.round(y) + "px";
+    });
+    const end = (e) => {
+      if (!drag) return;
+      const a = drag.a, x = m.offsetLeft, y = m.offsetTop, fx = a.width > drag.w ? x / (a.width - drag.w) : 1, fy = a.height > drag.h ? y / (a.height - drag.h) : 1;
+      drag = null;
+      try { localStorage.setItem("fsal.corrMapFree", JSON.stringify({ fx: Math.max(0, Math.min(1, fx)), fy: Math.max(0, Math.min(1, fy)) })); } catch (_e) { /* stockage indisponible */ }
+      setMapPos("free");
+    };
+    m.addEventListener("pointerup", end); m.addEventListener("pointercancel", end);
   }
   function sceneControls() { return document.querySelector(".corr-main .corr-controls:not(#cr-bar)"); }
   function showReal() {
@@ -160,6 +196,7 @@
     sceneControls().hidden = true;
     ["cr-fixed", "cr-seq", "cr-replay", "cr-prev", "cr-next", "cr-label", "cr-map-pos"].forEach((x) => { $(x).hidden = false; });
     $("cr-catalog").textContent = "Animation du catalogue";
+    if (mapPos() === "free") placeFree();
     openReal();
   }
   function openReal() {
@@ -230,7 +267,7 @@
     $("cr-seq").addEventListener("click", () => { real.mode = "seq"; if (real.view && real.events.length) openReal(); });
     $("cr-replay").addEventListener("click", () => { if (real.view) real.view.restart(); });
     $("cr-map-pos").addEventListener("click", () => { setMapPos(MAP_POS[(MAP_POS.indexOf(mapPos()) + 1) % MAP_POS.length]); });
-    setMapPos(mapPos());
+    setMapPos(mapPos()); bindMapDrag();
     $("cr-prev").addEventListener("click", () => { real.idx = (real.idx + real.events.length - 1) % real.events.length; openReal(); });
     $("cr-next").addEventListener("click", () => { real.idx = (real.idx + 1) % real.events.length; openReal(); });
     $("cr-catalog").addEventListener("click", () => {

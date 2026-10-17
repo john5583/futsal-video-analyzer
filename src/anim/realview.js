@@ -153,7 +153,8 @@
     this.message(null);
     const v = this.el.video, vw = v.videoWidth || 16, vh = v.videoHeight || 9;
     const k = Math.min(c.width / vw, c.height / vh), rw = vw * k, rh = vh * k, rx = (c.width - rw) / 2, ry = (c.height - rh) / 2;
-    const P = (x, y) => { const q = proj.project(x, y); return q ? [rx + q[0] * rw, ry + q[1] * rh] : null; };
+    const seen = [];                                 // points dessinés (pour placer la petite carte hors du chemin)
+    const P = (x, y) => { const q = proj.project(x, y); const r = q ? [rx + q[0] * rw, ry + q[1] * rh] : null; if (r) seen.push(r); return r; };
     const st = O.stateAt(s.frames, tNow), byId = new Map(st.players.map((p) => [p.id, p]));
     const posOf = (it) => { const p = it.id != null ? byId.get(it.id) : null; return p ? [p.x, p.y, p] : (it.id != null && s.mode === "seq" && Math.abs(tNow - s.ev.t) > 0.3 ? null : [it.x, it.y, null]); };
     const unit = Math.max(1, rh / 360);
@@ -184,6 +185,22 @@
     });
     if (corr >= 0 && s.ov.correction) this.drawCorrection(P, corr, unit, rx, ry, rw, rh);
     this.flushLabels(unit);
+    this.autoMap(c, st, seen, unit, rx, ry, rw, rh);
+  };
+
+  /* Mode « carte automatique » : la petite carte va dans le coin qui cache le moins les joueurs et les dessins (les marges noires
+     d'une vidéo verticale sont idéales). Le coin ne change que si le gain est net. */
+  RealView.prototype.autoMap = function (c, st, seen, unit, rx, ry, rw, rh) {
+    const r = this.el.root, mapEl = this.el.map;
+    if (!r || !r.dataset || r.dataset.mapMode !== "auto" || r.classList.contains("map-only") || r.classList.contains("map-big") || !mapEl.offsetParent) return;
+    const a = c.getBoundingClientRect(), b = mapEl.getBoundingClientRect();
+    if (!a.width || !a.height || !b.width) return;
+    const sx = c.width / a.width, sy = c.height / a.height, occ = [], pad = 18 * unit;
+    st.players.forEach((p) => { if (p.b) occ.push([rx + (p.b[0] / 1000) * rw, ry + (p.b[1] / 1000) * rh, rx + (p.b[2] / 1000) * rw, ry + (p.b[3] / 1000) * rh]); });
+    seen.forEach((q) => occ.push([q[0] - pad, q[1] - pad, q[0] + pad, q[1] + pad]));
+    const corners = ["br", "bl", "tl", "tr"], cur = corners.find((k) => r.classList.contains("map-" + k)) || null;
+    const best = O.chooseCorner({ w: c.width, h: c.height }, { w: b.width * sx, h: b.height * sy }, occ, cur, 10 * sx);
+    if (best !== cur) corners.forEach((k) => r.classList.toggle("map-" + k, k === best));
   };
 
   /* File des étiquettes : une demande = un texte, une couleur, un point d'attache ; prio basse = plus important. */
