@@ -608,13 +608,18 @@
     img.onerror = () => resolve(url);
     img.src = url;
   });
+  let thumbBusy = false, thumbAgain = false;
   async function loadQuestionThumbs(qs) {
+    if (thumbBusy) { thumbAgain = true; return; }                 // une seule capture à la fois (chacune ouvre la vidéo)
     const todo = qs.filter((q) => !qThumbs.has(q.key));
     if (!todo.length || !App.getVideoUrl() || !App.isVideoReady()) return;
+    thumbBusy = true;
     let shots = [];
-    try { shots = await P.captureFrames(App.getVideoUrl(), todo.map((q) => q.t), 480); } catch (_e) { return; }
+    try { shots = await P.captureFrames(App.getVideoUrl(), todo.map((q) => q.t), 480); } catch (_e) { thumbBusy = false; return; }
     for (let i = 0; i < todo.length; i++) if (shots[i]) qThumbs.set(todo[i].key, await markBox(shots[i], todo[i].kind === "team" || todo[i].kind === "sub" ? todo[i].b : null, todo[i].kind === "bench" ? benchPolys(todo[i]) : null));
     document.querySelectorAll("#ai-q img[data-k]").forEach((im) => { const u = qThumbs.get(im.dataset.k); if (u) im.src = u; });
+    thumbBusy = false;
+    if (thumbAgain) { thumbAgain = false; renderQuestions(); }
   }
   function renderQuestions() {
     const box = $("ai-q");
@@ -862,6 +867,7 @@
       const out = result.frames;
       frames = out;
       a.doubts = result.doubts || [];
+      qGroup = null; qThumbs.clear();                    // les numéros de pistes d'une nouvelle analyse n'ont rien à voir avec les anciens
       D.applyAnswers(frames, memory().answers);
       a.camera = camera; a.lost = result.lost; a.notes = result.notes;
       a.frames = P.compactFrames(frames);
@@ -937,6 +943,7 @@
     $("ai-marks").checked = !(d.settings && d.settings.floorMarks === false);
     $("ai-bench").value = (d.settings && ["left", "right"].includes(d.settings.bench)) ? d.settings.bench : "auto";
     benchMark = null; renderBenchZones();
+    qGroup = null; qHighlight = null; qThumbs.clear();
     $("ai-t0").value = App.fmt((d.settings && d.settings.t0) || 0);
     $("ai-t1").value = App.fmt((d.settings && d.settings.t1) || state.project.duration || 0);
     fillLandmarks(); renderPoints(); renderCalibs(); renderKits(); renderStats(); renderSuggestions(); updateEstimate();

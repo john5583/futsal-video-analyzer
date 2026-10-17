@@ -234,3 +234,46 @@ test("remplaçants : une question par personne (entrée et sortie), seulement si
   const rJ = M.analyze(frames, { L: 40, W: 20, bench: "left", subAnswers: [{ kind: "sub", t: r0.subs[0].t, x: r0.subs[0].x, y: r0.subs[0].y, verdict: "joueur" }] });
   assert.ok(rJ.normalized.every((f) => f.A.every((p) => p.id !== 5 || !p.sub)), "joueur : ni l'entrée ni la sortie ne sont écartées");
 });
+
+/* ---------- audit : une réponse ne s'applique qu'à la bonne personne ---------- */
+test("deux personnes presque aussi proches du point : on ne devine pas laquelle (réponse non appliquée)", () => {
+  const frames = toFrames(track(1, 20, ["A"], 20, 8), track(2, 20, ["A"], 20.3, 8.2));      // 0,3 m l'une de l'autre
+  const before = snap(frames);
+  const r = D.applyOne(frames, { kind: "team", t: 1, x: 20.1, y: 8.1, team: "B" });
+  assert.equal(r.ok, false, "ambigu : rien n'est appliqué");
+  assert.equal(snap(frames), before, "aucune image modifiée");
+});
+
+test("une personne plus loin que 1,5 m du point n'est pas touchée (autre joueur proche, pas le bon)", () => {
+  const frames = toFrames(track(1, 20, ["A"], 20, 8));
+  assert.equal(D.applyOne(frames, { kind: "team", t: 1, x: 22.5, y: 8, team: "B" }).ok, false);
+  assert.equal(D.applyOne(frames, { kind: "team", t: 1, x: 20.4, y: 8, team: "B" }).ok, true);
+});
+
+test("personne jamais identifiée debout à côté d'un autre joueur : elle est réintroduite, l'autre joueur n'est pas modifié", () => {
+  const all = toFrames(track(3, 40, ["UNK"], 20.2, 8), track(1, 40, ["A"], 20, 8));          // l'inconnu 3 est collé au joueur 1
+  const doubts = D.trackDoubts(all, { 3: "UNK", 1: "A" });
+  assert.equal(doubts.length, 1);
+  const finals = all.map((f) => ({ t: f.t, players: f.players.filter((p) => p.id !== 3) }));
+  const mem = { answers: [], rejected: [] };
+  const ans = D.answerTeam(mem, doubts[0], "B");
+  const r = D.applyOne(finals, ans);
+  assert.ok(r.ok && r.undo.kind === "injected", "réintroduite, pas appliquée au voisin");
+  assert.ok(finals.every((f) => f.players.filter((p) => p.id === 1).every((p) => p.team === "A")), "le joueur 1 reste « mon équipe »");
+  // la même réponse rejouée sur une analyse où l'inconnu est maintenant identifié : appliquée à lui, sans doublon
+  const second = all.map((f) => ({ t: f.t, players: f.players.map((p) => Object.assign({}, p, p.id === 3 ? { team: "A" } : {})) }));
+  const r2 = D.applyOne(second, ans);
+  assert.ok(r2.ok && r2.undo.kind === "set", "retrouvée aux mêmes points : pas de doublon");
+  assert.equal(second.filter((f) => f.players.filter((p) => p.id === 3).length > 1).length, 0);
+});
+
+test("annuler utilise l'identifiant de la personne modifiée (même si une autre est maintenant plus proche du point)", () => {
+  const frames = toFrames(track(2, 30, ["A", "B"], 20, 8));
+  frames.forEach((f) => f.players.forEach((p) => { p.team = "A"; }));
+  const ans = { kind: "team", t: 2, x: 20.5, y: 8, team: "B" };
+  const r = D.applyOne(frames, ans); ans.undo = r.undo;
+  assert.equal(ans.undo.id, 2);
+  frames.forEach((f) => f.players.push({ id: 77, team: "A", x: 20.5, y: 8, b: B }));          // un nouvel arrivant se place exactement sur le point
+  assert.ok(D.undoOne(frames, ans));
+  assert.ok(frames.every((f) => f.players.filter((p) => p.id === 2).every((p) => p.team === "A")), "la personne 2 est rétablie");
+});

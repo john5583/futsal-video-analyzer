@@ -20,7 +20,9 @@
   const MIN_UNKNOWN = 25;      // détections d'une piste jamais identifiée pour demander qui c'est
   const MAX_PTS = 600;         // points gardés pour une personne jamais identifiée (réinjectée si le coach répond)
   const T_TOL = 0.6;           // s : une réponse s'applique à la personne vue à cet instant (±)
-  const D_TOL = 3;             // m : …à cette distance au plus
+  const D_TOL = 3;             // m : une question répondue est retrouvée à cette distance au plus
+  const D_APPLY = 1.5;         // m : une réponse ne s'applique qu'à la personne trouvée à cette distance au plus (les joueurs se touchent souvent)
+  const D_AMBIG = 0.6;         // m : si deux personnes sont presque aussi proches, on ne devine pas laquelle
   const SUB_TOL = 1.5;         // s : tolérance de temps d'une réponse « remplaçant »
   const REJ_TOL = 2;           // s : une erreur écartée ne revient pas dans cette fenêtre
   const OK = { A: 1, B: 1, GKA: 1, GKB: 1 };
@@ -83,14 +85,30 @@
     return Math.abs(f.t - t) <= tol ? f : null;
   }
 
-  /* Identifiant de la personne vue à cet instant, à cet endroit (la plus proche), ou null. */
+  /* Identifiant de la personne vue à cet instant, à cet endroit, ou null. Rayon serré (D_APPLY) et aucune réponse en cas d'ambiguïté :
+     deux personnes presque aussi proches du point -> on ne devine pas laquelle (la réponse reste enregistrée mais n'est pas appliquée). */
   function findPerson(frames, a) {
-    let best = null, bd = Infinity;
+    const best = new Map();
     frames.forEach((f) => {
       if (Math.abs(f.t - a.t) > T_TOL) return;
-      f.players.forEach((p) => { const d = Math.hypot(p.x - a.x, p.y - a.y); if (d <= D_TOL && d < bd) { bd = d; best = p.id; } });
+      f.players.forEach((p) => { const d = Math.hypot(p.x - a.x, p.y - a.y); if (d <= D_APPLY && d < (best.has(p.id) ? best.get(p.id) : Infinity)) best.set(p.id, d); });
     });
-    return best;
+    const list = [...best.entries()].sort((x, y) => x[1] - y[1]);
+    if (!list.length) return null;
+    if (list.length > 1 && list[1][1] - list[0][1] < D_AMBIG) return null;
+    return list[0][0];
+  }
+
+  /* Personne jamais identifiée : retrouvée dans les images seulement si elle existe maintenant, aux mêmes points (à 15 cm près : ce sont les mêmes détections). */
+  function personAtPoints(frames, pts) {
+    const votes = new Map(), step = Math.max(1, Math.floor(pts.length / 7));
+    for (let k = 0; k < pts.length; k += step) {
+      const [t, x, y] = pts[k], f = nearestFrame(frames, t, 0.06);
+      if (!f) continue;
+      f.players.forEach((p) => { if (Math.hypot(p.x - x, p.y - y) <= 0.15) votes.set(p.id, (votes.get(p.id) || 0) + 1); });
+    }
+    const top = [...votes.entries()].sort((a, b) => b[1] - a[1])[0];
+    return top && top[1] >= 2 ? top[0] : null;
   }
 
   /* Applique une réponse « team » (modifie frames). Renvoie { ok, undo } : undo décrit comment la défaire.
@@ -98,7 +116,7 @@
      - une personne jamais identifiée (absente des images finales) est réintroduite à partir de ses points (a.pts). */
   function applyOne(frames, a) {
     if (!a || a.kind !== "team" || !(OK[a.team] || a.team === "NONE")) return { ok: false };
-    const id = findPerson(frames, a);
+    const id = Array.isArray(a.pts) && a.pts.length ? personAtPoints(frames, a.pts) : findPerson(frames, a);
     if (id != null) {
       if (a.team === "NONE") {
         const rows = [];
@@ -107,7 +125,7 @@
       }
       let prev = null;
       frames.forEach((f) => f.players.forEach((p) => { if (p.id === id) { if (prev == null) prev = p.team; p.team = a.team; } }));
-      return { ok: true, undo: { kind: "set", prev } };
+      return { ok: true, undo: { kind: "set", id, prev } };
     }
     if (Array.isArray(a.pts) && a.pts.length && a.team !== "NONE") {
       let nid = 1;
@@ -131,7 +149,7 @@
     const u = a && a.undo;
     if (!u) return false;
     if (u.kind === "set") {
-      const id = findPerson(frames, a);
+      const id = u.id != null && frames.some((f) => f.players.some((p) => p.id === u.id)) ? u.id : findPerson(frames, a);
       if (id == null) return false;
       frames.forEach((f) => f.players.forEach((p) => { if (p.id === id) p.team = u.prev; }));
       return true;
