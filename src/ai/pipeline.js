@@ -192,6 +192,8 @@
       if (feat && ctx.refs) K.addAccents(feat, ctx.img, [d.x1, d.y1, d.x2, d.y2], ctx.refs, close ? { close } : undefined);
       const cls = ctx.refs ? K.classify(feat, ctx.refs, close ? { reject: ctx.reject, close } : { reject: ctx.reject }) : { team: "UNK" };
       const item = { x: Math.round(p[0] * 100) / 100, y: Math.round(p[1] * 100) / 100, team: cls.team, box: [d.x1, d.y1, d.x2, d.y2], conf: d.score };
+      const leg = ctx.img ? K.legSkin(ctx.img, [d.x1, d.y1, d.x2, d.y2]) : null;      // peau visible aux jambes (pantalon ou short)
+      if (leg != null) item.leg = leg;
       // équipe de champ la plus proche (UNK si la tenue ne ressemble à aucune : arbitre, gardien d'une autre couleur…) ;
       // ne sert qu'à revoir les rôles en fin d'analyse quand le cas est ambigu
       if (ctx.refs && ctx.refs.A && ctx.refs.B) item.f = K.classify(feat, { A: ctx.refs.A, B: ctx.refs.B }, close ? { reject: ctx.reject, close } : { reject: ctx.reject }).team;
@@ -216,6 +218,7 @@
           b: [Math.round((p.box[0] / ctx.frameW) * 1000), Math.round((p.box[1] / ctx.frameH) * 1000), Math.round((p.box[2] / ctx.frameW) * 1000), Math.round((p.box[3] / ctx.frameH) * 1000)]
         };
         if (p.f) o.f = p.f;
+        if (p.leg != null) o.lg = Math.round(p.leg * 100) / 100;
         return o;
       }),
       ball,

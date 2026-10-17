@@ -75,6 +75,7 @@
   function drawOverlay() {
     const c = $("overlay");
     if (c.hidden) return;
+    c.classList.toggle("fixable", frames.length > 0 && !(placing || pickRole || pip || pointer || benchMark));      // un clic sur un cadre permet de corriger la personne
     const dpr = sizeOverlay();
     const ctx = c.getContext("2d");
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -634,7 +635,7 @@
       if (open.length) {
         const ban = document.createElement("div"); ban.className = "q"; ban.style.gridTemplateColumns = "1fr";
         const tx = document.createElement("div"); tx.className = "qt";
-        tx.textContent = open.length + " autre(s) question(s) concernent peut-être la même personne (une piste qui commence juste après ou finit juste avant, au même endroit, avec la même équipe retenue). Appliquer la même réponse (« " + (D.TEAM_LABEL[qGroup.team] || qGroup.team) + " ») ?";
+        tx.textContent = open.length + " autre(s) question(s) concernent peut-être la même personne (une piste qui commence juste après ou finit juste avant, au même endroit, avec la même équipe retenue)" + (qGroup.look ? " ou une personne qui porte la même allure (pantalon ou survêtement, sans peau visible aux jambes)" : "") + ". Appliquer la même réponse (« " + (D.TEAM_LABEL[qGroup.team] || qGroup.team) + " ») ?" + (qGroup.look ? " La tenue seule ne suffit pas à reconnaître un gardien : vérifie avant d'accepter." : "");
         const bt = document.createElement("div"); bt.className = "qb";
         const yes = document.createElement("button"); yes.className = "primary"; yes.textContent = "Oui, appliquer aux " + open.length; yes.addEventListener("click", () => applyGroup(open));
         const no = document.createElement("button"); no.textContent = "Non, une par une"; no.addEventListener("click", () => { qGroup = null; renderQuestions(); });
@@ -683,12 +684,15 @@
   function answerTeam(q, team) {
     const a = state.project.ai;
     qHighlight = null;
-    const ans = D.answerTeam(memory(), q, team), r = D.applyOne(frames, ans);
+    const ans = D.answerTeam(memory(), q, team), r = D.applyOne(frames, ans, { id: q.id });
     if (r.ok) { ans.undo = r.undo; a.frames = P.compactFrames(frames); }
     else App.toast("Je ne retrouve pas cette personne dans les images : votre réponse est retenue pour la prochaine analyse.", true);
     const rest = D.openQuestions({ doubts: a.doubts || [], memory: memory() }).filter((x) => x.kind === "team");
-    const group = D.sameTrackHint(q, rest);
-    qGroup = group.length ? { team, q, group } : null;
+    const dq = (a.doubts || []).find((d) => d.kind === "team" && d.id === q.id);          // un clic sur un cadre n'a pas la mesure des jambes : on la reprend de la question de cette personne
+    const qq = dq ? Object.assign({}, q, { leg: q.leg != null ? q.leg : dq.leg, cur: q.cur != null ? q.cur : dq.cur }) : q;
+    const cont = D.sameTrackHint(q, rest), look = team === "GKA" || team === "GKB" ? D.sameLookHint(qq, rest) : [];
+    const group = cont.concat(look.filter((d) => !cont.some((c) => c.id === d.id)));
+    qGroup = group.length ? { team, q, group, look: look.length > 0 } : null;
     reanalyzeSuggestions(); refreshLive(); App.changed(true);
   }
   /* Applique la réponse du coach aux pistes proposées (chacune reste une réponse distincte, annulable dans « Mes réponses »). */
@@ -696,13 +700,64 @@
     const a = state.project.ai, g = qGroup;
     if (!g) return;
     list.forEach((d) => {
-      const ans = D.answerTeam(memory(), d, g.team, App.fmt(g.q.t)), r = D.applyOne(frames, ans);
+      const ans = D.answerTeam(memory(), d, g.team, App.fmt(g.q.t)), r = D.applyOne(frames, ans, { id: d.id });
       if (r.ok) ans.undo = r.undo;
     });
     a.frames = P.compactFrames(frames);
     qGroup = null;
     reanalyzeSuggestions(); refreshLive(); App.changed(true);
   }
+  /* ---------- corriger une personne ou le ballon en un clic sur la vidéo ---------- */
+  let menuEl = null;
+  function closeMenu() { if (menuEl) { menuEl.remove(); menuEl = null; } }
+  function showMenu(e, title, items) {
+    closeMenu();
+    const m = document.createElement("div"); m.className = "person-menu";
+    const h = document.createElement("div"); h.className = "pm-title"; h.textContent = title; m.appendChild(h);
+    items.forEach((it) => { const b = document.createElement("button"); b.textContent = it.label; b.addEventListener("click", () => { closeMenu(); it.fn(); }); m.appendChild(b); });
+    const x = document.createElement("button"); x.className = "ghost"; x.textContent = "Annuler"; x.addEventListener("click", closeMenu); m.appendChild(x);
+    document.body.appendChild(m);
+    const r = m.getBoundingClientRect();
+    m.style.left = Math.max(8, Math.min(window.innerWidth - r.width - 8, e.clientX + 8)) + "px";
+    m.style.top = Math.max(8, Math.min(window.innerHeight - r.height - 8, e.clientY + 8)) + "px";
+    menuEl = m;
+  }
+  /* Clic sur un cadre : « qui est cette personne ? » ; clic ailleurs : « le ballon est ici ? ». Rien n'est changé sans ta réponse ; tout est annulable. */
+  function personClick(e, ix, iy) {
+    if (!frames.length || !state.project.ai) return;
+    const t = video.currentTime || 0, f = P.frameNear(frames, t, 0.8), vw = video.videoWidth, vh = video.videoHeight;
+    if (f) {
+      let best = null, area = Infinity;
+      f.players.forEach((p) => {
+        if (!p.b || p.b.length < 4) return;
+        const x1 = (p.b[0] / 1000) * vw, y1 = (p.b[1] / 1000) * vh, x2 = (p.b[2] / 1000) * vw, y2 = (p.b[3] / 1000) * vh;
+        if (ix >= x1 - 6 && ix <= x2 + 6 && iy >= y1 - 6 && iy <= y2 + 6 && (x2 - x1) * (y2 - y1) < area) { area = (x2 - x1) * (y2 - y1); best = p; }
+      });
+      if (best) {
+        const q = { kind: "team", id: best.id, t: f.t, x: best.x, y: best.y, b: best.b };
+        qHighlight = { t: f.t, b: best.b, label: "Qui est-ce ?" }; drawOverlay();
+        const lab = (k) => D.TEAM_LABEL[k] || k;
+        showMenu(e, "Qui est cette personne ? (lue : " + (best.team === "A" ? "mon équipe" : best.team === "B" ? "adversaire" : lab(best.team)) + ")", [
+          { label: "Mon équipe", fn: () => answerTeam(q, "A") }, { label: "Adversaire", fn: () => answerTeam(q, "B") },
+          { label: "Mon gardien", fn: () => answerTeam(q, "GKA") }, { label: "Gardien adverse", fn: () => answerTeam(q, "GKB") },
+          { label: "Arbitre, public ou remplaçant (ne pas compter)", fn: () => answerTeam(q, "NONE") }
+        ]);
+        return;
+      }
+    }
+    const H = projectionAt(t);
+    if (!H || !f) { App.toast("Je ne peux pas placer le ballon ici : pas d'image analysée avec le terrain repéré à cet instant.", true); return; }
+    const p = HG.apply(H, ix, iy);
+    if (!isFinite(p[0]) || !isFinite(p[1])) return;
+    showMenu(e, "Le ballon est ici ?", [{ label: "Oui, le ballon est ici (image de " + App.fmt(f.t) + ")", fn: () => answerBallAt({ t: f.t, x: Math.round(p[0] * 100) / 100, y: Math.round(p[1] * 100) / 100 }) }]);
+  }
+  function answerBallAt(pt) {
+    const a = state.project.ai, ans = D.answerBall(memory(), pt), r = D.applyOne(frames, ans);
+    if (r.ok) { ans.undo = r.undo; a.frames = P.compactFrames(frames); }
+    else App.toast("Aucune image analysée assez proche : ta réponse est retenue pour la prochaine analyse.", true);
+    reanalyzeSuggestions(); refreshLive(); App.changed(true);
+  }
+
   function answerSub(q, verdict) {
     D.answerSub(memory(), q, verdict);
     reanalyzeSuggestions(); App.changed();
@@ -732,7 +787,7 @@
   }
   function cancelAnswer(a) {
     const p = state.project, ai = p.ai, mem = memory();
-    if (a.kind === "team") {
+    if (a.kind === "team" || a.kind === "ball") {
       if (D.undoOne(frames, a)) ai.frames = P.compactFrames(frames);
       else App.toast("Cette réponse n'avait modifié aucune image (personne absente ou ambiguë) : rien à rétablir.");
     }
@@ -1027,7 +1082,10 @@
         if (FSAI.hooks.pointPlaced) FSAI.hooks.pointPlaced(placedId);
       } else if (pip) pipetteClick(ix, iy);
       else if (pickRole) handlePick(ix, iy);
+      else personClick(e, ix, iy);
     });
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeMenu(); });
+    document.addEventListener("mousedown", (e) => { if (menuEl && !menuEl.contains(e.target)) closeMenu(); });
     document.addEventListener("keydown", (e) => { if (e.key === "Escape" && benchMark) { benchMark = null; updateOverlayMode(); return; } if (e.key === "Escape" && (placing || pickRole || pip)) { placing = null; pickRole = null; if (pip) cancelPipette(); else updateOverlayMode(); } });
     ["loadedmetadata", "seeked", "pause", "timeupdate", "emptied"].forEach((ev) => video.addEventListener(ev, () => {
       if (preview && ev === "seeked" && lastTest && Math.abs(video.currentTime - preview.t) > 0.2) { preview = null; lastTest = null; $("ai-test-msg").textContent = ""; }

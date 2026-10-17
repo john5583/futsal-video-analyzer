@@ -313,3 +313,95 @@ test("remplaçants : une réponse qui correspond à deux personnes (l'entrant et
   const r1 = M.analyze(frames, Object.assign({ subAnswers: [{ kind: "sub", t: q.t, x: q.x, y: q.y, verdict: "joueur" }] }, base));
   assert.equal(r1.subs.find((s) => s.id === 5).answered, false, "réponse ambiguë entre deux personnes : non appliquée, la question reste ouverte");
 });
+
+/* ---------- gardien en pantalon : tenue différente, cinq joueurs, ballon désigné, clic sur un cadre ---------- */
+const K = require("../src/ai/kit");
+const withLeg = (tr, lg) => tr.map((q) => { q.p.lg = lg; return q; });
+
+test("jambes : un short laisse voir la peau, un pantalon noir non ; boîte trop petite -> non mesurée", () => {
+  const w = 100, h = 200, data = new Uint8ClampedArray(w * h * 4);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const i = (y * w + x) * 4, legs = y > h * 0.66 && y < h * 0.84;
+    const c = legs ? [205, 150, 120] : [30, 30, 35];            // peau sur les jambes, tenue sombre ailleurs
+    data[i] = c[0]; data[i + 1] = c[1]; data[i + 2] = c[2]; data[i + 3] = 255;
+  }
+  const short = K.legSkin({ data, width: w, height: h }, [0, 0, 100, 200]);
+  assert.ok(short > 0.8, "short : peau visible " + short);
+  const pants = new Uint8ClampedArray(w * h * 4); for (let i = 0; i < w * h; i++) { pants[i * 4] = 20; pants[i * 4 + 1] = 20; pants[i * 4 + 2] = 25; pants[i * 4 + 3] = 255; }
+  assert.ok(K.legSkin({ data: pants, width: w, height: h }, [0, 0, 100, 200]) < 0.02, "pantalon noir : pas de peau");
+  assert.equal(K.legSkin({ data, width: w, height: h }, [0, 0, 4, 30]), null, "boîte trop petite : non mesurée");
+});
+
+test("tenue différente : un joueur en pantalon dans une équipe en short est questionné (jamais décidé)", () => {
+  const frames = toFrames(
+    withLeg(track(1, 30, ["A"], 8, 4), 0.3), withLeg(track(2, 30, ["A"], 10, 8), 0.28), withLeg(track(3, 30, ["A"], 12, 12), 0.33),
+    withLeg(track(4, 30, ["B"], 26, 4), 0.25), withLeg(track(5, 30, ["B"], 28, 8), 0.3), withLeg(track(6, 30, ["B"], 30, 12), 0.22),
+    withLeg(track(7, 30, ["B"], 33, 16), 0.0));
+  const teams = { 1: "A", 2: "A", 3: "A", 4: "B", 5: "B", 6: "B", 7: "B" };
+  const ds = D.trackDoubts(frames, teams);
+  assert.deepEqual(ds.map((d) => d.id), [7]);
+  assert.match(ds[0].why, /pantalon ou un survêtement/);
+  assert.match(ds[0].why, /gardien, arbitre ou joueur/);
+  assert.equal(ds[0].leg, 0);
+});
+
+test("tenue différente : si toute l'équipe porte un pantalon (hiver), aucune question ; sans mesure (anciennes analyses), aucune question", () => {
+  const winter = toFrames(...[1, 2, 3, 4, 5, 6].map((id) => withLeg(track(id, 30, [id < 4 ? "A" : "B"], 8 + id * 3, 4 + id), 0.0)));
+  assert.equal(D.trackDoubts(winter, { 1: "A", 2: "A", 3: "A", 4: "B", 5: "B", 6: "B" }).length, 0);
+  const noLeg = toFrames(...[1, 2, 3, 4].map((id) => track(id, 30, ["B"], 8 + id * 3, 4 + id)));
+  assert.equal(D.trackDoubts(noLeg, { 1: "B", 2: "B", 3: "B", 4: "B" }).length, 0);
+});
+
+test("cinq joueurs d'une même équipe en même temps : question sur celui qui s'habille autrement (sinon la piste la plus courte)", () => {
+  const frames = toFrames(
+    withLeg(track(1, 40, ["B"], 20, 3), 0.3), withLeg(track(2, 40, ["B"], 22, 7), 0.3), withLeg(track(3, 40, ["B"], 24, 11), 0.3),
+    withLeg(track(4, 40, ["B"], 26, 15), 0.3), withLeg(track(5, 40, ["B"], 28, 18), 0.1), track(6, 40, ["A"], 10, 8), track(7, 40, ["A"], 12, 12));
+  const teams = { 1: "B", 2: "B", 3: "B", 4: "B", 5: "B", 6: "A", 7: "A" };
+  const ds = D.trackDoubts(frames, teams);
+  const crowd = ds.filter((d) => /cinq/.test(d.why));
+  assert.equal(crowd.length, 1);
+  assert.equal(crowd[0].id, 5, "celui dont les jambes diffèrent");
+  assert.match(crowd[0].why, /il n'y en a que quatre/);
+  // si l'un des cinq est déjà questionné pour son pantalon, pas de seconde question sur la foule
+  const f2 = toFrames(withLeg(track(1, 40, ["B"], 20, 3), 0.3), withLeg(track(2, 40, ["B"], 22, 7), 0.3), withLeg(track(3, 40, ["B"], 24, 11), 0.3), withLeg(track(4, 40, ["B"], 26, 15), 0.3), withLeg(track(5, 40, ["B"], 28, 18), 0.0));
+  const d2 = D.trackDoubts(f2, { 1: "B", 2: "B", 3: "B", 4: "B", 5: "B" });
+  assert.deepEqual(d2.map((d) => d.id), [5]);
+  assert.match(d2[0].why, /pantalon/);
+  // quatre joueurs seulement : rien
+  assert.equal(D.trackDoubts(toFrames(...[1, 2, 3, 4].map((id) => track(id, 40, ["B"], 20 + id * 2, 3 + id * 4))), { 1: "B", 2: "B", 3: "B", 4: "B" }).filter((d) => /cinq/.test(d.why)).length, 0);
+});
+
+test("même allure : proposition seulement pour les jambes sans peau et la même équipe lue", () => {
+  const q = { id: 7, leg: 0.0, cur: "B" };
+  const doubts = [{ kind: "team", id: 8, leg: 0.02, cur: "B" }, { kind: "team", id: 9, leg: 0.3, cur: "B" }, { kind: "team", id: 10, leg: 0.01, cur: "A" }, { kind: "team", id: 7, leg: 0, cur: "B" }];
+  assert.deepEqual(D.sameLookHint(q, doubts).map((d) => d.id), [8]);
+  assert.deepEqual(D.sameLookHint({ id: 7, leg: 0.3, cur: "B" }, doubts), [], "un joueur en short n'a pas d'allure de gardien");
+});
+
+test("ballon désigné par le coach : posé sur l'image la plus proche, annulable, vérifié par lui", () => {
+  const frames = toFrames(track(1, 20, ["A"], 10, 8));
+  frames.forEach((f) => { f.ball = { x: 1, y: 1 }; });
+  const mem = { goalPalettes: [], rejected: [], answers: [] };
+  const ans = D.answerBall(mem, { t: 2.0, x: 12.5, y: 7.5 });
+  const r = D.applyOne(frames, ans);
+  assert.ok(r.ok);
+  ans.undo = r.undo;
+  const f = frames.find((x) => Math.abs(x.t - 2.0) < 0.01);
+  assert.deepEqual(f.ball, { x: 12.5, y: 7.5 });
+  assert.deepEqual(frames.find((x) => Math.abs(x.t - 2.4) < 0.01).ball, { x: 1, y: 1 }, "les autres images ne changent pas");
+  assert.ok(D.undoOne(frames, ans));
+  assert.deepEqual(f.ball, { x: 1, y: 1 }, "annulé : l'ancienne position revient");
+  assert.equal(D.applyOne(frames, { kind: "ball", t: 50, x: 1, y: 1 }).ok, false, "aucune image analysée proche : non appliquée");
+  assert.match(D.describeAnswer(ans, (t) => "t" + t, (x) => x), /le ballon est ici/);
+  // rejouée sur une nouvelle analyse
+  assert.equal(D.applyAnswers(toFrames(track(1, 20, ["A"], 10, 8)), [ans]), 1);
+});
+
+test("clic sur un cadre : l'identifiant exact évite l'ambiguïté entre deux joueurs collés", () => {
+  const frames = toFrames(track(1, 20, ["A"], 20, 8), track(2, 20, ["A"], 20.3, 8.2));
+  const ans = { kind: "team", t: 1, x: 20.1, y: 8.1, team: "GKA" };
+  assert.equal(D.applyOne(frames, ans).ok, false, "sans identifiant : ambigu, on ne devine pas");
+  const r = D.applyOne(frames, ans, { id: 2 });
+  assert.ok(r.ok);
+  assert.ok(frames.every((f) => f.players.filter((p) => p.id === 2).every((p) => p.team === "GKA") && f.players.filter((p) => p.id === 1).every((p) => p.team === "A")));
+});

@@ -1,8 +1,9 @@
 /* Doute -> question -> mémoire du projet. Le programme ne tranche jamais un cas incertain : il le range dans une liste de
    questions, le coach répond (ou non), et la réponse est retenue dans le projet pour ne pas être redemandée. Une question
    sans réponse reste « non analysée » : rien n'est deviné. Chaque réponse peut être annulée (voir undoOne / removeAnswer).
-   Quatre sortes de doutes :
-   - « team » : une piste dont l'équipe lue sur les images est partagée, ou jamais identifiée ;
+   Cinq sortes de doutes (la tenue différente et les cinq joueurs de champ s'ajoutent au doute d'équipe) :
+   - « team » : une piste dont l'équipe lue sur les images est partagée, jamais identifiée, qui s'habille autrement que son équipe
+     (pantalon alors que les autres portent un short), ou qui fait cinq joueurs de champ en même temps (il n'y en a que quatre) ;
    - « event » : une erreur possible que le contexte (ballon non visible, arrêt de jeu…) n'a pas permis de confirmer ;
    - « sub » : une personne qui entre ou sort par la zone de remplacement (remplacement volant) et n'est pas comptée comme
      joueur pendant quelques secondes : remplaçant, ou joueur sur le terrain ?
@@ -18,6 +19,10 @@
   const MIN_VOTES = 6;         // lectures d'équipe minimales pour parler de partage
   const SHARE_OK = 0.7;        // part de lectures en accord avec l'équipe retenue en dessous de laquelle on demande
   const MIN_UNKNOWN = 25;      // détections d'une piste jamais identifiée pour demander qui c'est
+  const LEG_PANTS = 0.05;      // peau visible aux jambes en dessous de laquelle on parle de pantalon / survêtement (mesuré : gardien en survêtement = 0 %)
+  const LEG_REF_MIN = 0.12;    // les autres joueurs de l'équipe doivent, eux, montrer au moins cette part de peau (short)
+  const LEG_NEAR = 0.08;       // « même allure » : jambes sans peau, pour proposer le même gardien
+  const CROWD_MIN = 3;         // s : cinq joueurs de champ d'une même équipe en même temps pendant au moins ce temps
   const MAX_PTS = 600;         // points gardés pour une personne jamais identifiée (réinjectée si le coach répond)
   const T_TOL = 0.6;           // s : une réponse s'applique à la personne vue à cet instant (±)
   const D_TOL = 3;             // m : une question répondue est retrouvée à cette distance au plus
@@ -33,22 +38,41 @@
   };
   const r2 = (t) => Math.round(t * 100) / 100;
 
-  /* Pistes douteuses. frames : images finales de pipeline (players: { id, team (lecture brute), x, y, b }) ; teams : équipe retenue
-     par piste. Renvoie [{ kind:"team", id, t, x, y, b, n, cur, votes, why, pts? }], les plus longues d'abord.
+  const median = (v) => { const a = v.slice().sort((x, y) => x - y); return a.length ? a[a.length >> 1] : null; };
+
+  /* Pistes douteuses. frames : images finales de pipeline (players: { id, team (lecture brute), x, y, b, lg (peau visible aux jambes) }) ; teams : équipe retenue
+     par piste. Renvoie [{ kind:"team", id, t, x, y, b, n, cur, votes, why, leg, pts? }], les plus longues d'abord.
      Une personne jamais identifiée n'est pas gardée dans les images finales : ses points (pts) sont joints à la question pour
-     pouvoir la réintroduire si le coach dit qui c'est. */
+     pouvoir la réintroduire si le coach dit qui c'est. Trois raisons de douter d'une piste que les lectures d'équipe ne contredisent pas :
+     elle porte un pantalon alors que son équipe porte un short, ou elle fait partie de cinq joueurs de champ d'une même équipe en même temps. */
   function trackDoubts(frames, teams) {
     const info = new Map();
     frames.forEach((f) => f.players.forEach((p) => {
       let i = info.get(p.id);
-      if (!i) { i = { n: 0, votes: {}, pts: [] }; info.set(p.id, i); }
+      if (!i) { i = { n: 0, votes: {}, pts: [], lgs: [] }; info.set(p.id, i); }
       i.n++;
       // lecture la plus fine d'abord (équipe de champ la plus proche, `f`), comme pour la coupure des pistes ; sinon l'équipe lue
       const read = p.f === "A" || p.f === "B" ? p.f : p.team;
       if (SIDE[read]) i.votes[SIDE[read]] = (i.votes[SIDE[read]] || 0) + 1;
+      if (typeof p.lg === "number") i.lgs.push(p.lg);
       if (Array.isArray(p.b) && p.b.length === 4) i.pts.push({ t: f.t, x: p.x, y: p.y, b: p.b });
     }));
-    const out = [];
+    info.forEach((i) => { i.leg = i.lgs.length >= 6 ? median(i.lgs) : null; });
+    // jambes de référence : médiane des joueurs de champ de chaque équipe (à défaut, des deux équipes)
+    const legsOf = (side) => { const v = []; info.forEach((i, id) => { if (teams[id] === side && i.n >= MIN_DETECTIONS && i.leg != null) v.push(i.leg); }); return v; };
+    const all = legsOf("A").concat(legsOf("B"));
+    const ref = (side) => { const v = legsOf(side); return v.length >= 3 ? median(v) : median(all); };
+
+    const out = [], doubted = new Set();
+    const make = (id, i, cur, why, unknown, pt) => {
+      const q = pt || i.pts[i.pts.length >> 1], first = i.pts[0], last = i.pts[i.pts.length - 1];
+      const d = { kind: "team", id, t: q.t, x: q.x, y: q.y, b: q.b, n: i.n, cur: OK[cur] ? cur : null, votes: Object.assign({}, i.votes), why, leg: i.leg, t0: first.t, t1: last.t, p0: [first.x, first.y], p1: [last.x, last.y] };
+      if (unknown) {
+        const step = Math.max(1, Math.ceil(i.pts.length / MAX_PTS));
+        d.pts = i.pts.filter((_p, k) => k % step === 0).map((p) => [r2(p.t), p.x, p.y, p.b]);
+      }
+      doubted.add(id); out.push(d);
+    };
     info.forEach((i, id) => {
       if (i.n < MIN_DETECTIONS || !i.pts.length) return;
       const cur = teams[id] || "UNK";
@@ -60,18 +84,43 @@
         const top = Math.max(i.votes.A || 0, i.votes.B || 0), share = sum ? top / sum : 0, mine = sum ? (i.votes[cur] || 0) / sum : 0;
         if (sum >= MIN_VOTES && share < SHARE_OK) why = "équipe lue " + Math.round(mine * 100) + " % du temps seulement";
         else if (sum >= MIN_VOTES && mine < 0.5) why = "l'équipe retenue contredit les images (" + Math.round(mine * 100) + " % du temps)";
+        else if (i.leg != null && i.leg < LEG_PANTS && (ref(cur) || 0) >= LEG_REF_MIN) why = "porte un pantalon ou un survêtement (" + Math.round(i.leg * 100) + " % de peau visible aux jambes) alors que les autres " + (cur === "B" ? "adversaires" : "joueurs de ton équipe") + " portent un short : gardien, arbitre ou joueur ?";
       } else if (!OK[cur] && i.n >= MIN_UNKNOWN) { why = "jamais identifié"; unknown = true; }   // gardien : rôle décidé par la position, pas questionné
-      if (!why) return;
-      const q = i.pts[i.pts.length >> 1];
-      const first = i.pts[0], last = i.pts[i.pts.length - 1];
-      const d = { kind: "team", id, t: q.t, x: q.x, y: q.y, b: q.b, n: i.n, cur: OK[cur] ? cur : null, votes: Object.assign({}, i.votes), why, t0: first.t, t1: last.t, p0: [first.x, first.y], p1: [last.x, last.y] };
-      if (unknown) {
-        const step = Math.max(1, Math.ceil(i.pts.length / MAX_PTS));
-        d.pts = i.pts.filter((_p, k) => k % step === 0).map((p) => [r2(p.t), p.x, p.y, p.b]);
-      }
-      out.push(d);
+      if (why) make(id, i, cur, why, unknown);
+    });
+
+    // cinq joueurs de champ d'une même équipe en même temps : l'un d'eux est peut-être un gardien, un arbitre ou un remplaçant
+    ["A", "B"].forEach((side) => {
+      const runs = [];
+      let run = null;
+      frames.forEach((f) => {
+        const ids = [...new Set(f.players.filter((p) => teams[p.id] === side).map((p) => p.id))];
+        if (ids.length < 5) return;
+        if (run && f.t - run.t1 <= 1.5) { run.t1 = f.t; run.frames.push({ t: f.t, ids }); }
+        else { run = { t0: f.t, t1: f.t, frames: [{ t: f.t, ids }] }; runs.push(run); }
+      });
+      runs.filter((r) => r.t1 - r.t0 >= CROWD_MIN).forEach((r) => {
+        const seen = new Map();
+        r.frames.forEach((fr) => fr.ids.forEach((id) => seen.set(id, (seen.get(id) || 0) + 1)));
+        // les personnes présentes pendant la moitié de l'épisode ; on questionne celle dont les jambes sont le plus différentes (pantalon), sinon la piste la plus courte
+        const present = [...seen.entries()].filter(([, c]) => c >= r.frames.length * 0.5).map(([id]) => id).filter((id) => info.has(id) && info.get(id).pts.length);
+        if (present.some((id) => doubted.has(id))) return;                 // l'un d'eux est déjà questionné (pantalon, équipe douteuse) : la foule est expliquée
+        const cands = present;
+        if (!cands.length) return;
+        cands.sort((x, y) => { const lx = info.get(x).leg == null ? 1 : info.get(x).leg, ly = info.get(y).leg == null ? 1 : info.get(y).leg; return lx - ly || info.get(x).n - info.get(y).n; });
+        const id = cands[0], i = info.get(id), mid = (r.t0 + r.t1) / 2;
+        const pt = i.pts.reduce((bst, p) => (Math.abs(p.t - mid) < Math.abs(bst.t - mid) ? p : bst), i.pts[0]);
+        make(id, i, teams[id], "cinq " + (side === "B" ? "joueurs adverses" : "joueurs de ton équipe") + " de champ en même temps pendant " + Math.round(r.t1 - r.t0) + " s (il n'y en a que quatre en futsal) : l'un d'eux est peut-être un gardien, un arbitre ou un remplaçant", false, pt);
+      });
     });
     return out.sort((a, b) => b.n - a.n);
+  }
+
+  /* Personnes qui ont la même allure (jambes sans peau, même équipe lue) que celle qu'on vient de désigner : PROPOSITION de la même réponse,
+     jamais appliquée sans l'accord du coach. La tenue seule ne suffit pas à reconnaître un gardien (mesuré : presque tous les joueurs lui ressemblent). */
+  function sameLookHint(q, doubts) {
+    if (typeof q.leg !== "number" || q.leg >= LEG_NEAR) return [];
+    return (doubts || []).filter((d) => d.kind === "team" && d.id !== q.id && typeof d.leg === "number" && d.leg < LEG_NEAR && d.cur === q.cur);
   }
 
   const sameSpot = (a, b) => Math.abs(a.t - b.t) <= T_TOL && Math.hypot(a.x - b.x, a.y - b.y) <= D_APPLY;
@@ -114,9 +163,19 @@
   /* Applique une réponse « team » (modifie frames). Renvoie { ok, undo } : undo décrit comment la défaire.
      - la personne trouvée prend l'équipe donnée sur toutes ses images ; « NONE » la retire ;
      - une personne jamais identifiée (absente des images finales) est réintroduite à partir de ses points (a.pts). */
-  function applyOne(frames, a) {
+  function applyOne(frames, a, hint) {
+    if (a && a.kind === "ball") {
+      // « le ballon est ici » : posé sur l'image analysée la plus proche (à 0,5 s près), vérifié par le coach ; l'ancienne position est gardée pour annuler
+      const f = nearestFrame(frames, a.t, 0.5);
+      if (!f || !isFinite(a.x) || !isFinite(a.y)) return { ok: false };
+      const prev = f.ball ? { x: f.ball.x, y: f.ball.y } : null;
+      f.ball = { x: a.x, y: a.y };
+      return { ok: true, undo: { kind: "ball", t: f.t, prev } };
+    }
     if (!a || a.kind !== "team" || !(OK[a.team] || a.team === "NONE")) return { ok: false };
-    const id = Array.isArray(a.pts) && a.pts.length ? personAtPoints(frames, a.pts) : findPerson(frames, a);
+    // identifiant exact connu à l'instant de la réponse (clic sur un cadre, question de cette analyse) : pas de recherche par la position
+    const exact = hint && hint.id != null && frames.some((f) => f.players.some((p) => p.id === hint.id)) ? hint.id : null;
+    const id = exact != null ? exact : Array.isArray(a.pts) && a.pts.length ? personAtPoints(frames, a.pts) : findPerson(frames, a);
     if (id != null) {
       if (a.team === "NONE") {
         const rows = [];
@@ -141,7 +200,7 @@
   function applyAnswers(frames, answers) {
     let applied = 0;
     (answers || []).forEach((a) => {
-      if (!a || a.kind !== "team") return;
+      if (!a || (a.kind !== "team" && a.kind !== "ball")) return;
       const r = applyOne(frames, a);
       if (r.ok) { a.undo = r.undo; applied++; } else delete a.undo;           // non appliquée cette fois : rien à annuler
     });
@@ -152,6 +211,12 @@
   function undoOne(frames, a) {
     const u = a && a.undo;
     if (!u) return false;
+    if (u.kind === "ball") {
+      const f = nearestFrame(frames, u.t, 0.06);
+      if (!f) return false;
+      f.ball = u.prev ? { x: u.prev.x, y: u.prev.y } : null;
+      return true;
+    }
     if (u.kind === "set") {
       const id = u.id != null && frames.some((f) => f.players.some((p) => p.id === u.id)) ? u.id : findPerson(frames, a);
       if (id == null) return false;
@@ -237,6 +302,12 @@
     if (verdict === "non") reject(mem, q);
     return a;
   }
+  /* « Le ballon est ici » : désigné par le coach sur une image (coordonnées du terrain). */
+  function answerBall(mem, pt) {
+    const a = { kind: "ball", t: pt.t, x: pt.x, y: pt.y };
+    mem.answers = mem.answers.filter((o) => !(o.kind === "ball" && Math.abs(o.t - a.t) < 0.4)).concat([a]);
+    return a;
+  }
   /* verdict : "remplacant" (il entre ou sort : compté comme tel) ou "joueur" (il est bien sur le terrain : compté comme joueur). */
   function answerSub(mem, q, verdict) {
     const a = { kind: "sub", t: q.t, x: q.x, y: q.y, verdict };
@@ -261,11 +332,12 @@
   /* Texte d'une réponse pour l'écran « Mes réponses ». fmt(t) -> "mm:ss" ; labelOf(type) -> libellé d'une erreur. */
   function describeAnswer(a, fmt, labelOf) {
     if (a.kind === "team") return fmt(a.t) + " — personne désignée : " + (TEAM_LABEL[a.team] || a.team) + (a.via ? " (même réponse appliquée sur votre accord : " + a.via + ")" : "");
+    if (a.kind === "ball") return fmt(a.t) + " — le ballon est ici (position confirmée par vous sur cette image)";
     if (a.kind === "event") return fmt(a.t) + " — « " + labelOf(a.type) + " » : " + (a.verdict === "oui" ? "oui, c'est arrivé (ajoutée aux événements)" : "non, écartée");
     if (a.kind === "sub") return fmt(a.t) + " — passage par la zone de remplacement : " + (a.verdict === "joueur" ? "joueur sur le terrain" : "remplaçant qui entre ou sort");
     if (a.kind === "bench") return "Zone du banc : " + (a.ok ? "bien placée" : "a dérivé (suivi de dérive coupé aux prochaines analyses)");
     return "Réponse";
   }
 
-  return { trackDoubts, sameTrackHint, applyOne, applyAnswers, undoOne, openQuestions, answerTeam, answerEvent, answerSub, answerBench, removeAnswer, describeAnswer, isRejected, filterRejected, reject, unreject, TEAM_LABEL, MIN_DETECTIONS, SHARE_OK, T_TOL, D_TOL };
+  return { trackDoubts, sameTrackHint, sameLookHint, answerBall, applyOne, applyAnswers, undoOne, openQuestions, answerTeam, answerEvent, answerSub, answerBench, removeAnswer, describeAnswer, isRejected, filterRejected, reject, unreject, TEAM_LABEL, MIN_DETECTIONS, SHARE_OK, T_TOL, D_TOL };
 });

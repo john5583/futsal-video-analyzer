@@ -89,6 +89,36 @@ Sources : [lois du jeu futsal (FFF)](https://districtfoot08.fff.fr/wp-content/up
 catalogues de fabricants (aluminium blanc, uPVC, bandes rouges ou bleues de 200 mm). Les couleurs de bandes sont des choix de
 fabricants, non des règles : ce catalogue n'est **pas exhaustif**.
 
+## 5 bis. Personnes, ballon et tenue : comment le programme gère le doute
+
+- **Corriger en un clic** : un clic sur le cadre d'une personne ouvre « Qui est cette personne ? » (mon équipe, adversaire, mon gardien, gardien adverse, arbitre / public / remplaçant). Un clic ailleurs propose « le ballon est ici ? ». Tout est retenu dans le projet et annulable dans « Mes réponses ».
+- **Tenue différente** : une personne en pantalon ou survêtement (peu de peau visible aux jambes) alors que son équipe porte un short est questionnée. Mesuré sur des images étiquetées : médiane de 0 % de peau pour un gardien en survêtement, 22 à 34 % pour des joueurs en short.
+- **Cinq joueurs de champ en même temps** dans une même équipe (il n'y en a que quatre en futsal) : l'un d'eux est peut-être un gardien, un arbitre ou un remplaçant ; question sur celui dont les jambes diffèrent.
+- **Même allure** : après avoir désigné un gardien, les autres personnes en pantalon de la même équipe sont **proposées** (jamais appliquées d'office). Mesuré : la tenue seule ne suffit pas à reconnaître un gardien (158 joueurs sur 223 lui ressemblaient autant que lui-même), d'où la vérification par le coach.
+- Ce qui reste hors de portée : une personne lue avec assurance mais sans aucun signe visible de différence (gardien en short aux couleurs de l'équipe adverse, par exemple) ne déclenche aucune question ; le clic sur le cadre sert alors à la corriger.
+
+## 5 ter. Ce qu'il ne faut pas faire (risques de doute ou de résultats faux)
+
+**En filmant**
+- Ne filme pas avec une caméra qui suit le ballon de très près : les quatre joueurs de champ ne sont pas tous visibles, la forme de l'équipe et la hauteur du bloc ne peuvent pas être jugées (couverture faible). Idéal : trépied en hauteur voyant tout le terrain.
+- Évite le zoom, les mouvements brusques, le contre-jour, les joueurs masqués, les replays, les incrustations et les vidéos très compressées ou de faible résolution.
+- Évite des tenues presque identiques entre les deux équipes, ou un gardien habillé comme une équipe : le programme posera des questions, mais mieux vaut des tenues distinctes.
+
+**En utilisant le programme**
+- Ne désigne pas le mauvais but (« je défends » / « j'attaque ») et ne valide pas le calibrage sans vérifier le tracé du terrain : tout le reste en dépend.
+- Marque les zones de banc au bon endroit et indique le bon côté des bancs : sinon, des remplaçants sont comptés comme joueurs ou l'inverse.
+- Ne réponds pas aux questions au hasard ni « en masse » : une mauvaise réponse fausse les statistiques et les erreurs. Utilise « ▶ Voir dans la vidéo », et « Mes réponses » pour annuler.
+- N'accepte pas une proposition « même personne / même allure » sans l'avoir vérifiée.
+- Ne mélange pas deux matchs dans un même projet : la mémoire (tenues, réponses, couleurs de but) est par projet. Refais l'étape des tenues quand elles changent.
+- Ne lis pas une consigne « indicative » de la page « Mon plan tactique » comme un verdict : elle repose sur trop peu d'images.
+
+**Règles de conception (pour que le programme n'invente rien)**
+- Un indice mesuré (jambes, couleur…) ne décide jamais seul : il déclenche une question, sauf s'il est quasi parfait.
+- Un seuil n'est jamais réglé sur les mêmes images que celles qui servent à le juger.
+- Un trou (ballon caché, joueur hors champ) n'est jamais comblé : il reste « non analysé ».
+- Une déduction est toujours étiquetée comme telle ; un résultat sur peu d'images est dit « indicatif ».
+- Les résultats d'un seul match ne sont pas généralisés à un autre.
+
 ## 6. Limites assumées
 
 - Le détecteur est généraliste et ne s'améliore pas avec vos réponses. Un détecteur entraîné (ballon, gardien, buts) demanderait
