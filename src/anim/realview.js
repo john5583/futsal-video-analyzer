@@ -535,6 +535,8 @@
   };
 
   /* ---------- petite carte (ou plan en grand si l'image n'est pas utilisable) ---------- */
+  /* Zone filmée sur la petite carte : activée par défaut. */
+  RealView.prototype.setFov = function (on) { this.fov = on !== false; };
   RealView.prototype.drawMap = function (tNow, shown, corr) {
     const s = this.s, c = this.el.map, ctx = this.mctx;
     const dpr = root.devicePixelRatio || 1, cw = Math.max(2, Math.round(c.clientWidth * dpr)), ch = Math.max(2, Math.round(c.clientHeight * dpr));
@@ -555,6 +557,20 @@
     ctx.beginPath(); ctx.moveTo(ox + (L / 2) * k, oy); ctx.lineTo(ox + (L / 2) * k, oy + W * k); ctx.stroke();
     ctx.beginPath(); ctx.arc(ox + (L / 2) * k, oy + (W / 2) * k, 3 * k, 0, Math.PI * 2); ctx.stroke();
     [0, L].forEach((gx) => { ctx.beginPath(); ctx.arc(ox + gx * k, oy + (W / 2) * k, 6 * k, gx ? Math.PI / 2 : -Math.PI / 2, gx ? Math.PI * 1.5 : Math.PI / 2); ctx.stroke(); });
+    // zone réellement filmée à cet instant : le reste du terrain est assombri (rien n'est dessiné si la projection est inutilisable)
+    if (this.fov !== false && !s.mapOnly) {
+      const pj = s.pr.at(tNow), zone = pj.ok && pj.H ? O.visibleZone(pj.H, L, W) : null;
+      if (zone) {
+        ctx.save();
+        ctx.beginPath(); ctx.rect(ox, oy, L * k, W * k);
+        zone.forEach((p, n) => { const q = M(p[0], p[1]); if (n) ctx.lineTo(q[0], q[1]); else ctx.moveTo(q[0], q[1]); });
+        ctx.closePath(); ctx.fillStyle = "rgba(4,14,9,0.5)"; ctx.fill("evenodd");
+        ctx.beginPath(); zone.forEach((p, n) => { const q = M(p[0], p[1]); if (n) ctx.lineTo(q[0], q[1]); else ctx.moveTo(q[0], q[1]); });
+        ctx.closePath(); ctx.setLineDash([5 * u, 3 * u]); ctx.strokeStyle = "#fde68a"; ctx.lineWidth = 1.6 * u; ctx.stroke();
+        ctx.restore();
+        this.fovShown = true;
+      } else this.fovShown = false;
+    }
     const st = O.stateAt(s.frames, tNow), byId = new Map(st.players.map((p) => [p.id, p]));
     const it = s.ov.items.slice(0, shown);
     it.forEach((i) => {
