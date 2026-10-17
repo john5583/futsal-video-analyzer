@@ -61,7 +61,8 @@
       } else if (!OK[cur] && i.n >= MIN_UNKNOWN) { why = "jamais identifié"; unknown = true; }   // gardien : rôle décidé par la position, pas questionné
       if (!why) return;
       const q = i.pts[i.pts.length >> 1];
-      const d = { kind: "team", id, t: q.t, x: q.x, y: q.y, b: q.b, n: i.n, cur: OK[cur] ? cur : null, votes: Object.assign({}, i.votes), why };
+      const first = i.pts[0], last = i.pts[i.pts.length - 1];
+      const d = { kind: "team", id, t: q.t, x: q.x, y: q.y, b: q.b, n: i.n, cur: OK[cur] ? cur : null, votes: Object.assign({}, i.votes), why, t0: first.t, t1: last.t, p0: [first.x, first.y], p1: [last.x, last.y] };
       if (unknown) {
         const step = Math.max(1, Math.ceil(i.pts.length / MAX_PTS));
         d.pts = i.pts.filter((_p, k) => k % step === 0).map((p) => [r2(p.t), p.x, p.y, p.b]);
@@ -146,6 +147,27 @@
     return false;
   }
 
+  /* Questions qui concernent peut-être LA MÊME PERSONNE que q : le suivi coupe parfois une personne en plusieurs pistes. Deux pistes
+     se suivent si l'une commence juste après (ou finit juste avant) l'autre, tout près de là où elle s'arrête (vitesse plausible),
+     avec la même équipe retenue ; la chaîne de pistes qui se suivent est suivie de proche en proche. C'est une PROPOSITION : rien
+     n'est appliqué sans que le coach l'accepte. */
+  const LINK_GAP = 4, LINK_SPEED = 6;
+  function sameTrackHint(q, doubts) {
+    const teams = (doubts || []).filter((d) => d.kind === "team" && d.t0 != null && d.t1 != null && Array.isArray(d.p0) && Array.isArray(d.p1));
+    if (q.t0 == null || !Array.isArray(q.p0)) return [];
+    const follows = (a, b) => {                                  // b commence après a (ou l'inverse), au bon endroit
+      const dt = b.t0 - a.t1;
+      if (dt < -0.2 || dt > LINK_GAP) return false;
+      return Math.hypot(b.p0[0] - a.p1[0], b.p0[1] - a.p1[1]) <= 2 + LINK_SPEED * Math.max(0, dt);
+    };
+    const linked = (a, b) => a.cur === b.cur && (follows(a, b) || follows(b, a));
+    const group = [q], seen = new Set([q.id]);
+    for (let k = 0; k < group.length; k++) {
+      teams.forEach((d) => { if (!seen.has(d.id) && linked(group[k], d)) { seen.add(d.id); group.push(d); } });
+    }
+    return group.slice(1);
+  }
+
   const isRejected = (mem, e) => !!(mem && Array.isArray(mem.rejected) && mem.rejected.some((r) => r.type === e.type && Math.abs(r.t - e.t) < REJ_TOL));
   const filterRejected = (list, mem) => (list || []).filter((e) => !isRejected(mem, e));
   function reject(mem, e) { if (!isRejected(mem, e)) mem.rejected.push({ type: e.type, t: Math.round(e.t * 10) / 10 }); }
@@ -179,8 +201,9 @@
   }
 
   /* Enregistre une réponse dans la mémoire. Renvoie l'entrée retenue. */
-  function answerTeam(mem, q, team) {
+  function answerTeam(mem, q, team, via) {
     const a = { kind: "team", t: q.t, x: q.x, y: q.y, team };
+    if (via) a.via = via;
     if (Array.isArray(q.pts)) a.pts = q.pts;
     mem.answers = mem.answers.filter((o) => !(o.kind === "team" && sameSpot(o, q))).concat([a]);
     return a;
@@ -214,12 +237,12 @@
 
   /* Texte d'une réponse pour l'écran « Mes réponses ». fmt(t) -> "mm:ss" ; labelOf(type) -> libellé d'une erreur. */
   function describeAnswer(a, fmt, labelOf) {
-    if (a.kind === "team") return fmt(a.t) + " — personne désignée : " + (TEAM_LABEL[a.team] || a.team);
+    if (a.kind === "team") return fmt(a.t) + " — personne désignée : " + (TEAM_LABEL[a.team] || a.team) + (a.via ? " (même réponse appliquée sur votre accord : " + a.via + ")" : "");
     if (a.kind === "event") return fmt(a.t) + " — « " + labelOf(a.type) + " » : " + (a.verdict === "oui" ? "oui, c'est arrivé (ajoutée aux événements)" : "non, écartée");
     if (a.kind === "sub") return fmt(a.t) + " — passage par la zone de remplacement : " + (a.verdict === "joueur" ? "joueur sur le terrain" : "remplaçant qui entre ou sort");
     if (a.kind === "bench") return "Zone du banc : " + (a.ok ? "bien placée" : "a dérivé (suivi de dérive coupé aux prochaines analyses)");
     return "Réponse";
   }
 
-  return { trackDoubts, applyOne, applyAnswers, undoOne, openQuestions, answerTeam, answerEvent, answerSub, answerBench, removeAnswer, describeAnswer, isRejected, filterRejected, reject, unreject, TEAM_LABEL, MIN_DETECTIONS, SHARE_OK, T_TOL, D_TOL };
+  return { trackDoubts, sameTrackHint, applyOne, applyAnswers, undoOne, openQuestions, answerTeam, answerEvent, answerSub, answerBench, removeAnswer, describeAnswer, isRejected, filterRejected, reject, unreject, TEAM_LABEL, MIN_DETECTIONS, SHARE_OK, T_TOL, D_TOL };
 });

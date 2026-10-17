@@ -58,3 +58,19 @@ test("but blanc uni : rien n'est appris (aucune couleur inventée)", () => {
   const post = (y) => { const a = CF.project(B, f, wk.w, wk.h, 0, y, 0), b = CF.project(B, f, wk.w, wk.h, 0, y, 2); return { u: a.u, v0: b.v, v1: a.v, width: 5, score: a.v - b.v }; };
   assert.equal(G.learnPalette(wk, { left: post(W / 2 - 1.5), right: post(W / 2 + 1.5) }), null);
 });
+
+/* ---------- cadre clair sans bandes : candidats à confirmer, jamais retenus d'office ---------- */
+test("cadre blanc uni : non détecté d'office, mais proposé comme candidat à confirmer, au bon endroit", () => {
+  const wk = work({ goalColors: [WHITE, WHITE] });
+  assert.equal(G.detect(wk).goals.length, 0, "aucune détection automatique sans bandes");
+  const c = G.candidates(wk);
+  assert.ok(c.length >= 1 && c[0].candidate === true, "un candidat est proposé");
+  const B = CF.cameraBasis(TRUE), f = CF.focalPx(wk.w, TRUE[5]);
+  const l = CF.project(B, f, wk.w, wk.h, 0, W / 2 - 1.5, 0), r = CF.project(B, f, wk.w, wk.h, 0, W / 2 + 1.5, 0);
+  assert.ok(Math.hypot(c[0].left.u - l.u, c[0].left.v1 - l.v) < 6 && Math.hypot(c[0].right.u - r.u, c[0].right.v1 - r.v) < 6, "pieds des poteaux au bon endroit");
+});
+
+test("pas de candidat sur une scène sans cadre clair (sol et lignes seulement)", () => {
+  const wk = work({ goalColors: [[70, 110, 160], [70, 110, 160]] });
+  assert.equal(G.candidates(wk).length, 0);
+});

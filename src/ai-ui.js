@@ -13,6 +13,7 @@
   let pts = [];              // repères en cours de placement : { id, label, ix, iy }
   let placing = null;        // identifiant du repère à placer
   let pickRole = null;       // rôle de tenue à choisir
+  let qGroup = null;         // proposition d'appliquer la même réponse aux pistes de la même personne : { team, q, group }
   let qHighlight = null;     // personne désignée par une question : { t, b } (cadre orange sur la vidéo)
   let benchMark = null;      // marquage d'une zone de banc en cours : { t, H, first: [x, y] | null }
   let frames = [];           // trajectoires (format d'analyse)
@@ -623,6 +624,18 @@
     const qs = a ? D.openQuestions({ doubts: a.doubts || [], subs: a.subs || [], uncertain: a.uncertain || [], memory: memory() }) : [];
     $("ai-q-count").textContent = "(" + qs.length + ")";
     box.innerHTML = "";
+    if (qGroup) {
+      const open = qGroup.group.filter((g) => qs.some((x) => x.kind === "team" && x.id === g.id));
+      if (open.length) {
+        const ban = document.createElement("div"); ban.className = "q"; ban.style.gridTemplateColumns = "1fr";
+        const tx = document.createElement("div"); tx.className = "qt";
+        tx.textContent = open.length + " autre(s) question(s) concernent peut-être la même personne (une piste qui commence juste après ou finit juste avant, au même endroit, avec la même équipe retenue). Appliquer la même réponse (« " + (D.TEAM_LABEL[qGroup.team] || qGroup.team) + " ») ?";
+        const bt = document.createElement("div"); bt.className = "qb";
+        const yes = document.createElement("button"); yes.className = "primary"; yes.textContent = "Oui, appliquer aux " + open.length; yes.addEventListener("click", () => applyGroup(open));
+        const no = document.createElement("button"); no.textContent = "Non, une par une"; no.addEventListener("click", () => { qGroup = null; renderQuestions(); });
+        bt.appendChild(yes); bt.appendChild(no); ban.appendChild(tx); ban.appendChild(bt); box.appendChild(ban);
+      } else qGroup = null;
+    }
     if (!qs.length) { const p = document.createElement("p"); p.className = "muted"; p.style.padding = "6px"; p.textContent = "Aucune question en attente."; box.appendChild(p); return; }
     qs.forEach((q) => {
       const row = document.createElement("div"); row.className = "q";
@@ -668,6 +681,21 @@
     const ans = D.answerTeam(memory(), q, team), r = D.applyOne(frames, ans);
     if (r.ok) { ans.undo = r.undo; a.frames = P.compactFrames(frames); }
     else App.toast("Je ne retrouve pas cette personne dans les images : votre réponse est retenue pour la prochaine analyse.", true);
+    const rest = D.openQuestions({ doubts: a.doubts || [], memory: memory() }).filter((x) => x.kind === "team");
+    const group = D.sameTrackHint(q, rest);
+    qGroup = group.length ? { team, q, group } : null;
+    reanalyzeSuggestions(); refreshLive(); App.changed(true);
+  }
+  /* Applique la réponse du coach aux pistes proposées (chacune reste une réponse distincte, annulable dans « Mes réponses »). */
+  function applyGroup(list) {
+    const a = state.project.ai, g = qGroup;
+    if (!g) return;
+    list.forEach((d) => {
+      const ans = D.answerTeam(memory(), d, g.team, App.fmt(g.q.t)), r = D.applyOne(frames, ans);
+      if (r.ok) ans.undo = r.undo;
+    });
+    a.frames = P.compactFrames(frames);
+    qGroup = null;
     reanalyzeSuggestions(); refreshLive(); App.changed(true);
   }
   function answerSub(q, verdict) {

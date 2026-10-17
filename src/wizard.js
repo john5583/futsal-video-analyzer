@@ -89,6 +89,11 @@
         "<div class=\"wiz-btns\"><button class=\"primary\" data-act=\"retryGoal\">🔍 Chercher le but sur cette image</button><button data-act=\"showGoal\">Je montre le but moi-même (3 clics)</button><button data-act=\"manualMode\">Placer les repères moi-même</button></div>" +
         (T.msg ? "<p class=\"wiz-err\">" + esc(T.msg) + "</p>" : "") + cancel;
     }
+    if (T.phase === "confirmGoal") {
+      return head + "<p class=\"wiz-now\">Je crois voir un but (cadre clair, sans bandes de couleur), entouré en orange. Est-ce bien un but ?</p>" +
+        "<p class=\"muted\">Je ne le retiens pas sans votre accord : des poteaux clairs peuvent aussi être une fenêtre, un panier ou des vêtements.</p>" +
+        "<div class=\"wiz-btns\"><button class=\"primary\" data-act=\"confirmGoal\">Oui, c'est le but</button><button data-act=\"showGoal\">Non, je le montre moi-même (3 clics)</button><button data-act=\"retryGoal\">Chercher sur une autre image</button></div>" + cancel;
+    }
     if (T.phase === "mgoal") {
       const n = (T.mg || []).length, what = ["le <b>pied du poteau gauche</b>", "le <b>pied du poteau droit</b>", "le <b>haut d'un des deux poteaux</b>"][n] || "";
       return head + "<p class=\"wiz-now\">Montrez-moi le but : cliquez sur " + what + " (" + (n + 1) + " / 3).</p>" +
@@ -228,6 +233,7 @@
     },
     async retryGoal() { await prepareFrame(); },
     showGoal() { startShowGoal(); },
+    confirmGoal() { const T = W.T; if (!T || !T.cand) return; const g = T.cand; T.cand = null; acceptGoal(g); },
     undoGoalClick() { const T = W.T; if (T && T.mg) T.mg.pop(); render(); AI.redraw(); },
     manualMode() { const T = W.T; if (T) T.cancel = true; W.T = Object.assign(T || {}, { phase: "manual" }); AI.setPointer(null); AI.clearPoints(); W.lmIdx = 0; W.terrainT = null; W.msg = ""; render(); beginLandmark(); AI.redraw(); },
     async autoMode() { AI.cancelPlacing(); AI.clearPoints(); await startTerrain(); },
@@ -327,7 +333,7 @@
 
   async function startTerrain() {
     if (W.T) W.T.cancel = true;
-    W.T = { phase: "scan", text: "", msg: "", clicks: [], skipped: new Set(), colors: [], colorKey: null, cancel: false, busy: true, results: [], resultIdx: 0, pose: null, work: null, goal: null, frame: null };
+    W.T = { phase: "scan", cands: [], text: "", msg: "", clicks: [], skipped: new Set(), colors: [], colorKey: null, cancel: false, busy: true, results: [], resultIdx: 0, pose: null, work: null, goal: null, frame: null };
     const T = W.T;
     AI.clearPoints(); AI.setPointer(terrainPointer);
     setStep("terrain");
@@ -340,11 +346,18 @@
         await tick();
         await seekVideo(dur * fr[i]);
         const g = AI.grabSam(), wk = CF.prepare(g.img, 640), goal = GL.detect(wk, goalOpts()).goals[0];
+        const cand = goal ? null : GL.candidates(wk)[0];
+        if (cand) T.cands.push({ t: g.t, score: cand.score });
         if (goal) T.results.push({ t: g.t, h: Math.min(goal.left.v1 - goal.left.v0, goal.right.v1 - goal.right.v0) });
       }
     } catch (e) { T.msg = "Recherche impossible : " + e.message; }
     if (T.cancel) return;
     T.busy = false;
+    if (!T.results.length && T.cands.length) {
+      // aucun but à bandes : le meilleur candidat « cadre clair » est montré au coach pour confirmation
+      const bestC = T.cands.slice().sort((x, y) => y.score - x.score)[0];
+      await seekVideo(bestC.t); await prepareFrame(); return;
+    }
     if (!T.results.length) { T.phase = "nogoal"; T.msg = ""; await seekVideo(0); render(); AI.redraw(); return; }
     // on préfère le premier instant où le but est bien visible (l'analyse commence au repérage du terrain)
     const best = Math.max(...T.results.map((r) => r.h));
@@ -368,7 +381,12 @@
     T.busy = true; video.pause();
     const g = AI.grabSam(), wk = CF.prepare(g.img, 640), goal = GL.detect(wk, goalOpts()).goals[0] || null;
     T.frame = { t: g.t, w: g.w, h: g.h, k: g.k }; T.work = wk; T.goal = goal; T.clicks = []; T.skipped = new Set(); T.pose = null; T.msg = "";
-    if (!goal) { T.phase = "nogoal"; T.msg = "Aucun but repéré sur cette image."; T.busy = false; render(); AI.redraw(); return false; }
+    if (!goal) {
+      const cand = GL.candidates(wk)[0] || null;
+      if (cand) { T.cand = cand; T.phase = "confirmGoal"; T.msg = ""; T.busy = false; render(); AI.redraw(); return false; }
+      T.phase = "nogoal"; T.msg = "Aucun but repéré sur cette image."; T.busy = false; render(); AI.redraw(); return false;
+    }
+    T.cand = null;
     acceptGoal(goal);
     return true;
   }
@@ -482,6 +500,14 @@
     if (T.maskCanvas && (T.phase === "clicks")) {
       const o = V(0, 0), e = V(T.work.w, T.work.h);
       ctx.drawImage(T.maskCanvas, o[0], o[1], e[0] - o[0], e[1] - o[1]);
+    }
+    if (T.phase === "confirmGoal" && T.cand) {
+      ctx.strokeStyle = "#f97316"; ctx.lineWidth = 3; ctx.setLineDash([8, 5]);
+      const c = T.cand;
+      [c.left, c.right].forEach((p) => { const a = V(p.u, p.v0), b = V(p.u, p.v1); ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke(); });
+      const ta = V(c.left.u, c.left.v0), tb = V(c.right.u, c.right.v0);
+      ctx.beginPath(); ctx.moveTo(ta[0], ta[1]); ctx.lineTo(tb[0], tb[1]); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle = "#f97316"; ctx.font = "700 13px 'Segoe UI',Arial,sans-serif"; ctx.fillText("But ?", ta[0] + 4, ta[1] - 6);
     }
     if (T.goal) {
       ctx.strokeStyle = "#22c55e"; ctx.lineWidth = 3;
@@ -793,7 +819,7 @@
   video.addEventListener("seeked", () => {
     if (W.step === "terrain" && W.T && W.T.phase !== "manual") {
       const T = W.T;
-      if (!T.busy && T.frame && (T.phase === "clicks" || T.phase === "color" || T.phase === "mgoal") && Math.abs(video.currentTime - T.frame.t) > 0.05) {
+      if (!T.busy && T.frame && (T.phase === "clicks" || T.phase === "color" || T.phase === "mgoal" || T.phase === "confirmGoal") && Math.abs(video.currentTime - T.frame.t) > 0.05) {
         T.msg = "Vous avez déplacé la vidéo : je cherche à nouveau le but sur cette image.";
         prepareFrame().then(() => { if (W.T && !W.T.goal) { W.T.msg = "Aucun but repéré sur cette image."; render(); } });
       }

@@ -200,3 +200,27 @@ test("remplaçants : une personne qui entre par la zone de remplacement est ques
   assert.equal(D.openQuestions({ subs: r0.subs, memory: mem }).filter((q) => q.kind === "sub" && q.id === 5).length, 0);
   assert.equal(ans.verdict, "joueur");
 });
+
+test("même personne coupée en pistes : la question voisine est proposée (jamais appliquée d'office)", () => {
+  const mk = (id, t0, n, x, y) => track(id, n, ["A", "B"], x, y, t0);
+  // piste 2 : 0..6 s à x≈20 ; piste 3 : commence juste après, au même endroit ; piste 4 : même moment mais très loin ; piste 5 : bien plus tard
+  const frames = toFrames(mk(2, 0, 30, 20, 8), mk(3, 6.4, 30, 21.6, 8.2), mk(4, 6.4, 30, 5, 18), mk(5, 40, 30, 21.6, 8.2));
+  const teams = { 2: "A", 3: "A", 4: "A", 5: "A" };
+  const ds = D.trackDoubts(frames, teams);
+  assert.equal(ds.length, 4);
+  const q2 = ds.find((d) => d.id === 2), group = D.sameTrackHint(q2, ds);
+  assert.deepEqual(group.map((d) => d.id), [3], "seule la piste qui suit, au bon endroit, est proposée");
+  // chaîne : 3 -> 5 n'est pas liée (trop tard), donc 5 reste seule
+  assert.deepEqual(D.sameTrackHint(ds.find((d) => d.id === 5), ds), []);
+  // autre équipe retenue : jamais liée
+  const teams2 = { 2: "A", 3: "B", 4: "A", 5: "A" };
+  const ds2 = D.trackDoubts(frames, teams2);
+  assert.deepEqual(D.sameTrackHint(ds2.find((d) => d.id === 2), ds2), []);
+});
+
+test("réponse appliquée à un groupe : chaque réponse est distincte et indique son origine", () => {
+  const mem = { goalPalettes: [], rejected: [], answers: [] };
+  const a = D.answerTeam(mem, { t: 9, x: 21, y: 8 }, "B", "00:35");
+  assert.equal(a.via, "00:35");
+  assert.match(D.describeAnswer(a, (t) => "t" + t, (x) => x), /même réponse appliquée sur votre accord/);
+});
