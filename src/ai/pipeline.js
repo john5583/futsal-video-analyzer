@@ -101,7 +101,10 @@
 
   /* Faux ballon : marquage jaune au sol (tirets) ou brassard fluo. Mesuré sur des matchs réels : ces boîtes
      contiennent ~38 % de pixels jaunes et aucun blanc, un vrai ballon ~0 % de jaune.
+     Sur un sol lui-même jaune ou orangé (parquet sous une lumière chaude), tout est « jaune » : le filtre supprimait alors la moitié des vrais ballons.
+     Il ne s'applique donc que si le pourtour de la boîte n'est PAS jaune (un marquage jaune se détache d'un sol d'une autre couleur).
      img : { data (RGBA), width, height } ; box en pixels de img. */
+  function isYellow(r, g, b) { return r > 140 && g > 120 && b < 0.6 * g && r - b > 70; }
   function isFloorMark(img, box) {
     const x0 = Math.max(0, Math.floor(box.x1)), y0 = Math.max(0, Math.floor(box.y1));
     const x1 = Math.min(img.width, Math.ceil(box.x2)), y1 = Math.min(img.height, Math.ceil(box.y2));
@@ -110,10 +113,22 @@
     for (let y = y0; y < y1; y += step) for (let x = x0; x < x1; x += step) {
       const o = (y * img.width + x) * 4, r = img.data[o], g = img.data[o + 1], b = img.data[o + 2];
       n++;
-      if (r > 140 && g > 120 && b < 0.6 * g && r - b > 70) yellow++;
+      if (isYellow(r, g, b)) yellow++;
       if (Math.min(r, g, b) > 170 && Math.max(r, g, b) - Math.min(r, g, b) < 45) white++;
     }
-    return n > 0 && yellow / n >= 0.25 && white / n < 0.08;
+    if (!(n > 0 && yellow / n >= 0.25 && white / n < 0.08)) return false;
+    // pourtour : anneau autour de la boîte (une boîte de large autour) ; s'il est aussi jaune, le sol est jaune et la boîte n'est pas une marque
+    const bw = Math.max(4, x1 - x0), bh = Math.max(4, y1 - y0);
+    const rx0 = Math.max(0, x0 - bw), ry0 = Math.max(0, y0 - bh), rx1 = Math.min(img.width, x1 + bw), ry1 = Math.min(img.height, y1 + bh);
+    const rstep = Math.max(1, Math.floor(Math.min(rx1 - rx0, ry1 - ry0) / 36));
+    let rn = 0, ry = 0;
+    for (let y = ry0; y < ry1; y += rstep) for (let x = rx0; x < rx1; x += rstep) {
+      if (x >= x0 && x < x1 && y >= y0 && y < y1) continue;
+      const o = (y * img.width + x) * 4;
+      rn++;
+      if (isYellow(img.data[o], img.data[o + 1], img.data[o + 2])) ry++;
+    }
+    return !(rn > 0 && ry / rn >= 0.25);
   }
 
   /* enabled === false : filtre désactivé (match joué avec un ballon jaune). */
@@ -666,5 +681,5 @@
     return { dets, scale, img: ctx.getImageData(0, 0, cw, ch), width: cw, height: ch };
   }
 
-  return { courtH, trackDrift, inBenchZone, shiftedZones, followBenches, tileRects, courtRegion, zoomRects, tileToFrame, mergeTiles, isFloorMark, dropFloorMarks, calibrationAt, processDetections, finalizeFrames, compactFrames, expandFrames, frameNear, sampleTimes, startTime, estimateDuration, learnFactor, FACTOR_MIN, FACTOR_MAX, analyseVideo, detectAt, detectCanvas, captureFrames, TEAM_CODE };
+  return { isFloorMark, courtH, trackDrift, inBenchZone, shiftedZones, followBenches, tileRects, courtRegion, zoomRects, tileToFrame, mergeTiles, isFloorMark, dropFloorMarks, calibrationAt, processDetections, finalizeFrames, compactFrames, expandFrames, frameNear, sampleTimes, startTime, estimateDuration, learnFactor, FACTOR_MIN, FACTOR_MAX, analyseVideo, detectAt, detectCanvas, captureFrames, TEAM_CODE };
 });
