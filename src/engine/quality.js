@@ -11,6 +11,8 @@
   const COVER_MIN = 0.4;          // part du jeu où les quatre joueurs de champ sont visibles (sinon : terrain mal montré)
   const RELIABLE_MIN = 0.5;       // part du temps où le jeu est en cours ET le ballon visible
   const LOST_MAX = 0.08;          // part du temps où la caméra est perdue
+  const UNUSABLE_RELIABLE = 0.05; // en dessous, l'analyse est inutilisable (aucune conclusion possible)
+  const UNUSABLE_LOST = 0.5;      // au-dessus (caméra perdue), idem
   const BENCH_SEEN_MIN = 20;      // personnes vues le long des lignes de touche à partir de laquelle on parle de banc
   const GK_SIDE = 0.6;            // part des images où le gardien est vu du mauvais côté au-delà de laquelle on soupçonne un camp inversé
   const SECOND_HALF_MIN = 1200;   // s : une analyse de 20 min ou plus couvre probablement les deux mi-temps
@@ -52,10 +54,26 @@
 
     // caméra perdue
     const span = nf.length > 1 ? nf[nf.length - 1].t - nf[0].t : 0;
-    const lostSec = (Array.isArray(ai.lost) ? ai.lost : []).reduce((s, r) => s + (Array.isArray(r) ? Math.max(0, num(r[1]) - num(r[0])) : 0), 0);
-    if (span > 0) {
-      m.lost = lostSec / span;
+    // la part perdue se mesure sur la plage analysée (les images perdues ne sont pas gardées : leur durée ne compte pas dans span)
+    const range = ai.settings && num(ai.settings.t1) > num(ai.settings.t0) ? num(ai.settings.t1) - num(ai.settings.t0) : 0;
+    const lostSpan = range || span;
+    const lostSec = Math.min(lostSpan, (Array.isArray(ai.lost) ? ai.lost : []).reduce((s, r) => s + (Array.isArray(r) ? Math.max(0, num(r[1]) - num(r[0])) : 0), 0));
+    if (lostSpan > 0) {
+      m.lost = lostSec / lostSpan;
       if (m.lost > LOST_MAX) items.push({ id: "camera", level: "attention", title: "Caméra souvent perdue", detail: "Le suivi de la caméra est perdu sur " + Math.round(lostSec) + " s (" + pct(m.lost) + " de l'analyse) : ces images sont ignorées.", fix: "Évite zoom, mouvements brusques et flou ; ajoute un calibrage dans les passages concernés." });
+    }
+
+    // analyse inutilisable : trop peu de temps réellement analysé pour en tirer la moindre conclusion (en tête de liste)
+    const lostMostly = m.lost != null && m.lost > UNUSABLE_LOST, relLow = m.reliable != null && m.reliable < UNUSABLE_RELIABLE;
+    if (lostMostly || relLow) {
+      const why = [];
+      if (m.reliable != null) why.push("seulement " + pct(m.reliable) + " du temps a pu être analysé de façon fiable");
+      if (lostMostly) why.push("la caméra est perdue sur " + pct(m.lost) + " de la vidéo");
+      items.unshift({
+        id: "inutilisable", level: "attention", blocking: true, title: "⛔ Analyse inutilisable",
+        detail: why.join(" ; ").replace(/^./, (c) => c.toUpperCase()) + ". Aucune conclusion sur les erreurs n'est possible : « 0 erreur » ne veut pas dire « aucune erreur ».",
+        fix: lostMostly ? "Ajoute un calibrage au moment où la caméra redevient stable (voir le point de reprise indiqué), puis relance l'analyse." : "Vérifie le calibrage, les tenues et la visibilité du ballon, puis relance l'analyse."
+      });
     }
 
     // banc
@@ -100,5 +118,8 @@
     return out;
   }
 
-  return { evaluate, preflight, COVER_MIN, RELIABLE_MIN, LOST_MAX, BENCH_SEEN_MIN, GK_SIDE };
+  /* Vrai si le contrôle qualité conclut que l'analyse est inutilisable (voir le constat « inutilisable »). */
+  function unusable(quality) { return !!(quality && Array.isArray(quality.items) && quality.items.some((i) => i && i.blocking)); }
+
+  return { evaluate, preflight, unusable, COVER_MIN, RELIABLE_MIN, LOST_MAX, UNUSABLE_RELIABLE, UNUSABLE_LOST, BENCH_SEEN_MIN, GK_SIDE };
 });

@@ -67,3 +67,42 @@ test("avant le lancement : ce qui est prêt et ce qui manque", () => {
   assert.ok(ok.every((x) => x.ok));
   assert.deepEqual(Q.preflight(null, null, null).length > 0, true);
 });
+
+/* ---------- analyse inutilisable (caméra perdue presque tout le temps) ---------- */
+test("caméra perdue sur presque toute la plage : constat « inutilisable » en tête, pourcentage jamais au-delà de 100 %", () => {
+  // images conservées : 48 s seulement ; plage analysée : 800 s ; caméra perdue de 66 s à 817 s (le cas réel mesuré)
+  const res = build(48, () => ({ A: [5, 8, 11, 20], gk: 3 }));
+  res.context = { reliable: { ratio: 0.01, sec: 10.7, total: 800 } };
+  const r = Q.evaluate({ res, ai: ai({ lost: [[66, 817]], settings: { t0: 17, t1: 817 } }), project: {}, L });
+  assert.equal(r.items[0].id, "inutilisable", "en tête de liste");
+  assert.equal(r.items[0].blocking, true);
+  assert.ok(/0 erreur/.test(r.items[0].detail) && /aucune erreur/.test(r.items[0].detail));
+  assert.ok(r.measures.lost <= 1 && r.measures.lost > 0.9, "part perdue : " + r.measures.lost);
+  assert.ok(!/\d{3,} %/.test(r.items.map((i) => i.detail).join(" ")), "aucun pourcentage à 3 chiffres");
+  assert.equal(Q.unusable(r), true);
+});
+
+test("couverture fiable sous 5 % sans caméra perdue : analyse inutilisable aussi, avec un remède adapté", () => {
+  const res = build(60, () => ({ A: [5, 8, 11, 20], gk: 3 }));
+  res.context = { reliable: { ratio: 0.02, sec: 1.2, total: 60 } };
+  const r = Q.evaluate({ res, ai: ai(), project: {}, L });
+  assert.equal(r.items[0].id, "inutilisable");
+  assert.ok(!/calibrage au moment/.test(r.items[0].fix));
+});
+
+test("analyse normale ou simplement fragile : jamais « inutilisable »", () => {
+  const ok = Q.evaluate({ res: build(60, () => ({ A: [5, 8, 11, 20], gk: 3 })), ai: ai(), project: {}, L });
+  assert.equal(Q.unusable(ok), false);
+  const res = build(60, () => ({ A: [5, 8, 11, 20], gk: 3 }));
+  res.context = { reliable: { ratio: 0.3, sec: 18, total: 60 } };
+  const weak = Q.evaluate({ res, ai: ai({ lost: [[10, 30]], settings: { t0: 0, t1: 60 } }), project: {}, L });
+  assert.equal(Q.unusable(weak), false, "30 % du temps utilisable et 33 % perdu : fragile, pas inutilisable");
+  assert.equal(Q.unusable(null), false);
+  assert.equal(Q.unusable({}), false);
+});
+
+test("ancien projet sans plage enregistrée : la part perdue se calcule comme avant", () => {
+  const res = build(100, () => ({ A: [5, 8, 11, 20], gk: 3 }));
+  const r = Q.evaluate({ res, ai: ai({ lost: [[10, 30]] }), project: {}, L });
+  assert.ok(Math.abs(r.measures.lost - 0.2) < 1e-9);
+});
