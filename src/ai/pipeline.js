@@ -2,11 +2,11 @@
    reconnaissance des équipes, suivi, et lecture de la vidéo image par image (navigateur). */
 (function (root, factory) {
   if (typeof module === "object" && module.exports) {
-    module.exports = factory(require("./yolox"), require("./homography"), require("./kit"), require("./tracker"), require("./camera"), require("./balltrack"), require("./doubt"));
+    module.exports = factory(require("./yolox"), require("./homography"), require("./kit"), require("./tracker"), require("./camera"), require("./balltrack"), require("./doubt"), require("./signature"));
   } else {
-    root.FutsalPipeline = factory(root.FutsalYolox, root.FutsalHomography, root.FutsalKit, root.FutsalTracker, root.FutsalCamera, root.FutsalBallTrack, root.FutsalDoubt);
+    root.FutsalPipeline = factory(root.FutsalYolox, root.FutsalHomography, root.FutsalKit, root.FutsalTracker, root.FutsalCamera, root.FutsalBallTrack, root.FutsalDoubt, root.FutsalSignature);
   }
-})(typeof self !== "undefined" ? self : this, function (Y, HG, K, T, Cam, BT, D) {
+})(typeof self !== "undefined" ? self : this, function (Y, HG, K, T, Cam, BT, D, S) {
   "use strict";
 
   const TEAM_CODE = { A: "A", B: "B", GKA: "a", GKB: "b" };
@@ -210,6 +210,8 @@
       const item = { x: Math.round(p[0] * 100) / 100, y: Math.round(p[1] * 100) / 100, team: cls.team, box: [d.x1, d.y1, d.x2, d.y2], conf: d.score };
       const leg = ctx.img ? K.legSkin(ctx.img, [d.x1, d.y1, d.x2, d.y2]) : null;      // peau visible aux jambes (pantalon ou short)
       if (leg != null) item.leg = leg;
+      // signature d'apparence, lue seulement quand les tenues de référence sont proches (aide le suivi, jamais enregistrée dans les images)
+      if (ctx.appearance && ctx.img) { const sig = S.sample(ctx.img, [d.x1, d.y1, d.x2, d.y2]); if (sig) item.sig = sig; }
       // équipe de champ la plus proche (UNK si la tenue ne ressemble à aucune : arbitre, gardien d'une autre couleur…) ;
       // ne sert qu'à revoir les rôles en fin d'analyse quand le cas est ambigu
       if (ctx.refs && ctx.refs.A && ctx.refs.B) item.f = K.classify(feat, { A: ctx.refs.A, B: ctx.refs.B }, close ? { reject: ctx.reject, close } : { reject: ctx.reject }).team;
@@ -543,7 +545,7 @@
     const gctx = gcanvas.getContext("2d", { willReadFrequently: true });
     // tenues de référence trop proches (voir K.ambiguity) : reconnaissance, suivi et rôles adaptés ; sinon comportement inchangé
     const amb = opts.refs ? K.ambiguity(opts.refs) : { close: false, roles: false };
-    const tracker = new T.Tracker(amb.close ? { soft: 2 } : undefined);
+    const tracker = new T.Tracker(amb.close ? { soft: 2, appearance: true } : undefined);
     const frames = [], lost = [], recalage = [];   // recalage : [{ de, a, reprise }] ; reprise = instant où la caméra redevient stable (null si jamais)
     let lostStart = null, lastBall = null, curLost = null;
     const doubts = [];                   // pistes dont l'équipe est douteuse (questions au coach)
@@ -649,7 +651,7 @@
         continue;
       }
       if (lostStart != null) { lost.push([lostStart, t]); recalage.push({ de: curLost.de, a: t, reprise: curLost.reprise }); lostStart = null; curLost = null; }
-      frames.push(processDetections(dets, { frameW: cw, frameH: ch, scale, img, H, L: opts.L, W: opts.W, refs: opts.refs, reject: opts.tol, tracker, t, close: amb.close, bench, benchZones: opts.benchZones, benchDrift }));
+      frames.push(processDetections(dets, { frameW: cw, frameH: ch, scale, img, H, L: opts.L, W: opts.W, refs: opts.refs, reject: opts.tol, tracker, t, close: amb.close, appearance: amb.close, bench, benchZones: opts.benchZones, benchDrift }));
       if (opts.onProgress) {
         const elapsed = (Date.now() - started) / 1000;
         opts.onProgress({ done: i + 1, total: times.length, eta: (elapsed / (i + 1)) * (times.length - i - 1), frame: frames[frames.length - 1] });
