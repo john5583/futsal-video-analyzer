@@ -1,8 +1,8 @@
 /* Suivi des joueurs : associe les détections d'une image à la suivante (coordonnées terrain en mètres). */
 (function (root, factory) {
-  if (typeof module === "object" && module.exports) module.exports = factory();
-  else root.FutsalTracker = factory();
-})(typeof self !== "undefined" ? self : this, function () {
+  if (typeof module === "object" && module.exports) module.exports = factory(require("./signature"));
+  else root.FutsalTracker = factory(root.FutsalSignature);
+})(typeof self !== "undefined" ? self : this, function (S) {
   "use strict";
 
   const MAX_SPEED = 9;       // m/s, plafond réaliste d'un joueur de futsal
@@ -10,9 +10,11 @@
 
   /* opts.soft (mètres, 0 par défaut) : tenues trop proches, l'équipe lue sur une image n'est pas fiable.
      Une piste peut alors recevoir une détection d'une autre équipe moyennant ce surcoût (au lieu d'être coupée),
-     et son équipe est un vote où les images récentes pèsent davantage. */
+     et son équipe est un vote où les images récentes pèsent davantage.
+     opts.appearance (faux par défaut) : tenues proches, les détections portent une signature d'apparence (d.sig, voir signature.js) ;
+     un petit surcoût borné écarte une piste d'une personne qui ne lui ressemble pas. Sans signature fiable : aucun effet. */
   function Tracker(opts) {
-    this.opts = Object.assign({ maxSpeed: MAX_SPEED, maxMissed: MAX_MISSED, soft: 0 }, opts || {});
+    this.opts = Object.assign({ maxSpeed: MAX_SPEED, maxMissed: MAX_MISSED, soft: 0, appearance: false }, opts || {});
     this.tracks = [];
     this.nextId = 1;
   }
@@ -35,7 +37,8 @@
         if (!ok && !soft) return;
         const dd = Math.hypot(d.x - px, d.y - py);
         if (dd > gate) return;
-        pairs.push({ ti, di, cost: dd + (ok ? (tr.team !== d.team ? 1.5 : 0) : soft) });
+        const look = this.opts.appearance ? S.penalty(tr.sig, d.sig) : 0;
+        pairs.push({ ti, di, cost: dd + (ok ? (tr.team !== d.team ? 1.5 : 0) : soft) + look });
       });
     });
     pairs.sort((a, b) => a.cost - b.cost);
@@ -53,12 +56,14 @@
         tr.votes[d.team] = (tr.votes[d.team] || 0) + 1;
       }
       tr.team = bestVote(tr.votes, tr.team);
+      if (this.opts.appearance) tr.sig = S.blend(tr.sig, d.sig);
       d.id = tr.id;
     });
     dets.forEach((d, di) => {
       if (usedD.has(di)) return;
       const tr = { id: this.nextId++, team: d.team, x: d.x, y: d.y, vx: 0, vy: 0, lastT: t, n: 1, votes: {} };
       if (d.team !== "UNK") tr.votes[d.team] = 1;
+      if (this.opts.appearance) tr.sig = S.blend(null, d.sig);
       this.tracks.push(tr);
       d.id = tr.id;
     });
