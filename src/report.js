@@ -69,6 +69,10 @@
     h += "<header class=\"rep-head\"><h1>" + esc(title) + "</h1>" + (vs ? "<p class=\"sub\">" + vs + "</p>" : "") +
       (project.defaultSystem ? "<p class=\"sub\">Système de jeu : " + esc(project.defaultSystem) + "</p>" : "") + "</header>";
 
+    // analyse IA inutilisable (presque rien analysé) : un « 0 » plus bas ne doit pas se lire comme « aucune erreur »
+    const qual = project.ai && project.ai.quality, blocking = qual && Array.isArray(qual.items) ? qual.items.find((i) => i && i.blocking) : null;
+    if (blocking) h += "<p class=\"empty\"><strong>" + esc(blocking.title) + "</strong> — " + esc(blocking.detail) + "</p>";
+
     h += "<section class=\"cards\">" +
       card("Erreurs relevées", s.totalErrors) + card("Buts encaissés", s.goalsAgainst) + card("Buts marqués", s.goalsFor) +
       card("Critiques", s.critical, "crit") + card("Majeures", s.major, "maj") + card("Mineures", s.minor) + "</section>";

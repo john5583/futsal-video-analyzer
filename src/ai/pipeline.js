@@ -12,6 +12,7 @@
   const TEAM_CODE = { A: "A", B: "B", GKA: "a", GKB: "b" };
   const BALL_CAND = 0.05;      // score minimal d'un candidat ballon
   const BALL_STRONG = 0.2;     // score d'une détection de ballon fiable seule
+  const RESUME_RUN = 0.5;      // s de suivi de la caméra sans échec pour dire qu'elle est redevenue stable après un décrochage
   const MAX_BALL_CANDS = 4;    // candidats gardés par image
   const BENCH_HALF_LEN = 12;   // m : zone des bancs de part et d'autre de la ligne médiane
   const BENCH_DEPTH = 6;       // m : profondeur de la zone des bancs derrière la ligne de touche
@@ -543,8 +544,8 @@
     // tenues de référence trop proches (voir K.ambiguity) : reconnaissance, suivi et rôles adaptés ; sinon comportement inchangé
     const amb = opts.refs ? K.ambiguity(opts.refs) : { close: false, roles: false };
     const tracker = new T.Tracker(amb.close ? { soft: 2 } : undefined);
-    const frames = [], lost = [];
-    let lostStart = null, lastBall = null;
+    const frames = [], lost = [], recalage = [];   // recalage : [{ de, a, reprise }] ; reprise = instant où la caméra redevient stable (null si jamais)
+    let lostStart = null, lastBall = null, curLost = null;
     const doubts = [];                   // pistes dont l'équipe est douteuse (questions au coach)
     const bench = { y0: 0, yW: 0 };      // personnes vues le long de chaque ligne de touche (côté des bancs)
     const benchDrift = opts.benchFollow === false ? null : [];   // décalage de chaque zone de banc (suivi de la dérive de la caméra) ; null = coupé par le coach
@@ -571,6 +572,20 @@
         st.prev = cur; st.t = nt; addKey(st);
       }
       return st.t >= toT - 1e-3;
+    }
+    /* Caméra perdue : après un balayage ou un flou, la position n'est pas retrouvable par comparaison avec l'avant (la vue a changé).
+       On cherche donc le moment où la caméra redevient stable (RESUME_RUN secondes de suivi sans échec) : c'est là qu'un calibrage
+       permettra de reprendre. Ce suivi à part ne place rien sur le terrain : il ne sert qu'à indiquer le point de reprise. */
+    const probe = { prev: null, t: 0, M: IDENTITY, keys: [], boxes: [], run: 0, from: 0 };
+    const restartProbe = async (t) => { await seekTo(video, t); probe.prev = grabSmall([]); probe.t = t; probe.from = t; probe.run = 0; probe.keys = []; };
+    async function watchResume(cl, t) {
+      if (cl.reprise != null) return;
+      if (!probe.prev || probe.t > t) { await restartProbe(t); return; }
+      const before = probe.t;
+      if (await advanceMotion(probe, t)) {
+        probe.run += t - before;
+        if (probe.run >= RESUME_RUN) cl.reprise = Math.round(probe.from * 100) / 100;
+      } else await restartProbe(t);
     }
     function relocalize(st, cur, t) {
       for (let i = st.keys.length - 1; i >= 0; i--) {
@@ -628,23 +643,24 @@
         H = HG.mul3(trk.anchor.H, trk.M);
       }
       if (!reliable) {
-        if (lostStart == null) lostStart = t;
+        if (lostStart == null) { lostStart = t; curLost = { de: t, reprise: null }; probe.prev = null; }
+        if (mobile) await watchResume(curLost, t);
         if (opts.onProgress) opts.onProgress({ done: i + 1, total: times.length, eta: ((Date.now() - started) / 1000 / (i + 1)) * (times.length - i - 1), frame: null, lost: true });
         continue;
       }
-      if (lostStart != null) { lost.push([lostStart, t]); lostStart = null; }
+      if (lostStart != null) { lost.push([lostStart, t]); recalage.push({ de: curLost.de, a: t, reprise: curLost.reprise }); lostStart = null; curLost = null; }
       frames.push(processDetections(dets, { frameW: cw, frameH: ch, scale, img, H, L: opts.L, W: opts.W, refs: opts.refs, reject: opts.tol, tracker, t, close: amb.close, bench, benchZones: opts.benchZones, benchDrift }));
       if (opts.onProgress) {
         const elapsed = (Date.now() - started) / 1000;
         opts.onProgress({ done: i + 1, total: times.length, eta: (elapsed / (i + 1)) * (times.length - i - 1), frame: frames[frames.length - 1] });
       }
     }
-    if (lostStart != null) lost.push([lostStart, times[times.length - 1]]);
+    if (lostStart != null) { lost.push([lostStart, times[times.length - 1]]); recalage.push({ de: curLost.de, a: times[times.length - 1], reprise: curLost.reprise }); }
     video.removeAttribute("src"); video.load();
     if (lost.length) notes.push("Suivi de la caméra perdu sur " + lost.length + " passage(s) : ces images sont ignorées. Ajoutez un calibrage dans ces passages (flou, caméra trop rapide ou sol sans détails).");
     const finalFrames = finalizeFrames(frames, { L: opts.L, W: opts.W, dirAt: opts.dirAt, roles: amb.close || amb.roles, doubts });
     if (bench.drift && bench.drift.d >= BENCH_ASK) doubts.push({ kind: "bench", t: bench.drift.t, d: bench.drift.d, zones: bench.drift.zones });
-    return { frames: finalFrames, lost, notes, bench, doubts };
+    return { frames: finalFrames, lost, notes, bench, doubts, recalage };
   }
 
   /* Vignettes JPEG de la vidéo à des instants donnés (illustrations des erreurs acceptées). */
