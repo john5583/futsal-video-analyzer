@@ -501,6 +501,15 @@
       a.quality = Q.evaluate({ res, ai: a, project: state.project, L: L(), videoWidth: video.videoWidth, openQuestions: oq, kitWarnings: kitWarnings(refs()) });
     } catch (_e) { /* le contrôle qualité ne doit jamais bloquer l'analyse */ }
   }
+  /* Passage perdu le plus long dont on connaît le point de reprise (la caméra redevient stable) : { de, a, reprise } ou null. */
+  function mainRecalage(a) {
+    const list = (a && Array.isArray(a.recalage) ? a.recalage : []).filter((r) => r && typeof r.reprise === "number");
+    return list.sort((x, y) => (y.a - y.de) - (x.a - x.de))[0] || null;
+  }
+  function recalageHint(a) {
+    const r = mainRecalage(a);
+    return r ? " Pour reprendre : ajoute un calibrage vers " + App.fmt(r.reprise) + " (la caméra y redevient stable), puis relance l'analyse." : "";
+  }
   function renderQuality() {
     const box = $("ai-quality"), a = state.project.ai;
     if (!box) return;
@@ -522,6 +531,11 @@
       const t = document.createElement("b"); t.textContent = it.title; row.appendChild(t);
       const d = document.createElement("div"); d.textContent = it.detail; row.appendChild(d);
       const f = document.createElement("div"); f.className = "muted"; f.textContent = "À faire : " + it.fix; row.appendChild(f);
+      const rc = it.blocking ? mainRecalage(a) : null;
+      if (rc) {
+        const go = document.createElement("button"); go.type = "button"; go.textContent = "▶ Aller à " + App.fmt(rc.reprise) + " (point de reprise)";
+        go.addEventListener("click", () => App.seek(rc.reprise)); row.appendChild(go);
+      }
       box.appendChild(row);
     });
     if (q.good.length) { const g = document.createElement("div"); g.className = "muted q-good"; g.textContent = "Contrôles réussis : " + q.good.join(" · "); box.appendChild(g); }
@@ -1216,7 +1230,7 @@
       a.doubts = result.doubts || [];
       qGroup = null; qThumbs.clear();                    // les numéros de pistes d'une nouvelle analyse n'ont rien à voir avec les anciens
       D.applyAnswers(frames, memory().answers);
-      a.camera = camera; a.lost = result.lost; a.notes = result.notes;
+      a.camera = camera; a.lost = result.lost; a.notes = result.notes; a.recalage = result.recalage || [];
       a.frames = P.compactFrames(frames);
       a.benchSeen = result.bench || null;
       const res = applyMemory(M.analyze(frames, { L: L(), W: W(), dirAt, lost: result.lost, span: range, bench: benchSetting(), benchSeen: a.benchSeen, subAnswers: subAnswers() }));
@@ -1227,9 +1241,12 @@
       a.context = res.context;
       a.settings = { fps, tiles, t0: range[0], t1: range[1], tol: tol(), floorMarks: floorMarks(), bench: benchSetting() };
       const lostTxt = result.lost.length ? " Caméra perdue : " + result.lost.map((l) => App.fmt(l[0]) + "–" + App.fmt(l[1])).join(", ") + "." : "";
-      msg.textContent = (out.length ? "Analyse terminée : " + out.length + " images, " + a.suggestedEvents.length + " erreur(s) suggérée(s)" + (res.uncertain.length ? ", " + res.uncertain.length + " non signalée(s) (contexte incertain)" : "") + ". Temps de jeu analysé de façon fiable : " + Math.round(res.context.reliable.ratio * 100) + " %." : "Analyse terminée, mais aucun joueur n'a été retenu : vérifiez le calibrage et les tenues.") + (result.notes.length ? " " + result.notes.join(" ") : "") + lostTxt;
-      if (out.length) learnDuration(range, { fps, tiles, camera }, (Date.now() - startedAt) / 1000);
       updateQuality(res);
+      if (out.length && Q && Q.unusable(a.quality)) {
+        // jamais « 0 erreur » en gros quand presque rien n'a été analysé : on dit que l'analyse est inutilisable
+        msg.textContent = "⛔ Analyse inutilisable : seulement " + Math.round(res.context.reliable.ratio * 100) + " % du temps a pu être analysé de façon fiable. Aucune conclusion sur les erreurs n'est possible (« 0 erreur » ne veut pas dire « aucune erreur »)." + lostTxt + recalageHint(a);
+      } else msg.textContent = (out.length ? "Analyse terminée : " + out.length + " images, " + a.suggestedEvents.length + " erreur(s) suggérée(s)" + (res.uncertain.length ? ", " + res.uncertain.length + " non signalée(s) (contexte incertain)" : "") + ". Temps de jeu analysé de façon fiable : " + Math.round(res.context.reliable.ratio * 100) + " %." : "Analyse terminée, mais aucun joueur n'a été retenu : vérifiez le calibrage et les tenues.") + (result.notes.length ? " " + result.notes.join(" ") : "") + lostTxt;
+      if (out.length) learnDuration(range, { fps, tiles, camera }, (Date.now() - startedAt) / 1000);
       renderStats(); renderSuggestions(); refreshLive(); updateEstimate(); App.changed(true);
       okRun = out.length > 0;
     } catch (e) {
