@@ -545,7 +545,7 @@
     const gctx = gcanvas.getContext("2d", { willReadFrequently: true });
     // tenues de référence trop proches (voir K.ambiguity) : reconnaissance, suivi et rôles adaptés ; sinon comportement inchangé
     const amb = opts.refs ? K.ambiguity(opts.refs) : { close: false, roles: false };
-    const tracker = new T.Tracker(amb.close ? { soft: 2, appearance: true } : undefined);
+    const tracker = new T.Tracker(amb.close ? { soft: 2, appearance: true, method: "optimal" } : undefined);
     const frames = [], lost = [], recalage = [];   // recalage : [{ de, a, reprise }] ; reprise = instant où la caméra redevient stable (null si jamais)
     let lostStart = null, lastBall = null, curLost = null;
     const doubts = [];                   // pistes dont l'équipe est douteuse (questions au coach)
