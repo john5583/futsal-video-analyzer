@@ -1215,7 +1215,8 @@
     msg.textContent = "Chargement du modèle de détection…";
     try {
       const camera = $("ai-camera").value;
-      const result = await P.analyseVideo({
+      const continuous = !!(opts && opts.continuous);        // analyse continue : chaque image de la vidéo (voir pipeline.js)
+      const result = await (continuous ? P.analyseVideoContinuous : P.analyseVideo)({
         url: App.getVideoUrl(), t0: range[0], t1: range[1], fps, tiles, camera, tol: tol(), L: L(), W: W(), calibrations: a.calibrations, refs: r, floorMarks: floorMarks(), benchZones: a.benchZones || [], benchFollow: memory().benchFollow !== false, dirAt, signal: abort.signal, api,
         onProgress: (p) => {
           $("ai-bar").style.width = Math.round((p.done / p.total) * 100) + "%";
@@ -1231,6 +1232,7 @@
       qGroup = null; qThumbs.clear();                    // les numéros de pistes d'une nouvelle analyse n'ont rien à voir avec les anciens
       D.applyAnswers(frames, memory().answers);
       a.camera = camera; a.lost = result.lost; a.notes = result.notes; a.recalage = result.recalage || [];
+      a.trace = result.trace ? P.compactFrames(result.trace) : null; a.continuous = result.continuous || null;        // trajectoires continues (~10 images/s) et preuve de la lecture (images dupliquées / sautées)
       a.frames = P.compactFrames(frames);
       a.benchSeen = result.bench || null;
       const res = applyMemory(M.analyze(frames, { L: L(), W: W(), dirAt, lost: result.lost, span: range, bench: benchSetting(), benchSeen: a.benchSeen, subAnswers: subAnswers() }));
@@ -1239,14 +1241,14 @@
       a.suggested = a.suggestedEvents.length;
       a.uncertain = res.uncertain;
       a.context = res.context;
-      a.settings = { fps, tiles, t0: range[0], t1: range[1], tol: tol(), floorMarks: floorMarks(), bench: benchSetting() };
+      a.settings = { fps: continuous ? 3.33 : fps, tiles, t0: range[0], t1: range[1], tol: tol(), floorMarks: floorMarks(), bench: benchSetting(), continuous };
       const lostTxt = result.lost.length ? " Caméra perdue : " + result.lost.map((l) => App.fmt(l[0]) + "–" + App.fmt(l[1])).join(", ") + "." : "";
       updateQuality(res);
       if (out.length && Q && Q.unusable(a.quality)) {
         // jamais « 0 erreur » en gros quand presque rien n'a été analysé : on dit que l'analyse est inutilisable
         msg.textContent = "⛔ Analyse inutilisable : seulement " + Math.round(res.context.reliable.ratio * 100) + " % du temps a pu être analysé de façon fiable. Aucune conclusion sur les erreurs n'est possible (« 0 erreur » ne veut pas dire « aucune erreur »)." + lostTxt + recalageHint(a);
       } else msg.textContent = (out.length ? "Analyse terminée : " + out.length + " images, " + a.suggestedEvents.length + " erreur(s) suggérée(s)" + (res.uncertain.length ? ", " + res.uncertain.length + " non signalée(s) (contexte incertain)" : "") + ". Temps de jeu analysé de façon fiable : " + Math.round(res.context.reliable.ratio * 100) + " %." : "Analyse terminée, mais aucun joueur n'a été retenu : vérifiez le calibrage et les tenues.") + (result.notes.length ? " " + result.notes.join(" ") : "") + lostTxt;
-      if (out.length) learnDuration(range, { fps, tiles, camera }, (Date.now() - startedAt) / 1000);
+      if (out.length && !continuous) learnDuration(range, { fps, tiles, camera }, (Date.now() - startedAt) / 1000);
       renderStats(); renderSuggestions(); refreshLive(); updateEstimate(); App.changed(true);
       okRun = out.length > 0;
     } catch (e) {

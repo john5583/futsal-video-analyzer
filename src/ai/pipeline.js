@@ -183,6 +183,7 @@
       }
     });
     const margin = 1.5;
+    const stats = !!ctx.bench && !ctx.noBenchStats;        // analyse continue : les compteurs de bancs ne comptent que les images « historiques » (cadence d'origine)
     const list = [];
     // zones des bancs, décalées pour suivre la dérive du suivi de la caméra (voir followBenches)
     const zones = shiftedZones(ctx.benchZones, ctx.benchDrift);
@@ -194,10 +195,10 @@
       // personne assise dans une zone de banc marquée : remplaçant, pas un joueur
       const seated = (d.y2 - d.y1) < BENCH_SEATED * (d.x2 - d.x1);
       if (seated && zones) zones.forEach((z, i) => { if (inBenchZone(p, [z], BENCH_FOLLOW)) seatedIn[i].push(p); });
-      if (seated && inBenchZone(p, zones)) { if (ctx.bench) ctx.bench.zone = (ctx.bench.zone || 0) + 1; return; }
+      if (seated && inBenchZone(p, zones)) { if (stats) ctx.bench.zone = (ctx.bench.zone || 0) + 1; return; }
       if (p[0] < -margin || p[0] > ctx.L + margin || p[1] < -margin || p[1] > ctx.W + margin) {
         // personne assise ou debout le long d'une ligne de touche, près du milieu : remplaçants (côté des bancs)
-        if (ctx.bench && Math.abs(p[0] - ctx.L / 2) <= BENCH_HALF_LEN) {
+        if (stats && Math.abs(p[0] - ctx.L / 2) <= BENCH_HALF_LEN) {
           if (p[1] < -margin && p[1] >= -BENCH_DEPTH) ctx.bench.y0++;
           else if (p[1] > ctx.W + margin && p[1] <= ctx.W + BENCH_DEPTH) ctx.bench.yW++;
         }
@@ -217,7 +218,7 @@
       if (ctx.refs && ctx.refs.A && ctx.refs.B) item.f = K.classify(feat, { A: ctx.refs.A, B: ctx.refs.B }, close ? { reject: ctx.reject, close } : { reject: ctx.reject }).team;
       list.push(item);
     });
-    if (zones && ctx.benchDrift) { followBenches(ctx.benchDrift, seatedIn); if (ctx.bench) trackDrift(ctx.bench, ctx.benchDrift, ctx.benchZones, ctx.t); }
+    if (zones && ctx.benchDrift && !ctx.noBenchStats) { followBenches(ctx.benchDrift, seatedIn, ctx.benchRate); if (ctx.bench) trackDrift(ctx.bench, ctx.benchDrift, ctx.benchZones, ctx.t); }
     ctx.tracker.update(ctx.t, list);
     const bc = [];
     balls.sort((a, b) => b.score - a.score).forEach((d) => {
@@ -268,15 +269,16 @@
     drift.forEach((z) => { if (z) d = Math.max(d, Math.hypot(z.dx, z.dy)); });
     if (d > (bench.drift ? bench.drift.d : 0) + 1e-9) bench.drift = { d: Math.round(d * 10) / 10, t, zones: shiftedZones(zones, drift) };
   }
-  function followBenches(drift, seatedIn) {
+  function followBenches(drift, seatedIn, rate) {
+    const k = rate > 0 ? rate : BENCH_FOLLOW_RATE;
     seatedIn.forEach((list, i) => {
       if (!list.length) return;
       const d = drift[i] || (drift[i] = { ref: null, dx: 0, dy: 0 });
       const mx = list.reduce((s, p) => s + p[0], 0) / list.length, my = list.reduce((s, p) => s + p[1], 0) / list.length;
       if (!d.ref) { d.ref = [mx - d.dx, my - d.dy]; return; }
       const clamp = (v) => Math.max(-BENCH_MAX_DRIFT, Math.min(BENCH_MAX_DRIFT, v));
-      d.dx = clamp(d.dx + BENCH_FOLLOW_RATE * (mx - d.ref[0] - d.dx));
-      d.dy = clamp(d.dy + BENCH_FOLLOW_RATE * (my - d.ref[1] - d.dy));
+      d.dx = clamp(d.dx + k * (mx - d.ref[0] - d.dx));
+      d.dy = clamp(d.dy + k * (my - d.ref[1] - d.dy));
     });
   }
 
@@ -489,6 +491,27 @@
     });
   }
 
+  /* Saut à l'instant t et lecture de l'instant EXACT de l'image affichée (rappel d'image de la vidéo, juste après « seeked ») : on peut ainsi
+     prouver, image après image, qu'aucune image n'est dupliquée ni sautée. Renvoie mediaTime (s), ou null si le navigateur ne le fournit pas. */
+  function seekFrame(video, t) {
+    return new Promise((resolve, reject) => {
+      const hasCb = typeof video.requestVideoFrameCallback === "function";
+      let mt = null, seeked = false, fin = false, late = null;
+      const finish = (err) => {
+        if (fin) return; fin = true;
+        clearTimeout(to); clearTimeout(late);
+        video.removeEventListener("seeked", onSeeked); video.removeEventListener("error", onErr);
+        if (err) reject(err); else resolve(mt);
+      };
+      const to = setTimeout(() => finish(new Error("Délai dépassé pendant le positionnement dans la vidéo")), 15000);
+      const onSeeked = () => { seeked = true; if (!hasCb || mt != null) finish(); else late = setTimeout(() => finish(), 400); };   // le rappel arrive juste après « seeked »
+      const onErr = () => finish(new Error("Lecture de la vidéo impossible"));
+      video.addEventListener("seeked", onSeeked); video.addEventListener("error", onErr);
+      if (hasCb) video.requestVideoFrameCallback((_now, md) => { mt = md.mediaTime; if (seeked) finish(); });
+      video.currentTime = t;
+    });
+  }
+
   /* Détecte les personnes et le ballon sur une image déjà dessinée dans frameCanvas. */
   async function detectCanvas(frameCanvas, tilesMode, api, thresholds, customRects) {
     const w = frameCanvas.width, h = frameCanvas.height;
@@ -665,6 +688,266 @@
     return { frames: finalFrames, lost, notes, bench, doubts, recalage };
   }
 
+  /* ---- Analyse continue ----
+     Chaque image de la vidéo est lue et analysée, au lieu d'une image sur dix : lecture par saut exact au milieu de l'image (mesuré sur une vraie
+     vidéo : aucune image perdue, contrairement à la lecture continue d'un lecteur vidéo), détection de l'image k pendant la lecture de l'image k+1
+     et pendant le suivi de la caméra. Le suivi de la caméra se fait toutes les CAM_EVERY images (0,1 s à 30 images/s) ; la matrice des images
+     intermédiaires est interpolée. Le suivi des joueurs (filtre de Kalman) voit toutes les images.
+     Deux sorties :
+       frames : ancienne cadence (~3,3 images/s), pour tout ce qui a été écrit pour elle (erreurs, doutes, plan tactique) ;
+       trace  : trajectoires continues (~10 images/s), mêmes identités.
+     opts : comme analyseVideo, plus videoFps (30 par défaut). Le zoom automatique (tiles 3) n'est pas disponible : repli sur « Renforcé ». */
+  const CAM_EVERY = 3;            // images entre deux mesures du mouvement de la caméra
+  const LEGACY_EVERY = 3;         // une image de la trace sur 3 est aussi une image de l'analyse historique
+  const BRIDGE_TOL = 2;           // px (image de 480 px de large) : écart maximal entre le pas précédent et le pas suivant pour enjamber une image floue
+  const BRIDGE_MAX = 2;           // images floues de suite qu'on accepte d'enjamber
+  const MAP_WINDOW = 1.2;         // s : fenêtre de recherche de l'identité finale d'une piste pour les images de la trace
+
+  /* Écart maximal (px) entre deux pas de caméra (matrices image précédente -> image suivante) sur les coins et le centre d'une image w x h. */
+  function stepGap(Ha, Hb, w, h) {
+    let m = 0;
+    [[0, 0], [w, 0], [w, h], [0, h], [w / 2, h / 2]].forEach(([x, y]) => {
+      const a = HG.apply(Ha, x, y), b = HG.apply(Hb, x, y);
+      m = Math.max(m, Math.hypot(a[0] - b[0], a[1] - b[1]));
+    });
+    return m;
+  }
+  const avgStep = (a, b) => a.map((v, i) => (v / a[8] + b[i] / b[8]) / 2);
+  const lerpM = (a, b, t) => a.map((v, i) => v + (b[i] - v) * t);
+
+  async function analyseVideoContinuous(opts) {
+    const video = document.createElement("video");
+    video.muted = true; video.preload = "auto"; video.crossOrigin = "anonymous";
+    video.src = opts.url;
+    await new Promise((res, rej) => { video.onloadedmetadata = res; video.onerror = () => rej(new Error("Vidéo illisible")); });
+    const vw = video.videoWidth, vh = video.videoHeight, notes = [];
+    let tilesMode = opts.tiles;
+    if (tilesMode === 3) { tilesMode = 2; notes.push("Le zoom automatique n'est pas disponible en analyse continue : précision « Renforcée » utilisée."); }
+    const scale = Math.min(1, 1280 / Math.max(vw, vh * (16 / 9)));
+    const cw = Math.max(2, Math.round(vw * scale)), ch = Math.max(2, Math.round(vh * scale));
+    const mkCanvas = (w, h) => { const c = document.createElement("canvas"); c.width = w; c.height = h; return c; };
+    const cvs = Array.from({ length: CAM_EVERY + 2 }, () => mkCanvas(cw, ch));      // une toile par image en attente : la détection lit sa toile après la lecture de l'image suivante
+    const ctxs = cvs.map((c) => c.getContext("2d", { willReadFrequently: true }));
+    const gw = Math.min(480, cw), gh = Math.max(2, Math.round((ch * gw) / cw)), gs = gw / vw;
+    const gctx = mkCanvas(gw, gh).getContext("2d", { willReadFrequently: true });
+    const mobile = opts.camera === "mobile";
+    const calibs = (opts.calibrations || []).slice().sort((a, b) => a.t - b.t);
+    if (!calibs.length) throw new Error("Aucun calibrage du terrain");
+    const start = startTime(opts.t0, calibs, mobile);
+    const t0 = start.t0;
+    if (start.note) notes.push(start.note);
+    const vfps = opts.videoFps > 0 ? opts.videoFps : 30, dtF = 1 / vfps;
+    const tEnd = Math.min(opts.t1, video.duration - 0.05);
+    const nFrames = tEnd > t0 ? Math.floor((tEnd - t0) / dtF + 1e-6) + 1 : 0;
+    const amb = opts.refs ? K.ambiguity(opts.refs) : { close: false, roles: false };
+    const tracker = new T.Tracker({ method: "kalman", soft: amb.close ? 2 : 0, appearance: amb.close });
+    const frames = [], trace = [], lost = [], recalage = [], doubts = [];
+    const bench = { y0: 0, yW: 0 };
+    const benchDrift = opts.benchFollow === false ? null : [];
+    let lostStart = null, curLost = null, lastBoxes = [], analysed = 0, skipDetect = false;   // skipDetect : caméra perdue, détecter ne servirait à rien
+
+    /* ---- caméra ---- */
+    const trk = { anchor: null, M: IDENTITY, prev: null, keys: [], lastStep: null, bridge: null, Mprev: IDENTITY, anchorPrev: null, kPrev: -1, bridged: 0 };
+    const motion = (from, cur) => Cam.estimateMotion(from, cur, from.mask, cur.mask, { maxCorners: 320 });
+    const prep = (fr) => fr.prep || (fr.prep = Cam.prepare(fr.small.data, gw, gh, lastBoxes, 4));
+    const addKey = (t) => { const last = trk.keys[trk.keys.length - 1]; if (!last || t - last.t >= 1) { trk.keys.push({ prev: trk.prev, M: trk.M, t }); if (trk.keys.length > 14) trk.keys.splice(1, 1); } };
+    /* Un pas mesuré avec succès. Si une image floue vient d'être sautée : on n'enjambe que si le pas précédent et le pas suivant se ressemblent
+       (sinon la position de la caméra est inconnue : perdu). Renvoie "ok" ou "fail". */
+    function stepOk(r, cur, t) {
+      if (trk.bridge) {
+        const b = trk.bridge; trk.bridge = null;
+        if (!b.stepPrev || stepGap(b.stepPrev, r.H, gw, gh) > BRIDGE_TOL) return "fail";
+        trk.M = HG.mul3(HG.mul3(b.M0, HG.invert(Cam.toNative(avgStep(b.stepPrev, r.H), gs))), HG.invert(Cam.toNative(r.H, gs)));
+        trk.bridged++;
+      } else trk.M = HG.mul3(trk.M, HG.invert(Cam.toNative(r.H, gs)));
+      trk.prev = cur; trk.lastStep = r.H; addKey(t);
+      return "ok";
+    }
+    /* Un pas échoué : si le pas précédent est connu, l'image floue sert de nouvelle référence et on attend le pas suivant pour décider. */
+    function stepFail(cur) {
+      if (trk.bridge) { trk.bridge.n++; if (trk.bridge.n > BRIDGE_MAX) { trk.bridge = null; return "fail"; } trk.prev = cur; return "pending"; }
+      if (!trk.lastStep) return "fail";
+      trk.bridge = { M0: trk.M, stepPrev: trk.lastStep, n: 1 };
+      trk.prev = cur;
+      return "pending";
+    }
+    function relocalize(cur, t) {
+      for (let i = trk.keys.length - 1; i >= 0; i--) {
+        const k = trk.keys[i], r = motion(k.prev, cur);
+        if (r.ok) { trk.M = HG.mul3(k.M, HG.invert(Cam.toNative(r.H, gs))); trk.prev = cur; trk.lastStep = null; trk.bridge = null; addKey(t); return true; }
+      }
+      return false;
+    }
+    /* Mesure du mouvement jusqu'à l'image fr (between : images intermédiaires, en cas d'échec on refait le chemin image par image).
+       Renvoie { reliable, anchor, M, Mprev, anchorPrev, kPrev }. */
+    function cameraStep(fr, between) {
+      const calib = calibrationAt(calibs, fr.t);
+      const base = { anchor: calib };
+      if (!mobile) return { reliable: true, anchor: calib, fixed: true };
+      if (calib !== trk.anchor || !trk.prev) {
+        trk.anchor = calib; trk.M = IDENTITY; trk.prev = prep(fr); trk.keys = [{ prev: trk.prev, M: IDENTITY, t: fr.t }]; trk.lastStep = null; trk.bridge = null;
+        trk.anchorPrev = null; trk.kPrev = fr.k; trk.Mprev = IDENTITY; trk.prevOk = true; trk.broken = false;
+        return Object.assign(base, { reliable: true, M: trk.M, Mprev: trk.M, anchorPrev: calib, kPrev: fr.k });
+      }
+      if (trk.broken) {                                              // position inconnue (échec définitif) : seules les images clés ou un nouveau calibrage la redonnent, jamais une chaîne repartie d'une position périmée
+        if (!relocalize(prep(fr), fr.t)) { trk.prevOk = false; return Object.assign(base, { reliable: false }); }
+        trk.broken = false; trk.Mprev = trk.M; trk.anchorPrev = trk.anchor; trk.kPrev = fr.k; trk.prevOk = true;
+        return Object.assign(base, { reliable: true, M: trk.M, Mprev: trk.M, anchorPrev: trk.anchor, kPrev: fr.k });
+      }
+      const prevOk = trk.prevOk !== false;                         // pas d'interpolation vers une mesure ancienne (après un passage perdu)
+      const Mprev = trk.Mprev, anchorPrev = trk.anchorPrev || trk.anchor, kPrev = trk.kPrev;
+      let status;
+      const direct = prep(fr), r = motion(trk.prev, direct);
+      if (r.ok) status = stepOk(r, direct, fr.t);
+      else {
+        status = "ok";
+        const chain = between.concat([fr]);
+        for (let j = 0; j < chain.length && status !== "fail"; j++) {
+          const cur = prep(chain[j]), rr = motion(trk.prev, cur);
+          status = rr.ok ? stepOk(rr, cur, chain[j].t) : stepFail(cur);
+          if (status === "pending") status = "ok-pending";
+        }
+        if (trk.bridge) status = "pending";                      // image floue en fin de pas : on attend le pas suivant
+        else if (status === "ok-pending") status = "ok";
+      }
+      if (status === "fail") {
+        const ok = relocalize(prep(fr), fr.t);                    // dernier recours : retrouver la position par les images clés déjà suivies
+        status = ok ? "ok" : "fail";
+        if (!ok) trk.broken = true;
+      }
+      if (status !== "ok") { trk.prevOk = false; return Object.assign(base, { reliable: false, pending: status === "pending" }); }
+      trk.Mprev = trk.M; trk.anchorPrev = trk.anchor; trk.kPrev = fr.k; trk.prevOk = true;
+      return Object.assign(base, { reliable: true, M: trk.M, Mprev: prevOk ? Mprev : trk.M, anchorPrev: prevOk ? anchorPrev : trk.anchor, kPrev: prevOk ? kPrev : fr.k });
+    }
+
+    /* ---- recherche du point de reprise pendant un passage perdu (comme analyseVideo) ---- */
+    let probe = { prev: null, from: 0, run: 0, t: 0 };
+    function watchResume(cl, fr) {
+      if (cl.reprise != null) return;
+      const cur = prep(fr);
+      if (!probe.prev) { probe = { prev: cur, from: fr.t, run: 0, t: fr.t }; return; }
+      const r = motion(probe.prev, cur);
+      if (r.ok) { probe.run += fr.t - probe.t; probe.prev = cur; probe.t = fr.t; if (probe.run >= RESUME_RUN) cl.reprise = Math.round(probe.from * 100) / 100; }
+      else probe = { prev: cur, from: fr.t, run: 0, t: fr.t };
+    }
+
+    /* ---- lecture et détection d'une image ---- */
+    let seq = 0;
+    async function acquire(target) {
+      const mt = await seekFrame(video, target);
+      const ci = seq++ % cvs.length;
+      ctxs[ci].drawImage(video, 0, 0, cw, ch);
+      const img = ctxs[ci].getImageData(0, 0, cw, ch);
+      gctx.drawImage(video, 0, 0, gw, gh);
+      const small = gctx.getImageData(0, 0, gw, gh);
+      let detP = null;
+      if (!skipDetect) { detP = detectCanvas(cvs[ci], tilesMode, opts.api, { minPerson: 0.35, minBall: BALL_CAND }); detP.catch(() => {}); }   // la détection d'une image ignorée sera simplement jetée
+      const raw = mt != null ? mt : target - dtEst / 2;               // instant exact (non arrondi : sert à programmer l'image suivante sans dérive)
+      return { mt, target, raw, t: Math.round(raw * 1000) / 1000, img, small, detP };
+    }
+
+    /* ---- images en attente de leur matrice de caméra ---- */
+    async function flush(batch, cam, started, onProgress) {
+      for (const fr of batch) {
+        let reliable = cam.reliable && !!fr.detP, H = null;
+        if (reliable) {
+          if (cam.fixed) H = cam.anchor.H;
+          else {
+            const useNew = calibrationAt(calibs, fr.t) === cam.anchor;
+            const M = useNew ? (cam.anchorPrev === cam.anchor && fr.k > cam.kPrev ? lerpM(cam.Mprev, cam.M, Math.min(1, (fr.k - cam.kPrev) / Math.max(1, batch[batch.length - 1].k - cam.kPrev))) : cam.M) : cam.Mprev;
+            H = HG.mul3((useNew ? cam.anchor : cam.anchorPrev).H, M);
+          }
+        }
+        if (!reliable) {
+          if (lostStart == null) { lostStart = fr.t; curLost = { de: fr.t, reprise: null }; probe = { prev: null, from: 0, run: 0, t: 0 }; }
+          continue;
+        }
+        if (lostStart != null) { lost.push([lostStart, fr.t]); recalage.push({ de: curLost.de, a: fr.t, reprise: curLost.reprise }); lostStart = null; curLost = null; }
+        const dets = dropFloorMarks(await fr.detP, fr.img, opts.floorMarks);
+        lastBoxes = dets.filter((d) => d.cls === Y.CLASS_PERSON).map((d) => [d.x1 * (gw / cw), d.y1 * (gh / ch), d.x2 * (gw / cw), d.y2 * (gh / ch)]);
+        const legacy = fr.k % (CAM_EVERY * LEGACY_EVERY) === 0;
+        const o = processDetections(dets, { frameW: cw, frameH: ch, scale, img: fr.img, H, L: opts.L, W: opts.W, refs: opts.refs, reject: opts.tol, tracker, t: fr.t, close: amb.close, appearance: amb.close, bench, benchZones: opts.benchZones, benchDrift, noBenchStats: !legacy });
+        analysed++;
+        if (fr.k % CAM_EVERY === 0) trace.push(o);
+        if (legacy) frames.push(o);
+        if (onProgress && fr.k % CAM_EVERY === 0) {
+          const elapsed = (Date.now() - started) / 1000;
+          onProgress({ done: fr.k + 1, total: nFrames, eta: (elapsed / (fr.k + 1)) * (nFrames - fr.k - 1), frame: legacy ? o : null });
+        }
+      }
+    }
+
+    /* ---- boucle ----
+       Chaque saut vise le MILIEU de l'image suivante, calculé à partir de l'instant réel de l'image précédente (et non d'une cadence supposée) :
+       une vidéo à 29,97 images/s ou à cadence légèrement variable reste suivie sans doublon ni saut. Une image dupliquée est écartée et comptée,
+       une image sautée est comptée : le résultat les indique. */
+    const started = Date.now();
+    let dtEst = dtF, prevMt = null, n = 0, dup = 0, skipped = 0, noMt = 0, lastFrameT = t0, batch = [], retry = 0;
+    let nextAcq = nFrames ? acquire(t0 + dtF / 2) : null;
+    try {
+      while (nextAcq) {
+        if (opts.signal && opts.signal.aborted) throw new Error("Analyse interrompue");
+        const fr = await nextAcq;
+        let drop = false;
+        if (fr.mt != null) {
+          if (prevMt != null) {
+            const d = fr.mt - prevMt;
+            if (d < 0.5 * dtEst) { drop = true; if (retry < 2) retry++; else { dup++; retry = 0; } }       // même image qu'avant : on relit la même image (jusqu'à 2 fois), sinon on la compte et on avance
+            else if (d > 1.5 * dtEst) { skipped += Math.round(d / dtEst) - 1; }
+            else dtEst = 0.98 * dtEst + 0.02 * d;                         // la durée d'une image s'affine
+          }
+          if (!drop) prevMt = fr.mt;
+        } else noMt++;
+        // image suivante : milieu de l'image qui suit l'image réellement lue ; fin si elle dépasse la plage
+        const next = drop ? fr.target + (retry > 0 ? 0.25 * dtEst : dtEst) : (prevMt != null ? prevMt : fr.raw) + 1.5 * dtEst;
+        const more = fr.raw + dtEst <= tEnd + 0.002 && n < nFrames * 1.05 + 10;
+        nextAcq = more ? acquire(next) : null;                           // lecture de l'image suivante pendant le traitement de celle-ci
+        if (nextAcq) nextAcq.catch(() => {});
+        if (drop) continue;
+        retry = 0; fr.k = n++; lastFrameT = fr.t;
+        batch.push(fr);
+        const isLast = !nextAcq;
+        if (mobile && fr.k % CAM_EVERY !== 0 && !isLast) continue;
+        const cam = cameraStep(fr, batch.slice(0, -1));
+        skipDetect = !cam.reliable;                                       // reprend dès que la caméra est retrouvée (les 1 à 3 images lues entre-temps restent « non analysées »)
+        if (!cam.reliable && lostStart != null) watchResume(curLost, fr);
+        else if (!cam.reliable && opts.onProgress) opts.onProgress({ done: fr.k + 1, total: nFrames, eta: 0, frame: null, lost: true });
+        await flush(batch, cam, started, opts.onProgress);
+        batch = [];
+      }
+    } finally {
+      video.removeAttribute("src"); video.load();
+    }
+    const lastT = lastFrameT;
+    if (lostStart != null) { lost.push([lostStart, lastT]); recalage.push({ de: curLost.de, a: lastT, reprise: curLost.reprise }); }
+    if (lost.length) notes.push("Suivi de la caméra perdu sur " + lost.length + " passage(s) : ces images sont ignorées. Ajoutez un calibrage dans ces passages (flou, caméra trop rapide ou sol sans détails).");
+    if (trk.bridged) notes.push("Caméra : " + trk.bridged + " image(s) floue(s) enjambée(s) par estimation (écart de moins de " + BRIDGE_TOL + " px avec les pas voisins).");
+
+    // ballon : choix cohérent sur la trace (cadence plus fine), sans toucher aux candidats de l'analyse historique
+    const withC = trace.filter((f) => Array.isArray(f.bc)), picks = BT && withC.length ? BT.select(withC) : [], pickOf = new Map();
+    withC.forEach((f, i) => { if (picks[i]) pickOf.set(f, { x: picks[i][0], y: picks[i][1] }); });
+    trace.forEach((f) => f.players.forEach((p) => { p.oid = p.id; }));
+    const finalFrames = finalizeFrames(frames, { L: opts.L, W: opts.W, dirAt: opts.dirAt, roles: amb.close || amb.roles, doubts });
+    if (bench.drift && bench.drift.d >= BENCH_ASK) doubts.push({ kind: "bench", t: bench.drift.t, d: bench.drift.d, zones: bench.drift.zones });
+    // identités finales (équipes, coupures, recollages décidés sur l'analyse historique) reportées sur la trace : échantillon de la même piste le plus proche dans le temps
+    const byOid = new Map();
+    finalFrames.forEach((f) => f.players.forEach((p) => { (byOid.get(p.oid) || byOid.set(p.oid, []).get(p.oid)).push({ t: f.t, id: p.id, team: p.team }); }));
+    const traceOut = trace.map((f) => {
+      const players = [];
+      f.players.forEach((p) => {
+        const list = byOid.get(p.oid);
+        if (!list) return;
+        let best = null, bd = Infinity;
+        list.forEach((s) => { const d = Math.abs(s.t - f.t); if (d < bd) { bd = d; best = s; } });
+        if (best && bd <= MAP_WINDOW) players.push({ id: best.id, team: best.team, x: p.x, y: p.y, b: p.b });
+      });
+      const o = { t: f.t, players, ball: pickOf.get(f) || null };
+      if (f.h) o.h = f.h;
+      return o;
+    });
+    return { frames: finalFrames, trace: traceOut, lost, notes, bench, doubts, recalage, continuous: { videoFps: Math.round((1 / dtEst) * 100) / 100, images: n, analysed, duplicated: dup, skipped, withoutFrameTime: noMt, bridged: trk.bridged } };
+  }
+
   /* Vignettes JPEG de la vidéo à des instants donnés (illustrations des erreurs acceptées). */
   async function captureFrames(url, times, width) {
     const video = document.createElement("video");
@@ -699,5 +982,5 @@
     return { dets, scale, img: ctx.getImageData(0, 0, cw, ch), width: cw, height: ch };
   }
 
-  return { isFloorMark, courtH, trackDrift, inBenchZone, shiftedZones, followBenches, tileRects, courtRegion, zoomRects, tileToFrame, mergeTiles, isFloorMark, dropFloorMarks, calibrationAt, processDetections, finalizeFrames, compactFrames, expandFrames, frameNear, sampleTimes, startTime, estimateDuration, learnFactor, FACTOR_MIN, FACTOR_MAX, analyseVideo, detectAt, detectCanvas, captureFrames, TEAM_CODE };
+  return { isFloorMark, courtH, trackDrift, inBenchZone, shiftedZones, followBenches, tileRects, courtRegion, zoomRects, tileToFrame, mergeTiles, isFloorMark, dropFloorMarks, calibrationAt, processDetections, finalizeFrames, compactFrames, expandFrames, frameNear, sampleTimes, startTime, estimateDuration, learnFactor, FACTOR_MIN, FACTOR_MAX, analyseVideo, analyseVideoContinuous, stepGap, avgStep, lerpM, detectAt, detectCanvas, captureFrames, TEAM_CODE };
 });
