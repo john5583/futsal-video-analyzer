@@ -14,7 +14,7 @@
      opts.appearance (faux par défaut) : tenues proches, les détections portent une signature d'apparence (d.sig, voir signature.js) ;
      un petit surcoût borné écarte une piste d'une personne qui ne lui ressemble pas. Sans signature fiable : aucun effet. */
   function Tracker(opts) {
-    this.opts = Object.assign({ maxSpeed: MAX_SPEED, maxMissed: MAX_MISSED, soft: 0, appearance: false }, opts || {});
+    this.opts = Object.assign({ maxSpeed: MAX_SPEED, maxMissed: MAX_MISSED, soft: 0, appearance: false, sig0: SIG0, sigv: SIGV, chi: CHI }, opts || {});
     this.tracks = [];
     this.nextId = 1;
   }
@@ -23,34 +23,121 @@
     return a === "UNK" || b === "UNK" || a === b;
   }
 
-  /* dets : [{x, y, team, box, conf}] ; renvoie les mêmes objets avec .id. */
+  /* Affectation globale à coût minimal (algorithme hongrois) : chaque piste reçoit au plus une détection et chaque détection au plus
+     une piste, de façon à ce que la somme des coûts soit la plus petite possible (et non « la paire la plus proche d'abord », qui
+     échange deux joueurs qui se croisent). cost[i][j] = coût de la paire (piste i, détection j), Infinity = interdit.
+     cMiss : coût de laisser une piste sans détection (un nombre, ou un coût par piste) ; cNew : coût de créer une piste pour une détection sans piste.
+     Renvoie [{ ti, di }] des paires retenues. */
+  const BIG = 1e6;
+  function assign(cost, nT, nD, cMiss, cNew) {
+    const n = nT + nD;
+    if (!n) return [];
+    const a = [];
+    for (let i = 0; i < n; i++) {
+      a.push(new Array(n));
+      for (let j = 0; j < n; j++) {
+        if (i < nT && j < nD) a[i][j] = isFinite(cost[i][j]) ? cost[i][j] : BIG;
+        else if (i < nT) a[i][j] = j - nD === i ? (Array.isArray(cMiss) ? cMiss[i] : cMiss) : BIG;
+        else if (j < nD) a[i][j] = i - nT === j ? cNew : BIG;
+        else a[i][j] = 0;
+      }
+    }
+    // algorithme hongrois, potentiels (indices à partir de 1)
+    const u = new Array(n + 1).fill(0), v = new Array(n + 1).fill(0), p = new Array(n + 1).fill(0), way = new Array(n + 1).fill(0);
+    for (let i = 1; i <= n; i++) {
+      p[0] = i;
+      let j0 = 0;
+      const minv = new Array(n + 1).fill(Infinity), used = new Array(n + 1).fill(false);
+      do {
+        used[j0] = true;
+        const i0 = p[j0];
+        let delta = Infinity, j1 = 0;
+        for (let j = 1; j <= n; j++) {
+          if (used[j]) continue;
+          const cur = a[i0 - 1][j - 1] - u[i0] - v[j];
+          if (cur < minv[j]) { minv[j] = cur; way[j] = j0; }
+          if (minv[j] < delta) { delta = minv[j]; j1 = j; }
+        }
+        for (let j = 0; j <= n; j++) {
+          if (used[j]) { u[p[j]] += delta; v[j] -= delta; } else minv[j] -= delta;
+        }
+        j0 = j1;
+      } while (p[j0] !== 0);
+      do { const j1 = way[j0]; p[j0] = p[j1]; j0 = j1; } while (j0);
+    }
+    const out = [];
+    for (let j = 1; j <= nD; j++) {
+      const i = p[j] - 1;
+      if (i >= 0 && i < nT && isFinite(cost[i][j - 1])) out.push({ ti: i, di: j - 1 });
+    }
+    return out;
+  }
+
+  const TAU = 1.0;            // s : la vitesse d'un joueur « s'éteint » en s'éloignant de la dernière détection (il peut changer de direction)
+  const ALPHA = 0.75, BETA = 0.4, BETA_NEW = 0.7;   // filtre position-vitesse : poids de l'écart entre la détection et la position prévue
+  /* Coût d'une paire = vraisemblance : (écart / incertitude)² / 2 + log(incertitude). L'incertitude de la position prévue grandit avec le temps
+     écoulé depuis la dernière détection (SIG0 m de bruit + SIGV m/s de vitesse mal connue) : une piste ancienne accepte un écart plus grand,
+     mais il compte moins qu'un écart d'une piste récente. */
+  const SIG0 = 0.7, SIGV = 1.5;
+  const CHI = 4.5;            // coût de laisser une piste sans détection et de créer une piste (écart de ~4 incertitudes : au-delà, on ne relie pas)
+  const sigmaOf = (dt, o) => o.sig0 + o.sigv * dt;
+
+  /* Position prévue d'une piste à l'instant t (la vitesse est amortie sur TAU secondes). */
+  function predict(tr, t) {
+    const dt = Math.max(0.05, t - tr.lastT), k = TAU * (1 - Math.exp(-dt / TAU));
+    return { x: tr.x + tr.vx * k, y: tr.y + tr.vy * k, dt };
+  }
+
+  /* dets : [{x, y, team, box, conf}] ; renvoie les mêmes objets avec .id.
+     opts.method : "greedy" (par défaut : « la paire la plus proche d'abord », comportement historique) ou "optimal" (prévision du mouvement,
+     coût de vraisemblance, affectation globale ; activé par l'analyse quand les tenues sont proches). Essayé et écarté : refuser les paires ambiguës (sur matchs fabriqués, ça multiplie
+     par 3 les pistes en trop sans réduire les échanges de joueurs). */
   Tracker.prototype.update = function (t, dets) {
     const live = this.tracks.filter((tr) => t - tr.lastT <= this.opts.maxMissed);
     const soft = this.opts.soft > 0 ? this.opts.soft : 0;
+    const greedy = this.opts.method !== "optimal", o = this.opts;
+    const cost = live.map(() => new Array(dets.length).fill(Infinity));
     const pairs = [];
     live.forEach((tr, ti) => {
-      const dt = Math.max(0.05, t - tr.lastT);
-      const px = tr.x + tr.vx * dt * 0.5, py = tr.y + tr.vy * dt * 0.5;
-      const gate = this.opts.maxSpeed * dt + 1;
+      const pr = predict(tr, t), dt = pr.dt;
+      const px = greedy ? tr.x + tr.vx * dt * 0.5 : pr.x, py = greedy ? tr.y + tr.vy * dt * 0.5 : pr.y;
+      const gate = o.maxSpeed * dt + 1, sg = sigmaOf(dt, o);
       dets.forEach((d, di) => {
         const ok = compatible(tr.team, d.team);
         if (!ok && !soft) return;
         const dd = Math.hypot(d.x - px, d.y - py);
         if (dd > gate) return;
-        const look = this.opts.appearance ? S.penalty(tr.sig, d.sig) : 0;
-        pairs.push({ ti, di, cost: dd + (ok ? (tr.team !== d.team ? 1.5 : 0) : soft) + look });
+        const look = o.appearance ? S.penalty(tr.sig, d.sig) : 0;
+        const pen = (ok ? (tr.team !== d.team ? 1.5 : 0) : soft) + look;                  // surcoûts en mètres (équipe, apparence)
+        const c = greedy ? dd + pen : 0.5 * (dd / sg) * (dd / sg) + Math.log(sg / o.sig0) + pen / o.sig0;
+        cost[ti][di] = c;
+        pairs.push({ ti, di, cost: c });
       });
     });
-    pairs.sort((a, b) => a.cost - b.cost);
-    const usedT = new Set(), usedD = new Set();
-    pairs.forEach((p) => {
-      if (usedT.has(p.ti) || usedD.has(p.di)) return;
-      usedT.add(p.ti); usedD.add(p.di);
+    let matches;
+    if (greedy) {
+      pairs.sort((a, b) => a.cost - b.cost);
+      const uT = new Set(), uD = new Set();
+      matches = [];
+      pairs.forEach((p) => { if (uT.has(p.ti) || uD.has(p.di)) return; uT.add(p.ti); uD.add(p.di); matches.push(p); });
+    } else {
+      matches = assign(cost, live.length, dets.length, o.chi, o.chi);
+    }
+    const usedD = new Set();
+    matches.forEach((p) => {
+      usedD.add(p.di);
       const tr = live[p.ti], d = dets[p.di];
       const dt = Math.max(0.05, t - tr.lastT);
-      tr.vx = (d.x - tr.x) / dt * 0.6 + tr.vx * 0.4;
-      tr.vy = (d.y - tr.y) / dt * 0.6 + tr.vy * 0.4;
-      tr.x = d.x; tr.y = d.y; tr.lastT = t; tr.n += 1;
+      if (greedy) {
+        tr.vx = (d.x - tr.x) / dt * 0.6 + tr.vx * 0.4;
+        tr.vy = (d.y - tr.y) / dt * 0.6 + tr.vy * 0.4;
+        tr.x = d.x; tr.y = d.y;
+      } else {
+        const pr = predict(tr, t), rx = d.x - pr.x, ry = d.y - pr.y, b = tr.n < 3 ? BETA_NEW : BETA;
+        tr.x = pr.x + ALPHA * rx; tr.y = pr.y + ALPHA * ry;
+        tr.vx += (b * rx) / dt; tr.vy += (b * ry) / dt;
+      }
+      tr.lastT = t; tr.n += 1;
       if (d.team !== "UNK") {
         if (soft) Object.keys(tr.votes).forEach((k) => { tr.votes[k] *= 0.9; });
         tr.votes[d.team] = (tr.votes[d.team] || 0) + 1;
@@ -163,5 +250,5 @@
     return n;
   }
 
-  return { Tracker, finalTeams, splitTracks, relinkTracks, MAX_SPEED };
+  return { Tracker, assign, finalTeams, splitTracks, relinkTracks, MAX_SPEED };
 });
