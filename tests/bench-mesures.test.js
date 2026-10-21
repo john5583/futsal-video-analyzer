@@ -138,3 +138,56 @@ test("comparaison avant / après : mieux, moins bien, identique, non comparable"
   assert.equal(back["Identifiants / joueurs, équipe A"], "moins bien");
   assert.match(B.compareTable(a, b), /équipe A : .* -> 1 \(mieux\)/);
 });
+
+/* ---------- cadence et physique lissée (analyse continue) ---------- */
+const Syn = require("./bench/synthetic");
+const framesOfGt = (m) => m.map((f) => ({ t: f.t, players: f.dets.map((d) => ({ id: d.gt, team: d.gt < 5 ? "A" : "B", x: d.x, y: d.y })) }));
+
+test("cadence : 30 images/s sans trou, puis des trous quand des images manquent", () => {
+  const full = match(300, 1 / 30);
+  const c = B.cadence(full);
+  assert.ok(Math.abs(c.imagesPerSec - 30) < 0.5, "cadence " + c.imagesPerSec);
+  assert.equal(c.holes, 0);
+  const cut = full.filter((f, i) => i < 100 || i >= 130);       // 30 images perdues d'un coup (1 s)
+  const h = B.cadence(cut);
+  assert.ok(Math.abs(h.imagesPerSec - 30) < 0.5);
+  assert.equal(h.holes, 1);
+  assert.ok(Math.abs(h.holeSeconds - 31 / 30) < 0.05, "trou de " + h.holeSeconds + " s");
+  assert.ok(h.maxStepSec > 1);
+  assert.equal(B.cadence(match(60, 1 / 3)).imagesPerSec, 3);
+  assert.equal(B.cadence([]).imagesPerSec, null);
+});
+
+test("physique lissée : une vitesse connue est retrouvée à 3 comme à 30 images/s", () => {
+  [3, 30].forEach((fps) => {
+    const p = B.physicsWindow(match(Math.round(fps * 20), 1 / fps, { speed: 4 }));
+    assert.ok(Math.abs(p.speedP50 - 4) < 0.05, fps + " im/s : " + p.speedP50);
+    assert.equal(p.overSpeedRef, 0);
+    assert.ok(p.accelP95 < 0.1);
+  });
+});
+
+test("physique lissée : indépendante de la cadence sur un match bruité, alors que la mesure image par image gonfle à 30 images/s", () => {
+  const slow = framesOfGt(Syn.makeMatch({ seed: 7, scene: "calme", fps: 3, seconds: 90 })), fast = framesOfGt(Syn.makeMatch({ seed: 7, scene: "calme", fps: 30, seconds: 90 }));
+  const w3 = B.physicsWindow(slow), w30 = B.physicsWindow(fast);
+  assert.ok(Math.abs(w3.speedP50 - w30.speedP50) < 0.4, "vitesse médiane " + w3.speedP50 + " (3 im/s) contre " + w30.speedP50 + " (30 im/s)");
+  const raw30 = B.physics(fast);
+  assert.ok(raw30.accelP95 > 3 * w30.accelP95, "image par image à 30 im/s : " + raw30.accelP95 + " m/s² contre " + w30.accelP95 + " m/s² lissé");
+});
+
+test("physique lissée : les trous ne fabriquent pas de vitesse ; entrées vides sans exception", () => {
+  const f = match(10, 5, { speed: 4 });                      // une image toutes les 5 s : au-delà de 3 fenêtres d'1 s
+  assert.equal(B.physicsWindow(f, 1).samples, 0);
+  assert.equal(B.physicsWindow(undefined).samples, 0);
+  assert.equal(B.physicsWindow([{}]).speedP50, null);
+});
+
+test("résumé et tableau : la cadence et la physique lissée apparaissent", () => {
+  const s = B.summarize(null, match(90, 1 / 30));
+  assert.ok(Math.abs(s.cadence.imagesPerSec - 30) < 0.5);
+  assert.ok(s.physicsWindow.samples > 0);
+  const t = B.table("continu", s);
+  assert.match(t, /Cadence : 30 images\/s/);
+  assert.match(t, /fenêtres de 1 s, indépendants de la cadence/);
+  assert.ok(B.compare(s, s).some((r) => r.mesure === "Trous dans la cadence" && r.verdict === "identique"));
+});
