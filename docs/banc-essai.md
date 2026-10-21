@@ -39,3 +39,14 @@ Chaque mesure est notée « mieux », « moins bien » ou « identique ». Aucun
 - **Ballon** : part des images avec un ballon retenu, et rappel sur tes images étiquetées (ballon à moins de 1 m de l'étiquette, projetée sur le terrain).
 - **Ne mesurent pas** : la justesse des erreurs tactiques ni l'identité réelle d'un joueur (aucune vérité de terrain pour ça). Ces points se jugent en regardant des extraits.
 - Les mesures de l'extrait « rapide » ne valent que pour cet extrait.
+- **Compare des mesures faites dans la même session** (même jour, même ordinateur, sans redémarrage entre les deux). Mesuré : sur une vidéo où la caméra décroche, deux passages de suite sont identiques, mais un passage fait après un redémarrage de l'ordinateur a donné des chiffres légèrement différents avec le même code (carte graphique ou décodage vidéo). Pour juger un changement, refais aussi la mesure « avant » juste avant la mesure « après ».
+- Le script a besoin du module `playwright-core` (installé avec `npm install --no-save playwright-core`, il n'est pas dans `package.json`).
+
+## Analyse continue : mesures supplémentaires
+- **Cadence** : images par seconde réellement obtenues (écart entre images consécutives), et **trous** (écart de plus de 1,5 fois l'écart normal : images perdues). Une analyse continue à 30 images/s doit afficher environ 30 images/s et 0 trou.
+- **Déplacements en fenêtres de 1 s** : vitesses et accélérations calculées sur 1 seconde, donc comparables entre 3 et 30 images/s. La mesure « image par image » gonfle les accélérations à 30 images/s (bruit de position), elle ne se compare pas d'une cadence à l'autre.
+- Les mesures à 30 images/s **ne se comparent pas directement** à la mesure de départ faite à 3 images/s : compare des analyses de même cadence, ou utilise les fenêtres de 1 s.
+
+## Autres outils
+- `node scripts/mesure-lecture.js --projet x.fsal --video x.mp4 [--debut 20] [--secondes 10]` : mesure, dans l'application réelle, quelle façon de lire la vidéo ne perd aucune image, et combien coûtent la détection et le suivi de la caméra par image. Les temps varient d'un passage à l'autre (jusqu'à 50 % observé) : refais-la à vide avant de comparer.
+- `node scripts/banc-synthetique.js [--scenes realiste,tenuesProches] [--cadences 3,10,30] [--matchs 6] [--graine 101]` : matchs fabriqués à identités connues, pour compter exactement les échanges de joueurs. Les trajectoires ne dépendent pas de la cadence (même match vu à 3 ou à 30 images/s).

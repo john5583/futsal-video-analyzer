@@ -82,6 +82,53 @@ function physics(frames, maxGap) {
   };
 }
 
+/* Cadence réelle de l'analyse : écart entre images consécutives. En mode continu (30 images/s) on attend ~0,033 s sans trou ;
+   un trou = un écart de plus de 1,5 fois l'écart médian (images perdues : caméra perdue, lecture ratée...). */
+function cadence(frames) {
+  const fr = frameList(frames), steps = [];
+  for (let i = 1; i < fr.length; i++) if (fr[i].t > fr[i - 1].t) steps.push(fr[i].t - fr[i - 1].t);
+  const s = asc(steps), med = percentile(s, 50);
+  const holes = med ? steps.filter((d) => d > 1.5 * med) : [], normal = med ? steps.filter((d) => d <= 1.5 * med) : [];
+  const mean = normal.length ? normal.reduce((a, b) => a + b, 0) / normal.length : null;      // les temps sont enregistrés au centième de seconde : à 30 images/s les écarts alternent 0,03 et 0,04
+  return {
+    images: fr.length, medianStepSec: round(med, 3), imagesPerSec: mean ? round(1 / mean, 1) : null,
+    p95StepSec: round(percentile(s, 95), 3), maxStepSec: round(percentile(s, 100), 3),
+    holes: holes.length, holeSeconds: round(holes.reduce((a, b) => a + b, 0), 1)
+  };
+}
+
+/* Physique des joueurs mesurée sur des fenêtres d'environ winSec secondes (1 s par défaut : la même durée à 3 et à 30 images/s) : la vitesse et l'accélération ne dépendent plus
+   du nombre d'images par seconde (à 30 images/s, le bruit de position entre deux images voisines gonflerait les accélérations). */
+function physicsWindow(frames, winSec, maxGapFactor) {
+  const win = winSec || 1, maxGap = win * (maxGapFactor || 3), byId = new Map();
+  frameList(frames).forEach((f) => f.players.forEach((p) => {
+    if (!["A", "B", "GKA", "GKB"].includes(p.team)) return;
+    (byId.get(p.id) || byId.set(p.id, []).get(p.id)).push({ t: f.t, x: p.x, y: p.y });
+  }));
+  const speeds = [], accels = [];
+  byId.forEach((pts) => {
+    let i = 0, prev = null;
+    while (i < pts.length - 1) {
+      let j = i + 1;
+      while (j < pts.length && pts[j].t - pts[i].t < win - 1e-9) j++;
+      if (j >= pts.length) break;
+      if (j - 1 > i && Math.abs(pts[j - 1].t - pts[i].t - win) < Math.abs(pts[j].t - pts[i].t - win)) j--;       // durée la plus proche de la fenêtre demandée
+      const dt = pts[j].t - pts[i].t;
+      if (dt > maxGap) { i = j; prev = null; continue; }
+      const v = Math.hypot(pts[j].x - pts[i].x, pts[j].y - pts[i].y) / dt;
+      speeds.push(v);
+      if (prev) accels.push(Math.abs(v - prev.v) / ((dt + prev.dt) / 2));
+      prev = { v, dt }; i = j;
+    }
+  });
+  const s = asc(speeds), a = asc(accels);
+  return {
+    windowSec: win, samples: s.length, speedP50: round(percentile(s, 50), 2), speedP95: round(percentile(s, 95), 2), speedMax: round(percentile(s, 100), 2),
+    overSpeedRef: s.length ? round(s.filter((v) => v > SPEED_REF).length / s.length, 4) : null,
+    accelP95: round(percentile(a, 95), 2), overAccelRef: a.length ? round(a.filter((v) => v > ACCEL_REF).length / a.length, 4) : null
+  };
+}
+
 /* Ballon retenu : part des images avec un ballon, vitesses entre images voisines (au-delà de ~30 m/s : peu plausible pour un ballon de futsal). */
 const BALL_SPEED_REF = 30;
 function ballStats(frames, maxGap) {
@@ -153,7 +200,7 @@ function summarize(ai, frames, opts) {
   const o = opts || {}, out = {
     coverage: coverage(ai, frames),
     tracksA: trackStats(frames, "A", 5), tracksB: trackStats(frames, "B", 5),
-    physics: physics(frames), ball: ballStats(frames)
+    cadence: cadence(frames), physics: physics(frames), physicsWindow: physicsWindow(frames), ball: ballStats(frames)
   };
   if (Array.isArray(o.labels) && o.labels.length) out.ballRecall = ballRecall(frames, o.labels, o.recall);
   return out;
@@ -169,6 +216,8 @@ function table(name, s) {
   [s.tracksA, s.tracksB].forEach((t) => L.push("Pistes équipe " + t.team + " : " + t.ids + " identifiants pour " + t.expected + " joueurs attendus (x" + val(t.idsPerExpected) + "), " + val(t.meanVisible) + " visibles en moyenne, piste médiane " + val(t.medianTrackSec, "s") + ", " + pct(t.shortShare) + " de pistes < 2 s, " + val(t.birthsPerMin) + " nouvelles pistes / min."));
   const p = s.physics;
   L.push("Déplacements : vitesse médiane " + val(p.speedP50, "m/s") + ", p95 " + val(p.speedP95, "m/s") + ", max " + val(p.speedMax, "m/s") + ", " + pct(p.overSpeedRef) + " au-dessus de " + SPEED_REF + " m/s ; accélération p95 " + val(p.accelP95, "m/s²") + ", " + pct(p.overAccelRef) + " au-dessus de " + ACCEL_REF + " m/s².");
+  if (s.cadence && s.cadence.imagesPerSec != null) L.push("Cadence : " + s.cadence.imagesPerSec + " images/s (écart médian " + val(s.cadence.medianStepSec, "s") + ", max " + val(s.cadence.maxStepSec, "s") + "), " + s.cadence.holes + " trou(s) pour " + val(s.cadence.holeSeconds, "s") + ".");
+  if (s.physicsWindow && s.physicsWindow.samples) { const w = s.physicsWindow; L.push("Déplacements (fenêtres de " + w.windowSec + " s, indépendants de la cadence) : vitesse médiane " + val(w.speedP50, "m/s") + ", p95 " + val(w.speedP95, "m/s") + ", " + pct(w.overSpeedRef) + " au-dessus de " + SPEED_REF + " m/s ; accélération p95 " + val(w.accelP95, "m/s²") + ", " + pct(w.overAccelRef) + " au-dessus de " + ACCEL_REF + " m/s²."); }
   const b = s.ball;
   L.push("Ballon retenu : " + pct(b.withBallRatio) + " des images, vitesse p95 " + val(b.speedP95, "m/s") + ", max " + val(b.speedMax, "m/s") + ", " + pct(b.overSpeedRef) + " au-dessus de " + BALL_SPEED_REF + " m/s.");
   if (s.ballRecall) {
@@ -185,7 +234,8 @@ const KEYS = [
   ["tracksA.idsPerExpected", "Identifiants / joueurs, équipe A", -1], ["tracksB.idsPerExpected", "Identifiants / joueurs, équipe B", -1],
   ["tracksA.medianTrackSec", "Piste médiane, équipe A (s)", 1], ["tracksB.medianTrackSec", "Piste médiane, équipe B (s)", 1],
   ["tracksA.shortShare", "Pistes < 2 s, équipe A", -1], ["tracksB.shortShare", "Pistes < 2 s, équipe B", -1],
-  ["physics.overSpeedRef", "Joueurs au-dessus de 9 m/s", -1], ["ball.withBallRatio", "Ballon retenu (part des images)", 1],
+  ["physics.overSpeedRef", "Joueurs au-dessus de 9 m/s", -1], ["physicsWindow.overSpeedRef", "Joueurs au-dessus de 9 m/s (fenêtres de 1 s)", -1], ["physicsWindow.overAccelRef", "Accélérations au-dessus de 6 m/s² (fenêtres de 1 s)", -1],
+  ["cadence.holes", "Trous dans la cadence", -1], ["ball.withBallRatio", "Ballon retenu (part des images)", 1],
   ["ball.overSpeedRef", "Ballon au-dessus de 30 m/s", -1], ["ballRecall.recall", "Rappel du ballon sur étiquettes", 1]
 ];
 const dig = (o, path) => path.split(".").reduce((x, k) => (x == null ? null : x[k]), o);
@@ -201,4 +251,4 @@ function compareTable(avant, apres) {
   return compare(avant, apres).map((r) => r.mesure + " : " + val(r.avant) + " -> " + val(r.apres) + " (" + r.verdict + ")").join("\n");
 }
 
-module.exports = { compare, compareTable, percentile, coverage, trackStats, physics, ballStats, ballRecall, parseYoloLabels, toCourt, summarize, table, SPEED_REF, ACCEL_REF, BALL_SPEED_REF };
+module.exports = { cadence, physicsWindow, compare, compareTable, percentile, coverage, trackStats, physics, ballStats, ballRecall, parseYoloLabels, toCourt, summarize, table, SPEED_REF, ACCEL_REF, BALL_SPEED_REF };
