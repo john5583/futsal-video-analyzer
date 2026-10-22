@@ -4,6 +4,7 @@
 const { parentPort, workerData } = require("worker_threads");
 const Y = require("./yolox");
 const SAM = require("./sam");
+const SIL = require("./silhouette");
 const Backend = require("./backend");
 
 let ort = null;
@@ -38,9 +39,18 @@ async function onSegment(msg) {
     const s = await getSam();
     if (msg.buffer) await s.embed(msg.imgId, new Uint8ClampedArray(msg.buffer), msg.width, msg.height);
     const masks = [];
-    for (const box of msg.boxes || []) {
-      const m = await s.segmentBox(box, msg.imgId);
-      masks.push({ x0: m.x0, y0: m.y0, w: m.w, h: m.h, area: m.area, iou: m.iou, data: m.data });
+    const boxes = msg.boxes || [], negs = Array.isArray(msg.negs) ? msg.negs : [];
+    for (let i = 0; i < boxes.length; i++) {
+      const m = await s.segmentBox(boxes[i], msg.imgId, negs[i]);
+      // stabilité : la même personne découpée avec une boîte un peu plus petite puis un peu plus grande doit donner le même contour.
+      // Inutile (donc non calculée, 0) quand la découpe sera refusée de toute façon : forme impossible ou voisin collé.
+      const crowded = boxes.some((o, j) => j !== i && SIL.gap(boxes[i], o) <= SIL.LIM.gapMin);
+      let stab = 0;
+      if (!crowded && SIL.evaluate(Object.assign({}, m, { stab: 1 }), boxes[i]).ok) {
+        const mi = await s.segmentBox(SIL.scaleBox(boxes[i], 0.88), msg.imgId, negs[i]), mo = await s.segmentBox(SIL.scaleBox(boxes[i], 1.1), msg.imgId, negs[i]);
+        stab = Math.min(SIL.maskIoU(m, mi), SIL.maskIoU(m, mo));
+      }
+      masks.push({ x0: m.x0, y0: m.y0, w: m.w, h: m.h, area: m.area, iou: m.iou, stab, data: m.data });
     }
     parentPort.postMessage({ type: "result", id: msg.id, masks });
   } catch (e) {

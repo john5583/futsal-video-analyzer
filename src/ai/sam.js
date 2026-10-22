@@ -77,14 +77,18 @@
       cache = { imgId, emb: out[enc.outputNames[0]], w, h };
     }
 
-    /* Découpe une personne à partir de sa boîte [x1,y1,x2,y2] (pixels de l'image encodée). */
-    async function segmentBox(box, imgId) {
+    /* Découpe une personne à partir de sa boîte [x1,y1,x2,y2] (pixels de l'image encodée). neg : points [x, y] qui NE sont PAS cette personne
+       (le corps des voisins) : le modèle les exclut, ce qui évite de fondre deux personnes qui se touchent. */
+    async function segmentBox(box, imgId, neg) {
       if (!cache || (imgId !== undefined && cache.imgId !== imgId)) throw new Error("Image non encodée : renvoyez l'image avec la demande");
       const { emb, w, h } = cache;
+      const nn = (Array.isArray(neg) ? neg : []).filter((p) => Array.isArray(p) && isFinite(p[0]) && isFinite(p[1])).slice(0, 8);
+      const coords = [box[0], box[1], box[2], box[3]], labels = [2, 3];
+      nn.forEach((p) => { coords.push(p[0], p[1]); labels.push(0); });
       const feeds = {
         image_embeddings: emb,
-        point_coords: new ort.Tensor("float32", Float32Array.from([box[0], box[1], box[2], box[3]]), [1, 2, 2]),
-        point_labels: new ort.Tensor("float32", Float32Array.from([2, 3]), [1, 2]),
+        point_coords: new ort.Tensor("float32", Float32Array.from(coords), [1, 2 + nn.length, 2]),
+        point_labels: new ort.Tensor("float32", Float32Array.from(labels), [1, 2 + nn.length]),
         mask_input: new ort.Tensor("float32", new Float32Array(256 * 256), [1, 1, 256, 256]),
         has_mask_input: new ort.Tensor("float32", Float32Array.from([0]), [1]),
         orig_im_size: new ort.Tensor("float32", Float32Array.from([h, w]), [2])
