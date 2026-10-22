@@ -84,6 +84,7 @@ async function waitDisk(fn, ms) { const end = Date.now() + ms; while (Date.now()
   must(await waitDisk(() => { try { const d = JSON.parse(fs.readFileSync(path.join(folder, "etiquettes.json"), "utf8")); return d.frames[String(ms)] && d.frames[String(ms)].playersDone; } catch (_e) { return false; } }, 8000), "le disque contient l'image terminée");
   const disk = JSON.parse(fs.readFileSync(path.join(folder, "etiquettes.json"), "utf8"));
   must(disk.frames[String(ms)].boxes[0].who === "p1" && disk.persons[0].nom === "Karim 7", "le disque contient cadre, identité et fiche");
+  must(await waitDisk(() => { try { return JSON.parse(fs.readFileSync(path.join(folder, "etiquettes.json"), "utf8")).pos === ms2; } catch (_e) { return false; } }, 8000), "la position de la dernière image est écrite sur le disque");
   must(!fs.existsSync(path.join(folder, "etiquettes.json.tmp")), "aucun fichier temporaire oublié");
   await app.close();
 
