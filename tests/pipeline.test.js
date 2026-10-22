@@ -285,3 +285,15 @@ test("zone de banc : suit la dérive lente du suivi de la caméra (personnes ass
   assert.equal(far[0].dx, 6, "décalage plafonné");
   assert.equal(P.shiftedZones([], []), null);
 });
+
+test("marge du ballon autour du terrain : 2 m par défaut (comportement d'origine), élargie seulement sur demande", () => {
+  const src = [[0, 0], [1000, 0], [1000, 500], [0, 500]], dst = [[0, 0], [40, 0], [40, 20], [0, 20]];
+  const H = HG.solve(src, dst);
+  const ballBox = { cls: 32, score: 0.6, x1: 1070, y1: 245, x2: 1080, y2: 255 };           // centre (1075, 250) -> (43 m, 10 m) : 3 m au-delà de la ligne
+  const run = (extra) => P.processDetections([Object.assign({}, ballBox)], Object.assign({ frameW: 1200, frameH: 500, scale: 1, H, L: 40, W: 20, tracker: new T.Tracker(), t: 1 }, extra));
+  assert.equal(run({}).bc.length, 0, "par défaut : écarté (comme avant)");
+  assert.equal(run({ ballMargin: 2 }).bc.length, 0);
+  const wide = run({ ballMargin: 6 }).bc;
+  assert.equal(wide.length, 1);
+  assert.ok(Math.abs(wide[0][0] - 43) < 0.1 && Math.abs(wide[0][1] - 10) < 0.1);
+});

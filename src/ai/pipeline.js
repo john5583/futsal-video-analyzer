@@ -223,7 +223,8 @@
     balls.sort((a, b) => b.score - a.score).forEach((d) => {
       if (bc.length >= MAX_BALL_CANDS) return;
       const p = HG.apply(ctx.H, ((d.x1 + d.x2) / 2) / ctx.scale, ((d.y1 + d.y2) / 2) / ctx.scale);
-      if (!isFinite(p[0]) || !isFinite(p[1]) || p[0] < -2 || p[0] > ctx.L + 2 || p[1] < -2 || p[1] > ctx.W + 2) return;
+      const bm = ctx.ballMargin != null ? ctx.ballMargin : 2;      // marge autour du terrain (m) : un ballon en l'air se projette plus loin que sa vraie place
+      if (!isFinite(p[0]) || !isFinite(p[1]) || p[0] < -bm || p[0] > ctx.L + bm || p[1] < -bm || p[1] > ctx.W + bm) return;
       bc.push([Math.round(p[0] * 100) / 100, Math.round(p[1] * 100) / 100, Math.round(d.score * 1000) / 1000]);
     });
     // aperçu en direct : meilleure détection fiable ; le ballon définitif est choisi en fin d'analyse
@@ -525,7 +526,8 @@
     const vw = video.videoWidth, vh = video.videoHeight;
     const zoom = opts.tiles === 3;       // « zoom automatique » : résolution d'origine, zone du terrain découpée, recherche du ballon en gros plan
     const maxW = zoom ? 1920 : 1280;
-    const scale = Math.min(1, maxW / Math.max(vw, vh * (16 / 9)));
+    // fullRes (option cachée, zoom automatique) : plein détail aussi pour les vidéos verticales (sinon réduites à 56 %)
+    const scale = zoom && opts.fullRes ? Math.min(1, 1920 / Math.max(vw, vh)) : Math.min(1, maxW / Math.max(vw, vh * (16 / 9)));
     const cw = Math.max(2, Math.round(vw * scale)), ch = Math.max(2, Math.round(vh * scale));
     const canvas = document.createElement("canvas");
     canvas.width = cw; canvas.height = ch;
@@ -651,7 +653,7 @@
         continue;
       }
       if (lostStart != null) { lost.push([lostStart, t]); recalage.push({ de: curLost.de, a: t, reprise: curLost.reprise }); lostStart = null; curLost = null; }
-      frames.push(processDetections(dets, { frameW: cw, frameH: ch, scale, img, H, L: opts.L, W: opts.W, refs: opts.refs, reject: opts.tol, tracker, t, close: amb.close, appearance: amb.close, bench, benchZones: opts.benchZones, benchDrift }));
+      frames.push(processDetections(dets, { frameW: cw, frameH: ch, scale, img, H, L: opts.L, W: opts.W, refs: opts.refs, reject: opts.tol, tracker, t, close: amb.close, appearance: amb.close, bench, benchZones: opts.benchZones, benchDrift, ballMargin: opts.ballMargin }));
       if (opts.onProgress) {
         const elapsed = (Date.now() - started) / 1000;
         opts.onProgress({ done: i + 1, total: times.length, eta: (elapsed / (i + 1)) * (times.length - i - 1), frame: frames[frames.length - 1] });
