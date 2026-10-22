@@ -970,25 +970,31 @@
     return items;
   }
   /* Étiquette exacte du ballon (pixel cliqué) pour mesurer puis entraîner le détecteur ; jamais déduite par le programme. */
-  function saveBallLabel(t, ix, iy, H) {
+  function saveBallLabel(t, ix, iy, H, src, unsure) {
     const vw = video.videoWidth, vh = video.videoHeight;
     if (!vw || !vh) return;
-    const lab = ix == null ? { t, none: true, vw, vh } : Object.assign({ t, u: ix, v: iy, vw, vh }, BL.ballSize(ix, iy, vw, H, HG));
+    const origin = bs ? (bsBlind(t) ? "aveugle" : src || "clic") : undefined;      // d'où vient l'étiquette (mesure du biais des propositions)
+    const lab = unsure ? { t, unsure: true, vw, vh, src: origin } : ix == null ? { t, none: true, vw, vh, src: origin } : Object.assign({ t, u: ix, v: iy, vw, vh, src: origin }, BL.ballSize(ix, iy, vw, H, HG));
     if (!BL.add(memory(), lab)) { App.toast("Étiquette refusée : le clic est en dehors de l'image.", true); return; }
     renderBallLabels(); App.changed();
-    App.toast(ix == null ? "Noté : aucun ballon visible sur cette image." : "Étiquette du ballon enregistrée.");
+    App.toast(unsure ? "Noté : incertain (cette image ne compte ni pour ni contre)." : ix == null ? "Noté : aucun ballon visible sur cette image." : "Étiquette du ballon enregistrée.");
     if (bs && bs.list[bs.i] != null && Math.abs(bs.list[bs.i] - t) < 0.5) bsMove(1);
   }
   /* ---------- session d'étiquetage : des images une à une, le ballon proposé par le programme, la réponse est la tienne ---------- */
   let bs = null;                 // { list: [t…], i, n } ; null = pas de session
   const BS_MAX = 150;
+  /* Image de contrôle (session complète seulement) : environ 1 image sur 15, tirée de façon fixe, sans proposition, pour mesurer si les propositions guident la réponse. */
+  const bsBlind = (t) => !!(bs && bs.all) && (Math.imul(Math.round(t * 1000), 2654435761) >>> 0) % 10 === 0;
   function bsBox(show) { const b = $("ai-bs-box"); if (b) b.hidden = !show; }
-  function startBallSession() {
+  function startBallSession(all) {
     if (!App.isVideoReady() || !frames.length) { App.toast("Chargez la vidéo et lancez d'abord l'analyse : les images à étiqueter viennent de l'analyse.", true); return; }
     const done = BL.list(memory()), step = Math.max(1, Math.floor(frames.length / BS_MAX)), list = [];
-    for (let k = 0; k < frames.length && list.length < BS_MAX; k += step) { const t = frames[k].t; if (!done.some((l) => Math.abs(l.t - t) < BL.T_SAME)) list.push(t); }
+    if (all) {      // session complète : toutes les images de la plage analysée (grille de l'analyse), pour mesurer sur un match entier
+      const st = state.project.ai.settings || {}, tEnd = Math.min(st.t1 != null ? st.t1 : video.duration, video.duration - 0.05);
+      P.sampleTimes(st.t0 || 0, tEnd, 3).forEach((t) => { if (!done.some((l) => Math.abs(l.t - t) < BL.T_SAME)) list.push(t); });
+    } else for (let k = 0; k < frames.length && list.length < BS_MAX; k += step) { const t = frames[k].t; if (!done.some((l) => Math.abs(l.t - t) < BL.T_SAME)) list.push(t); }
     if (!list.length) { App.toast("Toutes les images proposées sont déjà étiquetées."); return; }
-    bs = { list, i: 0 }; bsBox(true); bsShow();
+    bs = { list, i: 0, all: !!all }; bsBox(true); bsShow();
     try { $("ai-bs-box").scrollIntoView({ block: "nearest" }); } catch (_e) { /* défilement indisponible */ }
   }
   function bsEnd(msg) { bs = null; qHighlight = null; bsBox(false); setZoom({ k: 1, tx: 0, ty: 0 }); if (msg) App.toast(msg); }
@@ -1001,29 +1007,31 @@
   function bsShow() {
     const t = bs.list[bs.i], f = P.frameNear(frames, t, 0.3), H = projectionAt(t);
     let pt = null;
-    if (f && f.ball && H) {
+    if (f && f.ball && H && !bsBlind(t)) {
       try { const q = HG.apply(HG.invert(H), f.ball.x, f.ball.y); if (isFinite(q[0]) && isFinite(q[1]) && q[0] >= 0 && q[1] >= 0 && q[0] <= video.videoWidth && q[1] <= video.videoHeight) pt = { u: q[0], v: q[1] }; } catch (_e) { pt = null; }
     }
     bs.pt = pt; bs.H = H;
     video.pause();
     qHighlight = { t, ballPt: pt, label: "Ballon proposé" };
-    $("ai-bs-text").textContent = "Image " + (bs.i + 1) + " sur " + bs.list.length + " (" + App.fmt(t) + ") — " + (pt ? "le programme propose le ballon dans le cercle orange. Est-ce bien le ballon ?" : "le programme ne propose aucun ballon. Vois-tu le ballon ?") + "  [Entrée = oui, N = aucun ballon, S = passer]";
+    $("ai-bs-text").textContent = "Image " + (bs.i + 1) + " sur " + bs.list.length + " (" + App.fmt(t) + ") — " + (bsBlind(t) ? "image de contrôle : le programme ne propose rien. Vois-tu le ballon (au moins la moitié visible) ? " : pt ? "le programme propose le ballon dans le cercle orange. Est-ce bien le ballon ?" : "le programme ne propose aucun ballon. Vois-tu le ballon ?") + "  [Entrée = oui, N = aucun ballon visible, ? = incertain, S = passer]";
     $("ai-bs-ok").disabled = !pt;
     App.seek(t);
     if (pt) zoomOnPoint(pt.u, pt.v, 5); else setZoom({ k: 1, tx: 0, ty: 0 });      // agrandissement automatique autour du ballon proposé
     prefetchContours(t);
     if (bs.list[bs.i + 1] != null) prefetchContours(bs.list[bs.i + 1]);            // l'image suivante est préparée pendant que tu réponds
   }
-  function bsOk() { if (bs && bs.pt) saveBallLabel(bs.list[bs.i], bs.pt.u, bs.pt.v, bs.H); }
+  function bsOk() { if (bs && bs.pt) saveBallLabel(bs.list[bs.i], bs.pt.u, bs.pt.v, bs.H, "propose"); }
+  function bsUnsure() { if (bs) saveBallLabel(bs.list[bs.i], undefined, undefined, null, undefined, true); }
   function bsNone() { if (bs) saveBallLabel(bs.list[bs.i], null, null, null); }
   function renderBallLabels() {
     const c = state.project.ai ? BL.counts(memory()) : { total: 0, positives: 0, negatives: 0 }, el = $("ai-bl-count");
-    if (el) el.textContent = c.total ? c.positives + " avec ballon, " + c.negatives + " sans ballon" : "aucune étiquette";
+    const un = state.project.ai ? BL.unsureCount(memory()) : 0;
+    if (el) el.textContent = c.total || un ? c.positives + " avec ballon, " + c.negatives + " sans ballon" + (un ? ", " + un + " incertain(s)" : "") : "aucune étiquette";
     const b = $("ai-bl-export"); if (b) b.disabled = !c.total;
   }
   /* Exporte les images étiquetées (JPEG + fichier YOLO) dans un dossier choisi : rien ne part sur Internet. */
   async function exportBallLabels() {
-    const labs = BL.list(memory()).slice();
+    const labs = BL.list(memory()).filter(BL.exportable);      // les « incertain » ne servent pas à l'entraînement
     if (!labs.length || !App.isVideoReady()) { App.toast("Chargez la vidéo et étiquetez au moins une image.", true); return; }
     const cv = document.createElement("canvas"), items = [], wasPaused = video.paused, t0 = video.currentTime;
     cv.width = video.videoWidth; cv.height = video.videoHeight;
@@ -1331,7 +1339,9 @@
     $("ai-bench-mark").addEventListener("click", startBenchMark);
     $("ai-bl-export").addEventListener("click", exportBallLabels);
     bindZoom();
-    $("ai-bs-start").addEventListener("click", startBallSession);
+    $("ai-bs-start").addEventListener("click", () => startBallSession(false));
+    if ($("ai-bs-start-all")) $("ai-bs-start-all").addEventListener("click", () => startBallSession(true));
+    $("ai-bs-unsure").addEventListener("click", bsUnsure);
     $("ai-bs-ok").addEventListener("click", bsOk); $("ai-bs-none").addEventListener("click", bsNone);
     $("ai-bs-skip").addEventListener("click", () => bsMove(1)); $("ai-bs-prev").addEventListener("click", () => bsMove(-1));
     $("ai-bs-stop").addEventListener("click", () => bsEnd());
@@ -1342,6 +1352,7 @@
       if (tg === "INPUT" || tg === "TEXTAREA" || tg === "SELECT" || (e.target && e.target.isContentEditable)) return;
       if (e.key === "Enter") { e.preventDefault(); bsOk(); }
       else if (e.key === "n" || e.key === "N") { e.preventDefault(); bsNone(); }
+      else if (e.key === "?") { e.preventDefault(); bsUnsure(); }
       else if (e.key === "s" || e.key === "S") { e.preventDefault(); bsMove(1); }
     });
     $("ai-bench-clear").addEventListener("click", () => { const a = ai(); a.benchZones = []; renderBenchZones(); drawOverlay(); App.changed(); });
