@@ -953,9 +953,10 @@
         const hit = CT.pick(ce.items, ix * ce.k, iy * ce.k);
         if (hit) best = f.players.find((p) => p.id === hit.id) || null;
       }
-      if (!best) {      // pas de silhouette fiable sous le clic : on retrouve la personne par son cercle au sol (zone de ses pieds) ou sa boîte
+      const withSil = new Set(ce ? ce.items.map((it) => it.id) : []);
+      if (!best) {      // seules les personnes SANS silhouette fiable se retrouvent par leur zone (un clic hors d'une silhouette dessinée = le ballon)
         f.players.forEach((p) => {
-          if (!p.b || p.b.length < 4) return;
+          if (!p.b || p.b.length < 4 || withSil.has(p.id)) return;
           const x1 = (p.b[0] / 1000) * vw, y1 = (p.b[1] / 1000) * vh, x2 = (p.b[2] / 1000) * vw, y2 = (p.b[3] / 1000) * vh;
           if (ix >= x1 - 6 && ix <= x2 + 6 && iy >= y1 - 6 && iy <= y2 + 6 && (x2 - x1) * (y2 - y1) < area) { area = (x2 - x1) * (y2 - y1); best = p; }
         });
