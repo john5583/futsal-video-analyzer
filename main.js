@@ -1,6 +1,7 @@
 "use strict";
 const { app, BrowserWindow, Menu, dialog, ipcMain, protocol, shell } = require("electron");
 const updater = require("./updater");
+const LF = require("./labelsFs");
 const { Worker } = require("worker_threads");
 const path = require("path");
 const fs = require("fs");
@@ -34,7 +35,8 @@ function checkVideo(p) {
     return { error: "Le fichier vidéo est introuvable : " + p };
   }
   allowedVideos.add(path.resolve(p));
-  return { path: p, name: path.basename(p), url: videoUrl(p) };
+  let size = 0; try { size = fs.statSync(p).size; } catch (_e) { /* taille inconnue */ }
+  return { path: p, name: path.basename(p), size, url: videoUrl(p) };
 }
 
 
@@ -196,6 +198,7 @@ function buildMenu() {
         { label: "Enregistrer sous…", accelerator: "CmdOrCtrl+Shift+S", click: send("saveAs") },
         { type: "separator" },
         { label: "Ouvrir une vidéo…", accelerator: "CmdOrCtrl+Shift+O", click: send("video") },
+        { label: "Étiquetage du ballon et des joueurs…", accelerator: "CmdOrCtrl+E", click: send("labelling") },
         { type: "separator" },
         { label: "Quitter", role: "quit" }
       ]
@@ -364,6 +367,13 @@ function registerIpc() {
       return { dir };
     } catch (err) { return { error: "Écriture impossible : " + err.message }; }
   });
+  /* Étiquetage (menu « Étiquetage ») : progression et images dans DocumentsFutsal Analyzeretiquettes<vidéo>. */
+  const labelsHome = () => process.env.FSAL_DOCUMENTS || app.getPath("documents");      // FSAL_DOCUMENTS : réservé aux tests
+  const labelsSafe = (fn) => { try { return fn(); } catch (err) { return { error: "Écriture ou lecture impossible : " + err.message }; } };
+  ipcMain.handle("labels:load", (_e, key) => labelsSafe(() => Object.assign({ dir: LF.dirFor(labelsHome(), key) }, LF.load(labelsHome(), key))));
+  ipcMain.handle("labels:save", (_e, key, data) => labelsSafe(() => LF.save(labelsHome(), key, data)));
+  ipcMain.handle("labels:saveImage", (_e, key, ms, jpeg) => labelsSafe(() => LF.saveImage(labelsHome(), key, ms, jpeg ? Buffer.from(jpeg) : null)));
+  ipcMain.handle("labels:key", (_e, name, size) => LF.videoKey(name, size));
   ipcMain.handle("animation:save", async (_e, buffer, defaultName, ext) => {
     const e = ext === "mp4" ? "mp4" : ext === "gif" ? "gif" : "webm";
     const r = await dialog.showSaveDialog(mainWindow, {

@@ -40,3 +40,7 @@ jobs:
         run: xvfb-run -a node tests/e2e/correction-video.js
         env:
           CI: "true"
+      - name: Ecran Etiquetage (ballon, joueurs, enregistrement immediat, reprise apres redemarrage)
+        run: xvfb-run -a node tests/e2e/etiquetage.js
+        env:
+          CI: "true"

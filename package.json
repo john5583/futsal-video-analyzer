@@ -29,6 +29,7 @@
       "main.js",
       "preload.js",
       "updater.js",
+      "labelsFs.js",
       "src/**/*",
       "build/icon.png",
       "package.json",
