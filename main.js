@@ -160,7 +160,7 @@ async function aiSegment(req) {
   return new Promise((resolve, reject) => {
     const id = ai.nextId++;
     ai.pending.set(id, { resolve, reject });
-    const msg = { type: "segment", id, imgId: String(req.imgId), width: req.width, height: req.height, boxes: req.boxes || [] };
+    const msg = { type: "segment", id, imgId: String(req.imgId), width: req.width, height: req.height, boxes: req.boxes || [], negs: Array.isArray(req.negs) ? req.negs.slice(0, 64) : [] };
     const transfer = [];
     if (req.buffer) {
       const ab = req.buffer instanceof ArrayBuffer ? req.buffer : req.buffer.buffer.slice(req.buffer.byteOffset, req.buffer.byteOffset + req.buffer.byteLength);

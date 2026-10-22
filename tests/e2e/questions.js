@@ -1,4 +1,4 @@
-/* Test de bout en bout : questions du programme, mémoire du projet, « Mes réponses » (annuler), cadre orange sur la vidéo.
+/* Test de bout en bout : questions du programme, mémoire du projet, « Mes réponses » (annuler), repère orange sur la vidéo.
    Projet synthétique avec un doute d'équipe, une erreur incertaine et un passage par la zone de remplacement.
    Usage : xvfb-run -a node tests/e2e/questions.js   (nécessite ffmpeg, npm i --no-save playwright-core) */
 "use strict";
@@ -66,7 +66,7 @@ function makeFrames() {
   // 1. les trois questions sont posées, avec le bon vocabulaire
   must(await waitFor(win, () => document.querySelectorAll("#ai-q .q").length === 3, 10000), "3 questions affichées (équipe, remplaçant, erreur incertaine)");
   const txt = await win.evaluate(() => document.getElementById("ai-q").textContent);
-  must(/Qui est la personne dans le cadre orange/.test(txt) && /zone de remplacement/.test(txt) && /a-t-elle eu lieu/.test(txt), "textes des trois sortes de questions");
+  must(/Qui est la personne marquée en orange/.test(txt) && /zone de remplacement/.test(txt) && /a-t-elle eu lieu/.test(txt), "textes des trois sortes de questions");
   must(/\(3\)/.test(await win.evaluate(() => document.getElementById("ai-q-count").textContent)), "compteur de questions");
 
   // 2. erreur incertaine : « Non » l'écarte pour de bon, « Annuler » la rétablit (même si le recalcul ne la retrouve pas)
@@ -83,12 +83,12 @@ function makeFrames() {
   must(await click("#ai-ans button", "Annuler"), "annuler la confirmation");
   must(await waitFor(win, () => window.FSApp.state.project.events.length === 0 && document.querySelectorAll("#ai-q .q").length === 3, 8000), "l'événement ajouté est retiré, la question revient");
 
-  // 4. « Voir dans la vidéo » : image exacte en pause, cadre orange sur la personne
+  // 4. « Voir dans la vidéo » : image exacte en pause, repère orange sur la personne
   must(await click("#ai-q .q button", "Voir dans la vidéo"), "bouton « Voir dans la vidéo »");
   must(await waitFor(win, () => { const v = document.querySelector("video"); return v.paused && Math.abs(v.currentTime - window.FSAI.ai().doubts[0].t) < 0.15; }, 8000), "vidéo en pause sur l'image exacte de la question");
   await sleep(500);
   const orange = await win.evaluate(() => { const c = document.getElementById("overlay"), d = c.getContext("2d").getImageData(0, 0, c.width, c.height).data; let n = 0; for (let i = 0; i < d.length; i += 4) if (d[i] > 230 && d[i + 1] > 100 && d[i + 1] < 135 && d[i + 2] < 60 && d[i + 3] > 200) n++; return n; });
-  must(orange > 60, "cadre orange dessiné sur la personne (" + orange + " pixels)");
+  must(orange > 60, "repère orange dessiné sur la personne (" + orange + " pixels)");
 
   // 5. réponse « équipe » : appliquée, mémorisée, visible dans « Mes réponses »
   must(await click("#ai-q .q button", "Adversaire"), "réponse « Adversaire »");
@@ -96,14 +96,14 @@ function makeFrames() {
   const teamOf = (id) => win.evaluate((i) => { const c = window.FSAI.ai().frames; return [...new Set(c.map((f) => (f[1].find((p) => p[0] === i) || [])[1]))].join(","); }, id);
   must((await teamOf(1)) === "B", "la personne désignée est devenue « adversaire » sur toutes ses images (" + (await teamOf(1)) + ")");
   must((await teamOf(2)) === "A", "les autres joueurs ne changent pas");
-  must(!/cadre orange/.test(await win.evaluate(() => document.getElementById("ai-q").textContent)), "la question répondue disparaît");
+  must(!/marquée en orange/.test(await win.evaluate(() => document.getElementById("ai-q").textContent)), "la question répondue disparaît");
   must(/(1)/.test(await win.evaluate(() => document.getElementById("ai-ans-count").textContent)), "« Mes réponses » liste la réponse");
 
   // 6. annuler : l'équipe d'avant revient et la question réapparaît
   must(await click("#ai-ans button", "Annuler"), "bouton « Annuler »");
   must(await waitFor(win, () => window.FSAI.memory().answers.length === 0, 5000), "réponse retirée de la mémoire");
   must((await teamOf(1)) === "A", "l'équipe d'avant est rétablie (" + (await teamOf(1)) + ")");
-  must(await waitFor(win, () => /cadre orange/.test(document.getElementById("ai-q").textContent), 5000), "la question réapparaît");
+  must(await waitFor(win, () => /marquée en orange/.test(document.getElementById("ai-q").textContent), 5000), "la question réapparaît");
 
   // 7. remplaçant : question posée par l'analyse elle-même (personne 9, près de la ligne de touche des bancs pendant plus de 6 s)
   must(/zone de remplacement/.test(await win.evaluate(() => document.getElementById("ai-q").textContent)), "question « remplaçant ou joueur ? » posée");
