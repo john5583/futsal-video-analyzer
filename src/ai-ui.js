@@ -2,7 +2,7 @@
 (function () {
   "use strict";
   const App = window.FSApp;
-  const KB = window.FutsalKB, HG = window.FutsalHomography, K = window.FutsalKit, P = window.FutsalPipeline, M = window.FutsalMatch, V2 = window.FutsalMatchV2, RG = window.FutsalRegles, E = window.FutsalAnim, D = window.FutsalDoubt, BL = window.FutsalBallLabels, Z = window.FutsalZoom, O = window.FutsalOverlay, Q = window.FutsalQuality;
+  const KB = window.FutsalKB, HG = window.FutsalHomography, K = window.FutsalKit, P = window.FutsalPipeline, M = window.FutsalMatch, V2 = window.FutsalMatchV2, RG = window.FutsalRegles, E = window.FutsalAnim, D = window.FutsalDoubt, BL = window.FutsalBallLabels, Z = window.FutsalZoom, O = window.FutsalOverlay, Q = window.FutsalQuality, EX = window.FutsalExemples;
   const $ = (id) => document.getElementById(id);
   const esc = App.esc;
   const video = App.video, api = App.api, state = App.state;
@@ -43,10 +43,14 @@
     return (a.dir || 1) * (second ? -1 : 1);
   }
   function refs() {
-    const a = ai(), out = {};
+    const a = ai();
+    if (EX) return EX.refs(a.kits, { multi: !!a.exemplesParInstant });
+    const out = {};
     Object.keys(a.kits).forEach((k) => { if (a.kits[k] && a.kits[k].length) out[k] = K.average(a.kits[k]); });
     return out;
   }
+  /* Instant et vidéo d'un exemple donné maintenant (gardés dans le projet avec l'échantillon). */
+  const marque = (feat, src, t) => (EX ? EX.marquer(feat, { t: typeof t === "number" ? t : video.currentTime || 0, v: state.project.videoName || null, src }) : feat);
   const L = () => ai().L, W = () => ai().W;
 
   /* ---------- géométrie de l'affichage ---------- */
@@ -479,7 +483,8 @@
 
   /* Tenues de référence trop proches : avertissements en clair (noms affichés dans l'interface). */
   function kitWarnings(r) {
-    return K.ambiguityMessages(r || refs(), Object.fromEntries(ROLES.map(([key, label]) => [key, label])));
+    const m = K.ambiguityMessages(r || refs(), Object.fromEntries(ROLES.map(([key, label]) => [key, label])));
+    return EX ? m.concat(EX.contradictions(ai().kits).map((c) => c.texte)) : m;
   }
 
   function renderKits() {
@@ -498,9 +503,93 @@
       box.appendChild(row);
     });
     kitWarnings(r).forEach((m) => { const p = document.createElement("p"); p.className = "hint kit-warn"; p.textContent = "⚠ " + m; box.appendChild(p); });
+    if (EX) box.appendChild(examplesPanel({ bench: false }));
     const ok = !!(r.A && r.B);
     setChip("ai-s2-state", ok ? "Équipes reconnues" : "Choisir au moins 2 équipes", ok ? "ok" : "warn");
     renderNext();
+  }
+
+  /* ---------- exemples d'identification : liste datée, navigation, indicateurs, demandes, banc ---------- */
+  function exEl(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+  function exBtn(text, title, fn, cls) { const b = exEl("button", cls || "", text); b.type = "button"; if (title) b.title = title; b.addEventListener("click", fn); return b; }
+  const SRC_TXT = { silhouette: "silhouette", pipette: "pipette", auto: "clic sur le joueur" };
+  /* opts : nav (boutons avancer / reculer et champ « aller à »), bench (partie banc, vrai par défaut), onMore(cat) (donner un autre exemple),
+     onChange() (le parent se redessine après un changement). Aucun bouton ne bloque l'analyse. */
+  function examplesPanel(opts) {
+    const o = opts || {}, a = ai(), root = exEl("div", "ex-panel");
+    if (!EX) return root;
+    const msg = exEl("p", "hint ex-msg", "");
+    const refresh = () => { renderKits(); renderBenchZones(); if (o.onChange) o.onChange(); };
+    const dur = () => video.duration || state.project.duration || 0;
+    const vnom = state.project.videoName || null;
+    root.appendChild(exEl("h4", null, "Mes exemples (gardés dans ce projet)"));
+    root.appendChild(exEl("p", "hint", "Donnez plusieurs exemples à des moments différents : l'IA les utilise tous ensemble. Ils restent dans ce projet et ne servent jamais à un autre match."));
+    if (o.nav) {
+      const nav = exEl("div", "ex-nav"), lab = exEl("span", "muted ex-time", App.fmt(video.currentTime || 0));
+      [["−10 s", -10], ["−1 s", -1], ["+1 s", 1], ["+10 s", 10]].forEach(([txt, d]) => nav.appendChild(exBtn(txt, "Reculer / avancer dans la vidéo", () => App.seek(Math.max(0, Math.min(dur(), (video.currentTime || 0) + d))))));
+      const inp = exEl("input"); inp.type = "text"; inp.placeholder = "mm:ss"; inp.size = 6; inp.setAttribute("aria-label", "Aller à l'instant (mm:ss)");
+      const go = () => { const t = App.parseTime(inp.value); if (t == null) { msg.textContent = "Écrivez l'instant sous la forme mm:ss, par exemple 2:30."; return; } App.seek(Math.max(0, Math.min(dur(), t))); };
+      inp.addEventListener("keydown", (e) => { if (e.key === "Enter") go(); });
+      nav.appendChild(lab); nav.appendChild(inp); nav.appendChild(exBtn("Aller", "Aller à cet instant", go));
+      const upd = () => { if (!root.isConnected) { video.removeEventListener("timeupdate", upd); video.removeEventListener("seeked", upd); return; } lab.textContent = App.fmt(video.currentTime || 0); };
+      video.addEventListener("timeupdate", upd); video.addEventListener("seeked", upd);
+      root.appendChild(nav);
+    }
+    ROLES.forEach(([key, label, color]) => {
+      const e = EX.etat(a.kits, key), box = exEl("div", "ex-cat");
+      const head = exEl("div", "ex-head");
+      const dot = exEl("span", "ex-dot"); dot.style.background = color;
+      head.appendChild(dot); head.appendChild(exEl("b", null, label));
+      head.appendChild(exEl("span", "ex-chip " + (e.etat === "assez" ? "assez" : e.etat === "insuffisant" ? "plus" : "fac"), e.etat === "assez" ? "assez d'exemples" : e.etat === "insuffisant" ? "il en faut plus" : "facultatif"));
+      const btns = exEl("span", "ex-btns");
+      btns.appendChild(exBtn("＋ Autre exemple", "Donner un exemple à un autre moment de la vidéo", () => { if (o.onMore) o.onMore(key); else startPick(key); }));
+      const p = e.etat === "insuffisant" || (e.etat === "facultatif" && e.n > 0) ? EX.prochainInstant({ kits: a.kits, cat: key, frames, duree: dur(), v: vnom }) : null;
+      if (p) btns.appendChild(exBtn("Aller à un instant " + (p.probable ? "probable" : "éloigné"), p.raison, () => { App.seek(p.t); msg.textContent = label + " : " + App.fmt(p.t) + " — " + p.raison + "."; }));
+      head.appendChild(btns);
+      box.appendChild(head);
+      box.appendChild(exEl("p", "hint", e.texte + "."));
+      const ask = EX.demande(a.kits, key);
+      if (ask) box.appendChild(exEl("p", "hint ex-ask", ask));
+      EX.liste(a.kits, key).forEach((x) => {
+        const row = exEl("div", "ex-row");
+        row.appendChild(exEl("span", "ex-t", EX.fmtT(x.t)));
+        row.appendChild(exEl("span", "muted", SRC_TXT[x.src] || "source inconnue"));
+        const sw = K.swatches(x.feat), cs = exEl("span", "kit-sw");
+        if (sw) ["shirt", "shorts", "socks", "trim"].forEach((part) => { if (sw[part]) { const i = exEl("i", "sw"); i.style.background = sw[part]; cs.appendChild(i); } });
+        row.appendChild(cs);
+        const autre = x.v && vnom && x.v !== vnom;
+        if (autre) row.appendChild(exEl("span", "muted", "autre vidéo"));
+        else if (x.t != null) row.appendChild(exBtn("Aller", "Aller à l'instant de cet exemple", () => App.seek(x.t)));
+        row.appendChild(exBtn("✕", "Supprimer cet exemple", () => { EX.retirer(a.kits, key, x.id); App.changed(); refresh(); }, "ghost"));
+        box.appendChild(row);
+      });
+      root.appendChild(box);
+    });
+    EX.contradictions(a.kits).forEach((c) => root.appendChild(exEl("p", "hint kit-warn", "⚠ " + c.texte)));
+    if (o.bench !== false) {
+      const zs = a.benchZones || [], info = EX.banc(zs, { camera: a.camera }), box = exEl("div", "ex-cat"), head = exEl("div", "ex-head");
+      head.appendChild(exEl("b", null, "Banc des remplaçants"));
+      head.appendChild(exEl("span", "ex-chip " + (info.etat === "ok" ? "assez" : info.etat === "aucune" ? "fac" : "plus"), info.etat === "ok" ? "marqué" : info.etat === "aucune" ? "facultatif" : "il en faut plus"));
+      const btns = exEl("span", "ex-btns");
+      btns.appendChild(exBtn("Marquer le banc à cet instant", "Cliquez deux coins opposés de la zone du banc, sur l'image affichée", () => {
+        if (!startBenchMark()) msg.textContent = "Le banc se marque sur un instant déjà repéré (terrain) ou analysé. Placez la vidéo sur un tel instant : la marque sera utilisée à la prochaine analyse.";
+        else { msg.textContent = "Cliquez un coin de la zone du banc, puis le coin opposé (Échap : annuler)."; }
+      }));
+      head.appendChild(btns); box.appendChild(head);
+      box.appendChild(exEl("p", "hint", zs.length ? zs.length + " marque(s) à " + info.instants + " instant(s). La caméra fait dériver le banc : plusieurs marques à des moments différents aident ; elles servent à la prochaine analyse." : "Aucune marque. Sans marque, les remplaçants le long de la ligne de touche risquent d'être comptés comme joueurs."));
+      zs.forEach((z, i) => {
+        const row = exEl("div", "ex-row");
+        row.appendChild(exEl("span", "ex-t", EX.fmtT(typeof z.t === "number" ? z.t : null)));
+        row.appendChild(exEl("span", "muted", Math.round((z.x2 - z.x1) * 10) / 10 + " × " + Math.round((z.y2 - z.y1) * 10) / 10 + " m"));
+        if (typeof z.t === "number" && !(z.v && vnom && z.v !== vnom)) row.appendChild(exBtn("Aller", "Aller à l'instant de cette marque", () => App.seek(z.t)));
+        row.appendChild(exBtn("✕", "Supprimer cette marque", () => { zs.splice(i, 1); App.changed(); refresh(); }, "ghost"));
+        box.appendChild(row);
+      });
+      info.messages.forEach((m) => box.appendChild(exEl("p", "hint kit-warn", "⚠ " + m)));
+      root.appendChild(box);
+    }
+    root.appendChild(msg);
+    return root;
   }
 
   /* ---------- contrôle qualité : ce qui rend l'analyse fragile, mesuré, avec le remède ---------- */
@@ -509,7 +598,7 @@
     if (!a || !Q) return;
     try {
       const oq = D.openQuestions({ doubts: a.doubts || [], subs: a.subs || [], uncertain: a.uncertain || [], memory: memory() }).length;
-      a.quality = Q.evaluate({ res, ai: a, project: state.project, L: L(), videoWidth: video.videoWidth, openQuestions: oq, kitWarnings: kitWarnings(refs()) });
+      a.quality = Q.evaluate({ res, ai: a, project: state.project, L: L(), videoWidth: video.videoWidth, openQuestions: oq, kitWarnings: kitWarnings(refs()), exemples: EX ? EX.etats(a.kits).filter((e) => e.etat === "insuffisant") : [] });
     } catch (_e) { /* le contrôle qualité ne doit jamais bloquer l'analyse */ }
   }
   /* Passage perdu le plus long dont on connaît le point de reprise (la caméra redevient stable) : { de, a, reprise } ou null. */
@@ -720,7 +809,7 @@
       const feat = K.sample(res.img, [best.x1, best.y1, best.x2, best.y2]);
       if (!feat) { App.toast("Joueur trop petit pour lire la tenue : choisissez une image où il est plus grand.", true); return; }
       const a = ai();
-      (a.kits[role] = a.kits[role] || []).push(feat);
+      (a.kits[role] = a.kits[role] || []).push(marque(feat, "auto"));
       renderKits(); App.changed();
       App.toast("Tenue enregistrée.");
     } catch (e) { App.toast("Détection impossible : " + e.message, true); }
@@ -777,7 +866,7 @@
     if (!pip) return;
     if (!pip.parts.shirt) { App.toast("Cliquez d'abord sur le maillot (partie obligatoire).", true); return; }
     const a = ai(), f = K.fromParts(pip.parts.shirt, pip.parts.shorts, pip.parts.socks, pip.parts.trim);
-    (a.kits[pip.role] = a.kits[pip.role] || []).push(f);
+    (a.kits[pip.role] = a.kits[pip.role] || []).push(marque(f, "pipette"));
     pip = null; renderPipette(); renderKits(); updateOverlayMode(); App.changed();
     App.toast("Tenue enregistrée.");
     if (lastTest) renderPreview();
@@ -793,7 +882,8 @@
   /* ---------- zones des bancs ---------- */
   function renderBenchZones() {
     const z = (state.project.ai && state.project.ai.benchZones) || [];
-    $("ai-bench-zones").textContent = z.length ? z.length + " zone(s) de banc marquée(s)" : "aucune zone de banc marquée";
+    const c = EX ? EX.banc(z, { camera: state.project.ai && state.project.ai.camera }) : null;
+    $("ai-bench-zones").textContent = z.length ? z.length + " zone(s) de banc marquée(s)" + (c && c.instants > 1 ? " à " + c.instants + " instants" : "") + (c && c.messages.length ? " — " + c.messages[0] : "") : "aucune zone de banc marquée";
   }
   /* Projection image (pixels vidéo) -> terrain à l'instant t : celle de l'image analysée la plus proche (la caméra a pu
      bouger depuis le calibrage), sinon le calibrage s'il a été fait à cet instant. */
@@ -806,12 +896,15 @@
   function startBenchMark() {
     if (!App.isVideoReady()) { App.toast("Chargez d'abord une vidéo.", true); return; }
     const H = projectionAt(video.currentTime || 0);
-    if (!H) { App.toast("Placez la vidéo sur un instant déjà analysé ou calibré pour marquer un banc.", true); return; }
+    if (!H) { App.toast("Placez la vidéo sur un instant déjà analysé ou calibré pour marquer un banc.", true); return false; }
     video.pause();
     placing = null; pickRole = null; if (pip) cancelPipette();
     benchMark = { H, first: null };
     updateOverlayMode();
+    return true;
   }
+  /* Le banc peut-il être marqué à l'instant affiché ? (il faut une projection image -> terrain à cet instant) */
+  const benchMarkable = () => App.isVideoReady() && !!projectionAt(video.currentTime || 0);
   function benchClick(ix, iy) {
     const p = HG.apply(benchMark.H, ix, iy);
     if (!isFinite(p[0]) || !isFinite(p[1])) return;
@@ -820,8 +913,10 @@
     const z = { x1: Math.min(f[0], p[0]), y1: Math.min(f[1], p[1]), x2: Math.max(f[0], p[0]), y2: Math.max(f[1], p[1]) };
     benchMark = null;
     if (z.x2 - z.x1 < 0.3 || z.y2 - z.y1 < 0.3) { App.toast("Zone trop petite : cliquez deux coins opposés autour du banc.", true); updateOverlayMode(); return; }
-    a.benchZones = ((a.benchZones || []).concat([Object.fromEntries(Object.entries(z).map(([k, v]) => [k, Math.round(v * 100) / 100]))])).slice(-3);
+    const nz = Object.fromEntries(Object.entries(z).map(([k, v]) => [k, Math.round(v * 100) / 100]));
+    a.benchZones = ((a.benchZones || []).concat([EX ? EX.marquerBanc(nz, { t: video.currentTime || 0, v: state.project.videoName || null }) : nz])).slice(EX ? -EX.LIMITES.BANC_MAX : -3);
     renderBenchZones(); updateOverlayMode(); App.changed();
+    if (FSAI.hooks.examplesChanged) FSAI.hooks.examplesChanged();
   }
 
   /* La mémoire du projet filtre un résultat d'analyse : les erreurs que le coach a écartées ne reviennent pas. */
@@ -1456,6 +1551,7 @@
     }));
     $("overlay").addEventListener("click", (e) => {
       const [ix, iy] = toVideo(e.offsetX, e.offsetY);
+      if (benchMark) { if (ix >= 0 && iy >= 0 && ix <= video.videoWidth && iy <= video.videoHeight) benchClick(ix, iy); return; }
       if (pointer && pointer.click) { pointer.click(ix, iy, ix >= 0 && iy >= 0 && ix <= video.videoWidth && iy <= video.videoHeight, e); return; }
       if (ix < 0 || iy < 0 || ix > video.videoWidth || iy > video.videoHeight) return;
       if (benchMark) { benchClick(ix, iy); return; }
@@ -1535,7 +1631,7 @@
 
   const FSAI = window.FSAI = {
     hooks: {}, segmentImpl: null, reanalyze: () => reanalyzeSuggestions(),
-    ai, memory, refs, kitWarnings, quality: () => (state.project.ai ? state.project.ai.quality : null), grabSam, renderKits, renderStats, renderCalibs, renderPoints, validateCalibration, runAnalysis, updateEstimate,
+    ai, memory, refs, kitWarnings, examplesPanel, benchMarkable, quality: () => (state.project.ai ? state.project.ai.quality : null), grabSam, renderKits, renderStats, renderCalibs, renderPoints, validateCalibration, runAnalysis, updateEstimate,
     addLayer: (fn) => { layers.push(fn); }, setPointer: (p) => { pointer = p; updateOverlayMode(); }, redraw: refreshLive,
     beginPlacing: (id) => { if (!App.isVideoReady()) return false; video.pause(); pickRole = null; pip = null; renderPipette(); placing = id; $("ai-landmark").value = id; updateOverlayMode(); return true; },
     cancelPlacing: () => { placing = null; updateOverlayMode(); },

@@ -48,3 +48,7 @@ jobs:
         run: xvfb-run -a node tests/e2e/analyse-v2.js
         env:
           CI: "true"
+      - name: Exemples d identification par projet (liste, instants, banc, ancien projet)
+        run: xvfb-run -a node tests/e2e/exemples.js
+        env:
+          CI: "true"

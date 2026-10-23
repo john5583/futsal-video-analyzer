@@ -194,6 +194,14 @@
     return w ? s / w : Infinity;
   }
 
+  /* Distance à une référence qui peut porter des références par instant (alts, voir exemples.js) : la plus petite des distances.
+     Sans alts, c'est exactement dist(). */
+  function distAlts(a, ref) {
+    let d = dist(a, ref);
+    if (ref && Array.isArray(ref.alts)) for (const x of ref.alts) { const e = dist(a, x); if (e < d) d = e; }
+    return d;
+  }
+
   /* Moyenne de plusieurs empreintes (chaque partie est moyennée sur les empreintes qui la contiennent). */
   function average(samples) {
     const out = {};
@@ -242,7 +250,7 @@
     const minAcc = close ? ACC_MIN_CLOSE : ACC_MIN;
     const keys = Object.keys(refs).filter((k) => refs[k]);
     const d = {};
-    keys.forEach((k) => { d[k] = dist(feat, refs[k]); });
+    keys.forEach((k) => { d[k] = distAlts(feat, refs[k]); });
     const accKeys = keys.filter((k) => refs[k].trim && (!close || FIELD[k]));
     if (accKeys.length && feat.acc) {
       const present = accKeys.some((k) => (feat.acc[k] || 0) >= minAcc);
@@ -300,5 +308,5 @@
     return ref ? { shirt: ref.shirt ? toHex(ref.shirt) : null, shorts: ref.shorts ? toHex(ref.shorts) : null, socks: ref.socks ? toHex(ref.socks) : null, trim: ref.trim ? toHex(ref.trim) : null } : null;
   }
 
-  return { BANDS, REJECT_DISTANCE, rgbToLab, labToRgb, sample, average, classify, dist, swatches, toHex, pipette, fromParts, fromMask, detectTrim, accentFraction, trimHueFraction, addAccents, ambiguity, ambiguityMessages, ACC_MIN, ACC_MIN_CLOSE, PLAYER_SPREAD, CLOSE_DISTANCE, legSkin };
+  return { BANDS, REJECT_DISTANCE, rgbToLab, labToRgb, sample, average, classify, dist, distAlts, swatches, toHex, pipette, fromParts, fromMask, detectTrim, accentFraction, trimHueFraction, addAccents, ambiguity, ambiguityMessages, ACC_MIN, ACC_MIN_CLOSE, PLAYER_SPREAD, CLOSE_DISTANCE, legSkin };
 });

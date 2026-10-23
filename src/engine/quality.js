@@ -21,7 +21,7 @@
   const pct = (v) => Math.round(v * 100) + " %";
   const num = (v) => (typeof v === "number" && isFinite(v) ? v : 0);
 
-  /* opts : { res (FutsalMatch.analyze), ai (project.ai), project, L, videoWidth, openQuestions (nombre), kitWarnings ([texte]) }. */
+  /* opts : { res (FutsalMatch.analyze), ai (project.ai), project, L, videoWidth, openQuestions (nombre), kitWarnings ([texte]), exemples ([{ cat, nom, texte }] : catégories à compléter) }. */
   function evaluate(opts) {
     const o = opts || {}, res = o.res || {}, ai = o.ai || {}, project = o.project || {}, L = o.L || ai.L || 40;
     const nf = Array.isArray(res.normalized) ? res.normalized : [], states = Array.isArray(res.playStates) ? res.playStates : [];
@@ -96,6 +96,9 @@
 
     // tenues
     (Array.isArray(o.kitWarnings) ? o.kitWarnings : []).forEach((w, k) => items.push({ id: "tenues" + k, level: "attention", title: "Tenues difficiles à distinguer", detail: String(w), fix: "Réponds aux questions du programme ; des tenues distinctes aideraient." }));
+
+    // exemples d'identification en nombre insuffisant : la catégorie reste « moins fiable » (jamais bloquant)
+    (Array.isArray(o.exemples) ? o.exemples : []).forEach((e) => items.push({ id: "exemples-" + e.cat, level: "info", title: "« " + e.nom + " » : moins fiable (peu d'exemples)", detail: "Exemples d'identification : " + e.texte + ". L'analyse a quand même été faite avec ce qui a été donné.", fix: "Donnez un exemple à un autre moment de la vidéo (étape Joueurs, « ＋ Autre exemple »)." }));
 
     // questions en attente
     const q = num(o.openQuestions);
