@@ -29,7 +29,7 @@ function makeFrames() {
   for (let i = 0; i <= 40; i++) {
     const t = Math.round(i * 0.2 * 100) / 100;
     const players = pos.map(([x, y], k) => ({ id: k + 1, team: k < 4 ? "A" : "B", x, y, b: box(x, y) }));
-    if (Math.abs(t - 1) < 0.01 || Math.abs(t - 4) < 0.01) players.push({ id: 20, team: "REF", x: 15, y: 18, b: box(15, 18) });      // l'arbitre est vu à 1 s et à 4 s
+    if (Math.abs(t - 1) < 0.01 || Math.abs(t - 4) < 0.01) players.push({ id: 20, team: "GKB", x: 15, y: 18, b: box(15, 18) });      // le gardien adverse est vu à 1 s et à 4 s
     frames.push({ t, players, ball: { x: 14, y: 9 }, h });
   }
   return frames;
@@ -68,7 +68,7 @@ function makeFrames() {
   must(await waitFor(win, () => document.querySelectorAll("#ai-kits .ex-panel .ex-cat").length === 5, 5000), "panneau « Mes exemples » : les 5 catégories");
   const tA = await catText("Mon équipe");
   must(/instant inconnu/.test(tA) && /il en faut plus/.test(tA), "Mon équipe : instants inconnus, « il en faut plus » (" + (tA || "").slice(0, 120) + ")");
-  must(/facultatif/.test(await catText("Arbitre")), "Arbitre : facultatif tant qu'aucun exemple");
+  must(/facultatif/.test(await catText("Gardien adverse")), "Arbitre : facultatif tant qu'aucun exemple");
 
   // 2. supprimer un exemple
   must(await clickIn("#ai-kits .ex-cat button", "✕", "#ai-kits") && await waitFor(win, () => window.FSAI.ai().kits.A.length === 1, 4000), "suppression d'un exemple : il en reste un");
@@ -82,8 +82,8 @@ function makeFrames() {
 
   // 4. « ＋ Autre exemple » pour l'arbitre, à un autre instant, puis retour à l'étape Analyse
   await seekTo(2.0);
-  must(await win.evaluate(() => { const c = [...document.querySelectorAll("#wiz-ex .ex-cat")].find((x) => x.querySelector(".ex-head b").textContent === "Arbitre"); const b = [...c.querySelectorAll("button")].find((x) => x.textContent.includes("Autre exemple")); b.click(); return true; }), "bouton « ＋ Autre exemple » de l'arbitre");
-  must(await waitFor(win, () => window.FSWiz.state.step === "players" && window.FSWiz.state.catIdx === 4 && !!window.FSWiz.state.ret, 4000), "retour mémorisé, étape Joueurs sur l'arbitre");
+  must(await win.evaluate(() => { const c = [...document.querySelectorAll("#wiz-ex .ex-cat")].find((x) => x.querySelector(".ex-head b").textContent === "Gardien adverse"); const b = [...c.querySelectorAll("button")].find((x) => x.textContent.includes("Autre exemple")); b.click(); return true; }), "bouton « ＋ Autre exemple » de l'arbitre");
+  must(await waitFor(win, () => window.FSWiz.state.step === "players" && window.FSWiz.state.catIdx === 3 && !!window.FSWiz.state.ret, 4000), "retour mémorisé, étape Joueurs sur l'arbitre");
   await win.evaluate(() => {
     window.FSAI.detectPersons = async () => [{ x1: 300, y1: 150, x2: 400, y2: 440, score: 0.9, cls: 0 }, { x1: 600, y1: 140, x2: 700, y2: 430, score: 0.9, cls: 0 }];
     window.FSAI.segmentImpl = async (req) => ({ masks: req.boxes.map((b) => { const x0 = Math.floor(b[0]), y0 = Math.floor(b[1]), w = Math.max(1, Math.ceil(b[2] - b[0])), h = Math.max(1, Math.ceil(b[3] - b[1])); const data = new Uint8Array(w * h); let area = 0; for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const dx = (x + 0.5 - w / 2) / (w / 2), dy = (y + 0.5 - h / 2) / (h / 2); if (dx * dx + dy * dy <= 1) { data[y * w + x] = 1; area++; } } return { x0, y0, w, h, area, data, iou: 0.95, stab: 0.95 }; }) });
@@ -92,16 +92,16 @@ function makeFrames() {
   must(await waitFor(win, () => window.FSWiz.state.det && window.FSWiz.state.det.players.length === 2, 15000), "silhouettes découpées à 2,0 s");
   const at = (i) => win.evaluate((k) => { const d = window.FSWiz.state.det, p = d.players[k], f = d.frame.k, c = document.getElementById("overlay"), r = c.getBoundingClientRect(), v = document.querySelector("video"), s = Math.min(r.width / v.videoWidth, r.height / v.videoHeight), ox = (r.width - v.videoWidth * s) / 2, oy = (r.height - v.videoHeight * s) / 2; return { x: r.left + ox + (((p.box[0] + p.box[2]) / 2) / f) * s, y: r.top + oy + (((p.box[1] + p.box[3]) / 2) / f) * s }; }, i);
   let q = await at(0); await win.mouse.click(q.x, q.y); await sleep(200);
-  must(await win.evaluate(() => window.FSWiz.state.det.players[0].cat === "REF"), "clic sur la silhouette : choisie pour l'arbitre");
+  must(await win.evaluate(() => window.FSWiz.state.det.players[0].cat === "GKB"), "clic sur la silhouette : choisie pour le gardien adverse");
   await win.click("[data-act=validateCat]"); await sleep(300);
   must(await win.evaluate(() => window.FSWiz.state.step === "run" && !window.FSWiz.state.ret), "après la validation : retour à l'étape Analyse (déroulé inchangé)");
-  const ex = await win.evaluate(() => window.FSAI.ai().kits.REF);
+  const ex = await win.evaluate(() => window.FSAI.ai().kits.GKB);
   must(ex && ex.length === 1 && Math.abs(ex[0].t - 2) < 0.2 && ex[0].src === "silhouette" && !!ex[0].id && !!ex[0].v, "l'exemple garde son instant (2,0 s), sa source, sa vidéo et un numéro");
-  const tR = await catText("Arbitre");
-  must(/0:02/.test(tR) && /il en faut plus/.test(tR) && /Je n'ai vu l'arbitre qu'une fois/.test(tR), "Arbitre : exemple daté, « il en faut plus », demande d'un autre moment");
+  const tR = await catText("Gardien adverse");
+  must(/0:02/.test(tR) && /il en faut plus/.test(tR) && /Je n'ai vu le gardien adverse qu'une fois/.test(tR), "Arbitre : exemple daté, « il en faut plus », demande d'un autre moment");
 
   // 5. le bouton mène à un instant où l'arbitre est probablement visible (l'analyse l'a vu à 1 s et à 4 s)
-  must(await win.evaluate(() => { const c = [...document.querySelectorAll("#wiz-ex .ex-cat")].find((x) => x.querySelector(".ex-head b").textContent === "Arbitre"); const b = [...c.querySelectorAll("button")].find((x) => /Aller à un instant (probable|éloigné)/.test(x.textContent)); if (!b) return false; b.click(); return true; }), "bouton « Aller à un instant … » de l'arbitre");
+  must(await win.evaluate(() => { const c = [...document.querySelectorAll("#wiz-ex .ex-cat")].find((x) => x.querySelector(".ex-head b").textContent === "Gardien adverse"); const b = [...c.querySelectorAll("button")].find((x) => /Aller à un instant (probable|éloigné)/.test(x.textContent)); if (!b) return false; b.click(); return true; }), "bouton « Aller à un instant … » de l'arbitre");
   const court = await win.evaluate(() => document.querySelector("video").duration) <= 7;     // vidéo d'essai de 6 s : l'analyse a vu l'arbitre à 1 s et à 4 s, on attend 4 s
   must(await waitFor(win, (c) => (c ? Math.abs(document.querySelector("video").currentTime - 4) < 0.3 : Math.abs(document.querySelector("video").currentTime - 2) > 1), 8000, court), "la vidéo est placée à un autre instant que l'exemple déjà donné");
 
@@ -133,9 +133,9 @@ function makeFrames() {
 
   // 9. la mémoire reste dans le projet : enregistrer, recharger, tout est relu sans erreur
   const saved = await win.evaluate(() => JSON.parse(JSON.stringify(window.FSApp.state.project)));
-  must(saved.ai.kits.REF[0].t != null && saved.ai.benchZones.length === 3, "les exemples et les marques sont dans le fichier du projet");
+  must(saved.ai.kits.GKB[0].t != null && saved.ai.benchZones.length === 3, "les exemples et les marques sont dans le fichier du projet");
   await win.evaluate(async (p) => { await window.FSApp.loadProject(p, null); }, saved);
-  must(await waitFor(win, () => !!window.FSAI.refs().REF && window.FSAI.ai().benchZones.length === 3, 8000), "projet rechargé : exemples et marques relus");
+  must(await waitFor(win, () => !!window.FSAI.refs().GKB && window.FSAI.ai().benchZones.length === 3, 8000), "projet rechargé : exemples et marques relus");
   await win.evaluate(() => window.FSWiz.actions.moreExamples());
   must(await waitFor(win, () => !!document.querySelector("#ai-kits .ex-panel"), 4000), "panneau toujours affiché après rechargement");
 
