@@ -5,6 +5,7 @@
    { version: 1, video: { name, size, duration, vw, vh },
      pos?: ms de la dernière image regardée,
      persons: [{ id, nom, team, role }],                       fiches des personnes (joueurs, remplaçants, arbitre…)
+     subs: [{ ms, who, sens: "entre"|"sort" }],               changements : une personne entre sur le terrain ou en sort à cet instant
      frames: { "<ms>": { ball?: { state: "vu"|"aucun"|"incertain", u?, v? },       u, v en pixels de la vidéo
                          boxes?: [{ id, x1, y1, x2, y2, team, who? }],            who = id d'une fiche
                          playersDone?: true } } }                                 « toutes les personnes de cette image sont cadrées » */
@@ -27,7 +28,7 @@
   const gridCount = (duration) => Math.max(0, Math.ceil(duration * GRID_FPS - 1e-9) - 1);
 
   function create(video) {
-    return { version: 1, video: { name: String(video.name || ""), size: Number(video.size) || 0, duration: Number(video.duration) || 0, vw: Number(video.vw) || 0, vh: Number(video.vh) || 0 }, persons: [], frames: {} };
+    return { version: 1, video: { name: String(video.name || ""), size: Number(video.size) || 0, duration: Number(video.duration) || 0, vw: Number(video.vw) || 0, vh: Number(video.vh) || 0 }, persons: [], subs: [], frames: {} };
   }
   /* Relit un fichier de progression : refuse ce qui n'a pas la forme attendue, sans jamais lever d'erreur. */
   function normalize(raw) {
@@ -36,6 +37,7 @@
     if (Array.isArray(raw.persons)) raw.persons.slice(0, MAX_PERSONS).forEach((p) => {
       if (p && typeof p.id === "string" && TEAMS[p.team]) d.persons.push({ id: p.id, nom: String(p.nom || "").slice(0, 60), team: p.team, role: String(p.role || "").slice(0, 30) });
     });
+    if (Array.isArray(raw.subs)) d.subs = raw.subs.filter((x) => x && Number.isInteger(x.ms) && x.ms >= 0 && (x.sens === "entre" || x.sens === "sort") && d.persons.some((p) => p.id === x.who)).map((x) => ({ ms: x.ms, who: x.who, sens: x.sens })).sort((a, b) => a.ms - b.ms).slice(0, 400);
     if (isFinite(raw.pos) && raw.pos >= 0) d.pos = Math.round(raw.pos);      // dernière image regardée : la reprise se fait au même endroit
     const f = raw.frames && typeof raw.frames === "object" ? raw.frames : {};
     Object.keys(f).forEach((k) => {
@@ -106,11 +108,35 @@
   }
   function removePerson(d, id) {
     d.persons = d.persons.filter((p) => p.id !== id);
+    d.subs = (d.subs || []).filter((x) => x.who !== id);
     Object.keys(d.frames).forEach((k) => (d.frames[k].boxes || []).forEach((b) => { if (b.who === id) delete b.who; }));
   }
 
+  /* Changements : « cette personne entre sur le terrain (ou en sort) à cet instant ». Un seul par personne et par instant. */
+  function addSub(d, ms, who, sens) {
+    if (!Number.isInteger(ms) || ms < 0 || (sens !== "entre" && sens !== "sort") || !d.persons.some((p) => p.id === who)) return null;
+    d.subs = (d.subs || []).filter((x) => !(x.ms === ms && x.who === who));
+    const r = { ms, who, sens };
+    d.subs.push(r); d.subs.sort((a, b) => a.ms - b.ms);
+    return r;
+  }
+  function removeSub(d, ms, who) { const n = (d.subs || []).length; d.subs = (d.subs || []).filter((x) => !(x.ms === ms && x.who === who)); return d.subs.length < n; }
+  const TEAM_BY_NAME = Object.keys(TEAMS).reduce((o, k) => { o[k.toLowerCase()] = k; o[TEAMS[k].toLowerCase()] = k; return o; }, {});
+  /* Ajout de plusieurs fiches d'un coup : une ligne par personne, « nom ; type » (type = A, B, GKA, GKB, ARB, BANC, PUBLIC, AUTRE ou son nom complet). */
+  function importPersons(d, text) {
+    const added = [], refused = [];
+    String(text || "").split(/\r?\n/).forEach((line) => {
+      const l = line.trim();
+      if (!l) return;
+      const parts = l.split(/[;\t]/).map((x) => x.trim());
+      const team = TEAM_BY_NAME[(parts[1] || "").toLowerCase()];
+      const r = parts[0] && team ? addPerson(d, { nom: parts[0], team, role: parts[2] || "" }) : null;
+      if (r) added.push(r); else refused.push(l);
+    });
+    return { added, refused };
+  }
   function counts(d) {
-    const c = { vu: 0, aucun: 0, incertain: 0, imagesJoueurs: 0, cadres: 0 };
+    const c = { vu: 0, aucun: 0, incertain: 0, imagesJoueurs: 0, cadres: 0, changements: (d.subs || []).length };
     Object.keys(d.frames).forEach((k) => {
       const f = d.frames[k];
       if (f.ball) c[f.ball.state]++;
@@ -137,5 +163,5 @@
   function trainingBalls(d) {
     return Object.keys(d.frames).filter((k) => d.frames[k].ball && d.frames[k].ball.state !== "incertain").map((k) => Object.assign({ ms: Number(k) }, d.frames[k].ball)).sort((a, b) => a.ms - b.ms);
   }
-  return { GRID_FPS, TEAMS, MIN_BOX, msKey, gridMs, snap, gridCount, create, normalize, setBall, clearBall, addBox, boxes, removeBox, setBoxTeam, setBoxWho, setPlayersDone, addPerson, removePerson, counts, nextTodo, trainingBalls };
+  return { GRID_FPS, TEAMS, MIN_BOX, msKey, gridMs, snap, gridCount, create, normalize, setBall, clearBall, addBox, boxes, removeBox, setBoxTeam, setBoxWho, setPlayersDone, addPerson, removePerson, addSub, removeSub, importPersons, counts, nextTodo, trainingBalls };
 });
