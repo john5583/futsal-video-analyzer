@@ -50,3 +50,8 @@ Chaque mesure est notée « mieux », « moins bien » ou « identique ». Aucun
 ## Autres outils
 - `node scripts/mesure-lecture.js --projet x.fsal --video x.mp4 [--debut 20] [--secondes 10]` : mesure, dans l'application réelle, quelle façon de lire la vidéo ne perd aucune image, et combien coûtent la détection et le suivi de la caméra par image. Les temps varient d'un passage à l'autre (jusqu'à 50 % observé) : refais-la à vide avant de comparer.
 - `node scripts/banc-synthetique.js [--scenes realiste,tenuesProches] [--cadences 3,10,30] [--matchs 6] [--graine 101]` : matchs fabriqués à identités connues, pour compter exactement les échanges de joueurs. Les trajectoires ne dépendent pas de la cadence (même match vu à 3 ou à 30 images/s).
+
+## Comparer le mode continu à l'ancien mode
+- `--continu` lance l'analyse continue (chaque image de la vidéo) ; les mesures portent alors sur la trace continue (~10 images/s), et les images historiques de la même analyse (~3,3 images/s) sont mesurées à part. Le résumé indique les images lues, dupliquées, sautées et enjambées.
+- `--tiles 1|2|3` impose la précision. **Compare toujours à précision égale** : le mode continu n'a pas le « zoom automatique » (tiles 3) et se replie sur « Renforcé » (tiles 2). Comparer le continu à un ancien mode en zoom automatique serait injuste (le zoom retrouve plus de ballons).
+- Mesuré sur `20261012_214004` (136 s, 180 ballons étiquetés) : à précision égale, le continu retrouve autant de ballons que l'ancien mode (56,7 % contre 56,2 %), ne perd aucune image (4080 lues, 0 dupliquée, 0 sautée) et ne perd jamais la caméra sur cet extrait, mais il prend environ 2,7 à 3,9 fois la durée de la vidéo (contre 1,5 fois) et n'améliore pas les identifiants.
