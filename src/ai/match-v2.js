@@ -51,11 +51,11 @@
       if (pressers < 2) {
         // R03 : perte sans pression, alors qu'un coéquipier libre était à portée de passe
         const mate = field(prev.A).find((p) => p.id !== h.id && dist(p, h) >= PASS_MIN && dist(p, h) <= PASS_MAX && isFree(p, prev.B));
-        if (mate && accept("perte_inutile", e.t)) out.push(mk("perte_inutile", i, { outcome: "PERTE", phase: "transition", note: "Perte sans pression (" + pressers + " adversaire à moins de 3 m) alors que le joueur n° " + mate.id + " était libre à " + dist(mate, h).toFixed(1) + " m (détection automatique)", conf: 0.5, blocked: e.blocked }));
+        if (mate && accept("perte_inutile", e.t)) out.push(mk("perte_inutile", i, { outcome: "PERTE", phase: "transition", joueur: h.id, libre: mate.id, note: "Perte sans pression (" + pressers + " adversaire à moins de 3 m) alors que le joueur n° " + mate.id + " était libre à " + dist(mate, h).toFixed(1) + " m (détection automatique)", conf: 0.5, blocked: e.blocked }));
       } else if (e.type === "perte_zone_def") {
         // R04 : perte sous pressing par le gardien ou le dernier défenseur de champ
         const back = field(prev.A).slice().sort((a, b) => a.x - b.x)[0];
-        if ((h.gk || (back && back.id === h.id)) && accept("relance_risquee", e.t)) out.push(mk("relance_risquee", i, { outcome: "PERTE", phase: "pressing", note: (h.gk ? "Le gardien" : "Le dernier défenseur") + " perd le ballon sous pressing (" + pressers + " adversaires à moins de 3 m) (détection automatique)", conf: 0.55, blocked: e.blocked }));
+        if ((h.gk || (back && back.id === h.id)) && accept("relance_risquee", e.t)) out.push(mk("relance_risquee", i, { outcome: "PERTE", phase: "pressing", joueur: h.id, note: (h.gk ? "Le gardien" : "Le dernier défenseur") + " perd le ballon sous pressing (" + pressers + " adversaires à moins de 3 m) (détection automatique)", conf: 0.55, blocked: e.blocked }));
       }
     });
 
@@ -74,7 +74,7 @@
         }
         let idx = nf.findIndex((f, k) => k >= i && f.t >= nf[i].t + DRIBBLE_MAX - 1e-6);
         if (idx < 0 || idx > j) idx = j;
-        if (freeN >= n / 2 && accept("dribble_excessif", nf[idx].t)) out.push(mk("dribble_excessif", idx, { note: "Le joueur n° " + h.id + " garde le ballon " + (nf[j].t - nf[i].t).toFixed(1) + " s alors qu'un coéquipier libre est à portée (détection automatique)", conf: 0.5 }));
+        if (freeN >= n / 2 && accept("dribble_excessif", nf[idx].t)) out.push(mk("dribble_excessif", idx, { joueur: h.id, note: "Le joueur n° " + h.id + " garde le ballon " + (nf[j].t - nf[i].t).toFixed(1) + " s alors qu'un coéquipier libre est à portée (détection automatique)", conf: 0.5 }));
       }
       i = j + 1;
     }
@@ -90,7 +90,7 @@
         // série continue : aucun trou de plus de 0,8 s entre deux positions
         for (let k = s + 1; k <= e; k++) if (pts[k].t - pts[k - 1].t > 0.8 + 1e-9) return;
         const i = pts[s].i;
-        if (accept("absence_mouvement", pts[s].t)) out.push(mk("absence_mouvement", i, { note: "Le joueur n° " + id + " reste quasi immobile pendant " + (pts[e].t - pts[s].t).toFixed(1) + " s alors que l'équipe attaque (détection automatique)", conf: 0.45 }));
+        if (accept("absence_mouvement", pts[s].t)) out.push(mk("absence_mouvement", i, { joueur: id, note: "Le joueur n° " + id + " reste quasi immobile pendant " + (pts[e].t - pts[s].t).toFixed(1) + " s alors que l'équipe attaque (détection automatique)", conf: 0.45 }));
       });
     });
 
@@ -122,7 +122,7 @@
     const gk = nf.map((f, i) => poss[i].team === "A" && poss[i].holder && poss[i].holder.gk === true && poss[i].ball.x < L / 2 && !!f.ball);
     BD.series(gk, ts, GK_HOLD).forEach(([s]) => {
       const k = nf.findIndex((f, q) => q >= s && f.t >= nf[s].t + GK_HOLD - 1e-6);
-      if (k >= 0 && accept("regle_4s", nf[k].t)) out.push(mk("regle_4s", k, { note: "Le gardien garde le ballon plus de " + GK_HOLD + " s dans sa moitié (détection automatique)", conf: 0.5 }));
+      if (k >= 0 && accept("regle_4s", nf[k].t)) out.push(mk("regle_4s", k, { joueur: poss[k].holder.id, note: "Le gardien garde le ballon plus de " + GK_HOLD + " s dans sa moitié (détection automatique)", conf: 0.5 }));
     });
 
     return out.sort((a, b) => a.t - b.t);

@@ -46,6 +46,16 @@
     return steps(s, "Passe verticale dans l'axe interceptée : la transition adverse démarre.", "Passes tendues vers l'ailier, appel du pivot, un joueur reste derrière le ballon.", "Contrôle orienté, passe tendue, la rotation se fait ballon sécurisé.").done();
   };
 
+  S.perte_inutile = () => {
+    const s = std("perte_inutile", "Perte de balle inutile (sans pression, partenaire libre)");
+    s.set("A5", 14, 10).set("A3", 15, 16).set("A2", 15, 4).set("A4", 24, 10).set("B9", 21, 8).set("B6", 26, 13).set("B7", 27, 6).set("B8", 26, 16);
+    s.ball(0, 14.6, 10).go("A5", [0.5, 14, 10], [1.6, 17, 10]).ball(1.6, 17.4, 10).go("B9", [1, 21, 8], [2.4, 18, 10]).ball(2.4, 18.2, 10);
+    s.mark("x", 18, 10, 1.9, 6.4).label(15, 16, "Libre, non servi", 1, 6.4, "#ff5a5f", 1.1);
+    s.jumpAll(JT, { A5: [14, 10], A3: [15, 16], A2: [15, 4], A4: [24, 10], B9: [21, 8], B6: [26, 13], B7: [27, 6], B8: [26, 16] }).ballJump(JT, 14.6, 10);
+    s.pass("good", "A5", "A3", 7.3, 8.1, "Partenaire libre").go("A4", [8, 24, 10], [8.9, 22, 12]).pass("good", "A3", "A4", 8.9, 9.8);
+    return steps(s, "Aucune pression, un partenaire libre à portée : le joueur garde le ballon, le perd et l'adversaire lance sa transition.", "Quand personne ne presse, jouer le partenaire libre : passe sûre puis relance.", "Pas de pression : joue simple, regarde l'appui libre avant de recevoir.").done();
+  };
+
   S.passe_imprecise = () => {
     const s = std("passe_imprecise", "Passe imprécise ou mal rythmée");
     s.set("A2", 14, 5).set("A4", 25, 10).set("B6", 27, 11).set("A5", 10, 10);

@@ -241,7 +241,7 @@
       return out("plan");
     }
 
-    if (type === "perte_zone_mediane" || type === "perte_zone_def") {
+    if (type === "perte_zone_mediane" || type === "perte_zone_def" || type === "perte_inutile" || type === "relance_risquee") {
       const before = stateAt(fs, t - 0.4);
       const loserRaw = nearest(before.players.filter((p) => p.team === "A"), before.ball ? (() => { const [x, y] = N(before.ball.x, before.ball.y); return { x, y }; })() : ref);
       const loser = loserRaw ? (players.find((p) => p.id === loserRaw.id) || (() => { const [x, y] = N(loserRaw.x, loserRaw.y); return { id: loserRaw.id, team: "A", x, y }; })()) : nearest(A, ref);
@@ -342,6 +342,36 @@
         ghost(mate, holder.x + ((mate.x - holder.x) * 4) / n, holder.y + ((mate.y - holder.y) * 4) / n, "Soutien à 4 m");
       }
       return out("attaque");
+    }
+
+    // ----- règles de l'analyse v2 (le joueur concerné est donné par l'évènement : event.joueur) -----
+    const who = (id) => (id != null ? players.find((p) => p.id === id) || null : null);
+    const freeMate = (from) => A.filter((p) => p.id !== from.id && d2(p, from) >= 3 && d2(p, from) <= 12 && !Bp.some((b) => d2(b, p) < 3)).sort((a, b) => d2(a, from) - d2(b, from))[0] || null;
+    if (type === "dribble_excessif") {
+      const h = who(event.joueur) || nearest(A, ref);
+      if (h) {
+        ring(h, "err", "Garde trop longtemps");
+        const mate = freeMate(h);
+        if (mate) { ring(mate, "ok", "Libre"); corr.lines.push({ from: R(h.x, h.y), to: R(mate.x, mate.y), label: "Passe" }); }
+      }
+      return out("attaque");
+    }
+    if (type === "absence_mouvement") {
+      const p = who(event.joueur);
+      if (p) { ring(p, "err", "Immobile"); ghost(p, p.x + 4, p.y + (p.y < W / 2 ? 2 : -2), "Appel de balle"); }
+      return out("attaque");
+    }
+    if (type === "transition_off_lente" || type === "superiorite_non_convertie") {
+      const h = nearest(A, ref);
+      if (h) ring(h, "err", type === "transition_off_lente" ? "Trop lent" : "Supériorité");
+      if (type === "transition_off_lente") A.filter((p) => !h || (p.id !== h.id && p.x > ref.x + 5)).slice(0, 3).forEach((p) => { ring(p, "ok", "Libre devant"); if (h) corr.lines.push({ from: R(h.x, h.y), to: R(p.x, p.y), label: "Passe vers l'avant" }); });
+      else A.filter((p) => d2(p, ref) <= 8 && (!h || p.id !== h.id)).slice(0, 3).forEach((p) => { ring(p, "ok", null); if (h) corr.lines.push({ from: R(h.x, h.y), to: R(p.x, p.y), label: "Combiner et avancer" }); });
+      return out("attaque");
+    }
+    if (type === "regle_4s") {
+      const g = who(event.joueur) || players.find((p) => p.team === "GKA") || nearest(A, ref);
+      if (g) { ring(g, "err", "Plus de 4 s"); const mate = freeMate(g) || nearest(A.filter((p) => p.id !== g.id), g); if (mate) corr.lines.push({ from: R(g.x, g.y), to: R(mate.x, mate.y), label: "Relancer avant 4 s" }); }
+      return out("gardien");
     }
 
     // erreur marquée à la main ou sans règle : les joueurs les plus proches du ballon, sans correction sur l'image
