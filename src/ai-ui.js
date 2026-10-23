@@ -2,7 +2,7 @@
 (function () {
   "use strict";
   const App = window.FSApp;
-  const KB = window.FutsalKB, HG = window.FutsalHomography, K = window.FutsalKit, P = window.FutsalPipeline, M = window.FutsalMatch, E = window.FutsalAnim, D = window.FutsalDoubt, BL = window.FutsalBallLabels, Z = window.FutsalZoom, O = window.FutsalOverlay, Q = window.FutsalQuality;
+  const KB = window.FutsalKB, HG = window.FutsalHomography, K = window.FutsalKit, P = window.FutsalPipeline, M = window.FutsalMatch, V2 = window.FutsalMatchV2, RG = window.FutsalRegles, E = window.FutsalAnim, D = window.FutsalDoubt, BL = window.FutsalBallLabels, Z = window.FutsalZoom, O = window.FutsalOverlay, Q = window.FutsalQuality;
   const $ = (id) => document.getElementById(id);
   const esc = App.esc;
   const video = App.video, api = App.api, state = App.state;
@@ -528,7 +528,7 @@
     if (!a.quality && frames.length) {                              // ancien projet : le contrôle est calculé une fois
       try {
         const s = a.settings || {};
-        updateQuality(M.analyze(frames, { L: L(), W: W(), dirAt, lost: a.lost || [], span: [s.t0 || frames[0].t, s.t1 || frames[frames.length - 1].t], bench: benchSetting(), benchSeen: a.benchSeen || null, subAnswers: subAnswers() }));
+        updateQuality(analyzeMatch(frames, { L: L(), W: W(), dirAt, lost: a.lost || [], span: [s.t0 || frames[0].t, s.t1 || frames[frames.length - 1].t], bench: benchSetting(), benchSeen: a.benchSeen || null, subAnswers: subAnswers() }));
       } catch (_e) { /* ignoré */ }
     }
     const q = a.quality;
@@ -572,7 +572,36 @@
     renderNext();
   }
 
+  /* ---------- analyse v2 (bêta) : validation des règles et couverture ---------- */
+  function ruleDecision(id, decision) {
+    const a = ai();
+    a.regles = RG.valider(a.regles || {}, id, decision);
+    reanalyzeSuggestions(); App.changed();
+    App.toast(decision === "validee" ? "Règle " + id + " validée." : decision === "rejetee" ? "Règle " + id + " rejetée : elle n'affichera plus rien." : "Règle " + id + " remise à « non validée ».");
+  }
+  function ruleButtons(r) {
+    const mk = (d, label) => "<button data-r=\"" + d + "\" class=\"ghost\">" + label + "</button>";
+    return (r.etatRegle === "validee" ? "" : mk("validee", "Valider")) + (r.etatRegle === "rejetee" ? "" : mk("rejetee", "Rejeter")) + (r.etatRegle === "non_validee" ? "" : mk("non_validee", "Remettre à non validée"));
+  }
+  function renderCoverage() {
+    const a = state.project.ai, box = $("ai-cov"), list = $("ai-cov-list"), rows = a && a.v2 && Array.isArray(a.couverture) ? a.couverture : null;
+    box.hidden = !rows;
+    if (!rows) return;
+    const sum = RG.resumeCouverture(rows);
+    $("ai-cov-sum").textContent = "— " + sum.evaluees + " règle(s) évaluée(s) sur " + sum.total + " (dont " + sum.nonValidees + " non validée(s)), " + sum.nonEvaluees + " non évaluée(s)";
+    list.innerHTML = "";
+    rows.forEach((r) => {
+      const row = document.createElement("div"); row.className = "cov-row";
+      const rule = RG.PAR_ID[r.id], state2 = r.statut === "evaluee"
+        ? "<span class=\"cov-ok\">évaluée</span> — " + r.nb + " erreur(s) trouvée(s)" + (r.sur != null ? " (ballon fiable sur " + r.sur + " % du temps)" : "") + (r.etatRegle === "validee" ? " — règle validée" : " — <b>règle non validée</b>")
+        : "<span class=\"" + (r.raison === "règle rejetée par le coach" ? "cov-rej" : "cov-no") + "\">non évalué</span> : " + esc(r.raison);
+      row.innerHTML = "<b>" + r.id + "</b><div><div>" + esc(r.titre) + "</div><div class=\"muted\">" + state2 + "</div>" + (rule && rule.codee ? "<div class=\"muted\" style=\"font-size:12px\">Mesure : " + esc(rule.mesure) + "</div>" : "") + "</div><div class=\"v2rule\">" + (rule && rule.codee ? ruleButtons(r) : "") + "</div>";
+      row.querySelectorAll("[data-r]").forEach((b) => b.addEventListener("click", () => ruleDecision(r.id, b.dataset.r)));
+      list.appendChild(row);
+    });
+  }
   function renderSuggestions() {
+    renderCoverage();
     const a = state.project.ai, list = $("ai-sugg");
     list.innerHTML = "";
     const items = (a && a.suggestedEvents) || [];
@@ -596,6 +625,12 @@
     items.forEach((e) => {
       const row = document.createElement("div"); row.className = "ev";
       row.innerHTML = "<button class=\"t\">" + App.fmt(e.t) + "</button><div><div class=\"lbl\"><span class=\"dot\" style=\"background:" + App.phaseColor(e.type) + "\"></span>" + esc(App.labelOf(e.type)) + "</div><div class=\"chips\">" + esc(e.note || "") + (typeof e.ballConf === "number" ? " · ballon vu sur " + Math.round(e.ballConf * 100) + " % des images" : "") + (e.statut && window.FutsalRegleOr ? " · statut : " + window.FutsalRegleOr.decrire(e.statut) : "") + "</div></div><div class=\"btns\"><button data-a=\"ok\" title=\"Ajouter aux événements\">✔</button><button data-a=\"no\" title=\"Écarter\">✖</button></div>";
+      if (isV2() && e.regle) {
+        const c = document.createElement("div"); c.className = "chips v2rule";
+        c.innerHTML = "<span>Règle " + e.regle + " — " + (e.regleEtat === "validee" ? "règle validée" : "<b>règle non validée</b>") + "</span>" + ruleButtons({ etatRegle: e.regleEtat });
+        c.querySelectorAll("[data-r]").forEach((b) => b.addEventListener("click", () => ruleDecision(e.regle, b.dataset.r)));
+        row.children[1].appendChild(c);
+      }
       row.querySelector(".t").addEventListener("click", () => App.seek(Math.max(0, e.t - 3)));
       row.querySelector("[data-a=ok]").addEventListener("click", () => acceptSuggestion(e));
       row.querySelector("[data-a=no]").addEventListener("click", () => { D.reject(memory(), e); a.suggestedEvents = a.suggestedEvents.filter((x) => x.sid !== e.sid); a.suggested = a.suggestedEvents.length; renderSuggestions(); App.changed(); });
@@ -791,6 +826,9 @@
 
   /* La mémoire du projet filtre un résultat d'analyse : les erreurs que le coach a écartées ne reviennent pas. */
   const subAnswers = () => memory().answers.filter((x) => x.kind === "sub" || x.kind === "team");
+  /* Analyse v2 (bêta) : case cochée dans l'étape d'analyse ; sinon l'analyse habituelle (match.js), inchangée. */
+  const isV2 = () => !!(state.project.ai && state.project.ai.v2 && V2);
+  function analyzeMatch(fr, o) { return isV2() ? V2.analyze(fr, Object.assign({}, o, { validations: state.project.ai.regles || {} })) : M.analyze(fr, o); }
   function applyMemory(res) {
     const mem = memory();
     if (state.project.ai) state.project.ai.subs = res.subs || [];
@@ -1145,10 +1183,10 @@
     const a = state.project.ai;
     if (!a || !frames.length) return;
     const s = a.settings || {};
-    const res = applyMemory(M.analyze(frames, { L: L(), W: W(), dirAt, lost: a.lost || [], span: [s.t0 || frames[0].t, s.t1 || frames[frames.length - 1].t], bench: benchSetting(), benchSeen: a.benchSeen || null, subAnswers: subAnswers() }));
+    const res = applyMemory(analyzeMatch(frames, { L: L(), W: W(), dirAt, lost: a.lost || [], span: [s.t0 || frames[0].t, s.t1 || frames[frames.length - 1].t], bench: benchSetting(), benchSeen: a.benchSeen || null, subAnswers: subAnswers() }));
     a.stats = Object.assign({}, res.stats); renderStats();
     a.suggestedEvents = res.events.filter((e) => !state.project.events.some((x) => x.type === e.type && Math.abs(x.t - e.t) < 2)).map((e, i) => Object.assign({ sid: "s" + Date.now().toString(36) + i }, e));
-    a.suggested = a.suggestedEvents.length; a.uncertain = res.uncertain; a.context = res.context;
+    a.suggested = a.suggestedEvents.length; a.uncertain = res.uncertain; a.context = res.context; a.couverture = res.couverture || null;
     updateQuality(res); renderQuality();
     renderSuggestions(); App.changed();
   }
@@ -1200,7 +1238,7 @@
   }
   /* p : réglages de l'analyse { fps, tiles, camera } ; par défaut ceux affichés. */
   function estimate(range, withFactor, p) {
-    p = p || { fps: Number($("ai-fps").value), tiles: Number($("ai-tiles").value), camera: $("ai-camera").value };
+    p = p || (isV2() ? { fps: 3, tiles: 3, camera: $("ai-camera").value } : { fps: Number($("ai-fps").value), tiles: Number($("ai-tiles").value), camera: $("ai-camera").value });
     return P.estimateDuration({ t0: range[0], t1: range[1], fps: p.fps, tiles: p.tiles, camera: p.camera,
       calibrations: ai().calibrations, kind: engineKind, factor: withFactor ? estFactor() : 1 });
   }
@@ -1209,11 +1247,13 @@
     if (plan.images < 20 || !(plan.seconds > 0)) return;   // trop court pour être représentatif
     try { localStorage.setItem(factorKey(), String(P.learnFactor(estFactor(), plan.seconds, realSeconds))); } catch (_e) { /* stockage indisponible */ }
   }
+  const CONT_FACTOR = 2.7;
   function updateEstimate() {
     const r = readRange(), e = $("ai-est");
     if (!r) { e.textContent = ""; return; }
-    const est = estimate(r, true);
-    e.textContent = "Durée estimée : environ " + fmtEta(est.seconds) + " (" + est.images + " images, calcul sur " + (engineKind === "dml" ? "la carte graphique" : "le processeur") + "). Pour un match entier, analysez d'abord un extrait ou choisissez « Rapide ».";
+    const est = estimate(r, true), cont = isV2() && $("ai-v2-cont").checked;
+    if (cont) est.seconds *= CONT_FACTOR;      // mesuré : 534 s contre 199 s sur la même vidéo (voir la PR de l'analyse continue)
+    e.textContent = (isV2() ? "Analyse v2 (bêta). " : "") + "Durée estimée : environ " + fmtEta(est.seconds) + " (" + est.images + " images, calcul sur " + (engineKind === "dml" ? "la carte graphique" : "le processeur") + "). Pour un match entier, analysez d'abord un extrait ou choisissez « Rapide ».";
   }
 
   function fmtEta(s) { s = Math.max(0, Math.round(s)); return Math.floor(s / 60) + " min " + String(s % 60).padStart(2, "0") + " s"; }
@@ -1229,16 +1269,16 @@
     const range = readRange();
     if (!range) { msg.textContent = "Plage de temps invalide."; return false; }
     if (frames.length && !(opts && opts.noConfirm) && !confirm("Une analyse existe déjà : la remplacer ?")) return false;
-    const fps = Number($("ai-fps").value), tiles = Number($("ai-tiles").value);
+    const v2 = isV2(), fps = v2 ? 3 : Number($("ai-fps").value), tiles = v2 ? 3 : Number($("ai-tiles").value);      // v2 : 3 images/s, zoom automatique
     running = true; abort = new AbortController(); live = null;
     const startedAt = Date.now();
     $("ai-run").disabled = true; $("ai-device").disabled = true; $("ai-cancel").hidden = false; $("ai-progress").hidden = false; $("ai-bar").style.width = "0%";
     msg.textContent = "Chargement du modèle de détection…";
     try {
       const camera = $("ai-camera").value;
-      const continuous = !!(opts && opts.continuous);        // analyse continue : chaque image de la vidéo (voir pipeline.js)
+      const continuous = !!(opts && opts.continuous) || (v2 && $("ai-v2-cont").checked);        // analyse continue : chaque image de la vidéo (voir pipeline.js)
       const result = await (continuous ? P.analyseVideoContinuous : P.analyseVideo)({
-        url: App.getVideoUrl(), t0: range[0], t1: range[1], fps, tiles, camera, tol: tol(), L: L(), W: W(), calibrations: a.calibrations, refs: r, floorMarks: floorMarks(), benchZones: a.benchZones || [], benchFollow: memory().benchFollow !== false, dirAt, signal: abort.signal, api, ballMargin: opts && opts.extra && opts.extra.ballMargin, fullRes: !!(opts && opts.extra && opts.extra.fullRes),
+        url: App.getVideoUrl(), t0: range[0], t1: range[1], fps, tiles, camera, tol: tol(), L: L(), W: W(), calibrations: a.calibrations, refs: r, floorMarks: floorMarks(), benchZones: a.benchZones || [], benchFollow: memory().benchFollow !== false, dirAt, signal: abort.signal, api, ballMargin: (opts && opts.extra && opts.extra.ballMargin) || (v2 ? 6 : undefined), fullRes: !!(opts && opts.extra && opts.extra.fullRes) || v2,
         onProgress: (p) => {
           $("ai-bar").style.width = Math.round((p.done / p.total) * 100) + "%";
           msg.textContent = "Image " + p.done + " / " + p.total + " — reste environ " + fmtEta(p.eta) + (p.lost ? " (caméra perdue sur cette image)" : "");
@@ -1256,13 +1296,13 @@
       a.trace = result.trace ? P.compactFrames(result.trace) : null; a.continuous = result.continuous || null;        // trajectoires continues (~10 images/s) et preuve de la lecture (images dupliquées / sautées)
       a.frames = P.compactFrames(frames);
       a.benchSeen = result.bench || null;
-      const res = applyMemory(M.analyze(frames, { L: L(), W: W(), dirAt, lost: result.lost, span: range, bench: benchSetting(), benchSeen: a.benchSeen, subAnswers: subAnswers() }));
+      const res = applyMemory(analyzeMatch(frames, { L: L(), W: W(), dirAt, lost: result.lost, span: range, bench: benchSetting(), benchSeen: a.benchSeen, subAnswers: subAnswers() }));
       a.stats = Object.assign({}, res.stats);
       a.suggestedEvents = res.events.map((e, i) => Object.assign({ sid: "s" + Date.now().toString(36) + i }, e));
       a.suggested = a.suggestedEvents.length;
-      a.uncertain = res.uncertain;
+      a.uncertain = res.uncertain; a.couverture = res.couverture || null;
       a.context = res.context;
-      a.settings = { fps: continuous ? 3.33 : fps, tiles, t0: range[0], t1: range[1], tol: tol(), floorMarks: floorMarks(), bench: benchSetting(), continuous };
+      a.settings = { fps: continuous ? 3.33 : fps, tiles, t0: range[0], t1: range[1], tol: tol(), floorMarks: floorMarks(), bench: benchSetting(), continuous, v2 };
       const lostTxt = result.lost.length ? " Caméra perdue : " + result.lost.map((l) => App.fmt(l[0]) + "–" + App.fmt(l[1])).join(", ") + "." : "";
       updateQuality(res);
       if (out.length && Q && Q.unusable(a.quality)) {
@@ -1328,6 +1368,7 @@
     $("ai-fps").value = String((d.settings && d.settings.fps) || 3); $("ai-tiles").value = String((d.settings && d.settings.tiles) || 1);
     $("ai-camera").value = d.camera || "mobile"; $("ai-tol").value = String((d.settings && d.settings.tol) || 42); $("ai-tol-v").textContent = "(" + $("ai-tol").value + ")";
     pip = null; preview = null; lastTest = null; renderPipette(); $("ai-test-msg").textContent = "";
+    $("ai-v2").checked = !!d.v2; $("ai-v2-cont").checked = !!(d.settings && d.settings.continuous && d.v2); $("ai-v2-box").hidden = !d.v2;
     $("ai-marks").checked = !(d.settings && d.settings.floorMarks === false);
     $("ai-bench").value = (d.settings && ["left", "right"].includes(d.settings.bench)) ? d.settings.bench : "auto";
     benchMark = null; renderBenchZones();
@@ -1354,6 +1395,14 @@
     $("ai-bench-mark").addEventListener("click", startBenchMark);
     $("ai-bl-export").addEventListener("click", exportBallLabels);
     bindZoom();
+    $("ai-v2").addEventListener("change", () => {
+      const a = ai(); a.v2 = $("ai-v2").checked; $("ai-v2-box").hidden = !a.v2;
+      if (!a.v2) a.couverture = null;
+      updateEstimate();
+      if (frames.length) reanalyzeSuggestions(); else renderSuggestions();
+      App.changed();
+    });
+    $("ai-v2-cont").addEventListener("change", () => { updateEstimate(); });
     $("ai-bs-start").addEventListener("click", () => startBallSession(false));
     if ($("ai-bs-start-all")) $("ai-bs-start-all").addEventListener("click", () => startBallSession(true));
     $("ai-bs-unsure").addEventListener("click", bsUnsure);
@@ -1485,14 +1534,14 @@
   }
 
   const FSAI = window.FSAI = {
-    hooks: {}, segmentImpl: null,
+    hooks: {}, segmentImpl: null, reanalyze: () => reanalyzeSuggestions(),
     ai, memory, refs, kitWarnings, quality: () => (state.project.ai ? state.project.ai.quality : null), grabSam, renderKits, renderStats, renderCalibs, renderPoints, validateCalibration, runAnalysis, updateEstimate,
     addLayer: (fn) => { layers.push(fn); }, setPointer: (p) => { pointer = p; updateOverlayMode(); }, redraw: refreshLive,
     beginPlacing: (id) => { if (!App.isVideoReady()) return false; video.pause(); pickRole = null; pip = null; renderPipette(); placing = id; $("ai-landmark").value = id; updateOverlayMode(); return true; },
     cancelPlacing: () => { placing = null; updateOverlayMode(); },
     getPoints: () => pts.slice(), clearPoints: () => { pts = []; placing = null; renderPoints(); updateOverlayMode(); },
     removePoint: (id) => { pts = pts.filter((q) => q.id !== id); renderPoints(); refreshLive(); },
-    clearAnalysis: () => { frames = []; const a = ai(); a.frames = null; a.stats = null; a.suggestedEvents = []; a.uncertain = []; a.context = null; a.suggested = 0; renderStats(); renderSuggestions(); refreshLive(); },
+    clearAnalysis: () => { frames = []; const a = ai(); a.frames = null; a.stats = null; a.suggestedEvents = []; a.uncertain = []; a.context = null; a.couverture = null; a.suggested = 0; renderStats(); renderSuggestions(); refreshLive(); },
     setRange: (t0, t1) => { $("ai-t0").value = App.fmt(t0); $("ai-t1").value = App.fmt(t1); updateEstimate(); },
     setCamera: (v) => { $("ai-camera").value = v; $("ai-camera").dispatchEvent(new Event("change")); },
     setDirection: (v) => { $("ai-dir").value = String(v); $("ai-dir").dispatchEvent(new Event("change")); },

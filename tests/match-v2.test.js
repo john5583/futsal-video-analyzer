@@ -166,3 +166,14 @@ test("deux sens du temps : lissage sans retard, vitesses sans trou enjambé, con
   assert.deepEqual(BD.confirmer([false, true, true, true, false, true, false], 3), [false, true, true, true, false, false, false]);
   assert.deepEqual(BD.series([true, true, false, true, true, true], [0, 1, 2, 3, 4, 5], 2), [[3, 5]], "la série de 2 images (1 s) est trop courte, celle de 3 images (2 s) suffit");
 });
+
+test("rapport : la couverture est dans le rapport exporté seulement en analyse v2, avec les raisons et l'état des règles", () => {
+  const R = require("../src/report"), A = require("../src/engine/analyzer");
+  const cov = RG.couverture({ validations: { R01: "validee" }, events: [{ regle: "R01" }], fiabilite: { ballon: 0.7 } });
+  const mk = (v2) => ({ name: "M", events: [], ai: { v2, suggested: 0, stats: { possession: { A: 50, B: 50, known: true }, players: [] }, couverture: cov, suggestedEvents: [] } });
+  const html = R.build(mk(true), A.analyze(mk(true)), { date: "01/01/2026" });
+  assert.ok(html.includes("Couverture des erreurs (analyse v2, bêta)"));
+  assert.ok(html.includes("règle validée") && html.includes("règle non validée") && html.includes("Non évalué"));
+  assert.ok(html.includes("Les fautes ne sont pas détectées") || html.includes("fautes ne sont pas détectées"), "la raison d'une règle non évaluée est écrite");
+  assert.ok(!R.build(mk(false), A.analyze(mk(false)), { date: "01/01/2026" }).includes("Couverture des erreurs"), "analyse habituelle : rapport inchangé");
+});

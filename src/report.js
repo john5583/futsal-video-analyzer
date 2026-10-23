@@ -43,6 +43,12 @@
     if (st.heat && E) {
       h += "<h3>Zones occupées par mon équipe (joueurs de champ)</h3><div class=\"snap wide\">" + E.opsToSVG(E.liveOps(null, { heat: st.heat }), 760, E.COURT_VIEW) + "</div><p class=\"meta\">Mon équipe attaque vers la droite. Rouge : zone très fréquentée ; bleu : peu fréquentée.</p>";
     }
+    if (ai.v2 && Array.isArray(ai.couverture) && ai.couverture.length) {
+      const cov = ai.couverture, ev = cov.filter((c) => c.statut === "evaluee"), nv = ev.filter((c) => c.etatRegle !== "validee").length;
+      h += "<h3>Couverture des erreurs (analyse v2, bêta)</h3><p class=\"meta\">" + ev.length + " règle(s) évaluée(s) sur " + cov.length + " (dont " + nv + " règle(s) non validée(s)) ; " + (cov.length - ev.length) + " non évaluée(s), avec la raison. Rien n'est inventé : sans ballon ou identité fiable, l'erreur n'est pas affichée.</p>" +
+        "<table><thead><tr><th>Règle</th><th>Erreur</th><th>État</th></tr></thead><tbody>" + cov.map((c) => "<tr><td>" + esc(c.id) + "</td><td>" + esc(c.titre) + "</td><td>" +
+          (c.statut === "evaluee" ? "Évaluée : " + esc(c.nb) + " erreur(s) trouvée(s)" + (c.sur != null ? " (ballon fiable sur " + esc(c.sur) + " % du temps)" : "") + (c.etatRegle === "validee" ? " — règle validée" : " — <b>règle non validée</b>") : "<b>Non évalué</b> : " + esc(c.raison)) + "</td></tr>").join("") + "</tbody></table>";
+    }
     const mine = (st.players || []).filter((p) => p.team === "A" || p.team === "B");
     if (mine.length) {
       h += "<table><thead><tr><th>Joueur (piste)</th><th>Équipe</th><th>Distance</th><th>Position moyenne</th><th>Présence</th></tr></thead><tbody>" +

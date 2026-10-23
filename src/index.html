@@ -177,6 +177,13 @@
                 <span id="ai-bench-zones" class="muted"></span>
               </div>
             </div>
+            <div class="ai-v2">
+              <label><input type="checkbox" id="ai-v2"> <b>Analyse v2 (bêta)</b></label>
+              <div id="ai-v2-box" class="hint" hidden>
+                <p>Les 32 règles d'erreurs du coach. Celles que le programme sait mesurer s'affichent « <b>règle non validée</b> » tant que vous ne les avez pas validées ou rejetées ; les autres sont « <b>non évalué</b> » avec la raison. Si le ballon ou l'identité n'est pas fiable, l'erreur n'est pas affichée. Ballon : marge élargie autour du terrain et pleine définition des vidéos verticales (un peu meilleur sur les vidéos d'entraînement ; <b>non mesuré sur un match jamais vu</b>). L'analyse habituelle reste inchangée si cette case n'est pas cochée.</p>
+                <label><input type="checkbox" id="ai-v2-cont"> Lecture continue (toutes les images) : environ 2,7 fois plus lent ; <b>aucune amélioration mesurée</b> du ballon ni des identités ; pas de zoom automatique</label>
+              </div>
+            </div>
             <div class="ai-run">
               <button id="ai-run" class="primary">Lancer l'analyse</button>
               <button id="ai-cancel" hidden>Annuler</button>
@@ -199,6 +206,7 @@
             </div>
             <div id="ai-quality" class="ai-quality" hidden></div>
             <div id="ai-stats" class="ai-stats"></div>
+            <details id="ai-cov" hidden><summary><b>Couverture des erreurs (analyse v2)</b> <span id="ai-cov-sum" class="muted"></span></summary><div id="ai-cov-list"></div></details>
             <h3 class="ai-h">Erreurs suggérées <span id="ai-sugg-count" class="muted"></span></h3>
             <div class="ai-run"><button id="ai-accept-all">Tout accepter</button><button id="ai-clear-sugg" class="ghost">Tout écarter</button></div>
             <div id="ai-sugg" class="events"></div>
@@ -463,6 +471,9 @@
 <script src="engine/regle-or.js"></script>
 <script src="ai/context.js"></script>
 <script src="ai/match.js"></script>
+<script src="engine/regles.js"></script>
+<script src="ai/bidirectionnel.js"></script>
+<script src="ai/match-v2.js"></script>
 <script src="ai/balltrack.js"></script>
 <script src="ai/pipeline.js"></script>
 <script src="ai/overlay.js"></script>

@@ -217,3 +217,19 @@ Statuts affichés (règle d'or) : *mesuré* (lu sur la vidéo), *déduit avec pr
 2. R06 : seuil de durée de possession individuelle « trop longue » (en secondes) ?
 3. R03 et R24 : veux-tu les ajouter (propositions nouvelles) ?
 4. Règlement de ta compétition : durée de la rentrée de touche, fautes cumulées, remplacements : à confirmer pour la section 1.
+
+## 6. Mise à jour : règles codées dans « Analyse v2 (bêta) »
+Sept règles qui étaient « non codées » sont maintenant mesurées par la bêta. **Leurs seuils sont des propositions** : elles s'affichent « règle non validée » dans l'application tant que tu ne les as pas validées ou rejetées (boutons « Valider » / « Rejeter » sur chaque erreur et dans le tableau de couverture). Les seuils exacts sont aussi écrits dans `src/engine/regles.js`.
+
+| Règle | Seuils codés (propositions) |
+|---|---|
+| **R03** Perte de balle inutile | Perte R01/R02 avec moins de 2 adversaires à moins de 3 m du porteur, et un coéquipier de champ libre (aucun adversaire à moins de 3 m) à 3 à 12 m du porteur. |
+| **R04** Relance risquée | Perte en zone défensive avec au moins 2 adversaires à moins de 3 m ; porteur = gardien ou dernier défenseur de champ. |
+| **R06** Dribble excessif | Même joueur avec le ballon au moins **6 s** (seuil proposé), un coéquipier libre à 12 m ou moins pendant au moins la moitié du temps. |
+| **R10** Absence de mouvement | Joueur de champ sans ballon à moins de **0,3 m/s** pendant au moins **5 s** (vitesse lissée dans les deux sens du temps) alors que mon équipe a le ballon. |
+| **R13** Transition offensive lente | Récupération dans les deux premiers tiers, ballon gardé 4 s, avancée de moins de **4 m**, au moins 2 coéquipiers de champ à plus de 5 m devant. |
+| **R14** Supériorité mal exploitée | Au moins **2 joueurs de champ de plus** que l'adversaire à 8 m ou moins du ballon pendant au moins **3 s**, ballon avancé de moins de 3 m. |
+| **R27** Règle des 4 secondes | Gardien de mon équipe avec le ballon (à 2,2 m ou moins), vu sans trou, dans sa moitié, au moins **4,0 s**. |
+
+Toujours **non évaluées** (avec leur raison dans le tableau de couverture) : R05, R11, R12, R20 à R26, R28 à R32.
+Rappel : ces règles ne sont **pas mesurées** en précision ni en couverture sur un match jamais vu : cette mesure attend tes erreurs notées à la main.
