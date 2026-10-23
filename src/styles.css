@@ -284,6 +284,7 @@ fieldset.plan-q label.plan-opt{display:flex;flex-direction:row;gap:8px;align-ite
 .video-box.zoomed.panning{cursor:grabbing}
 
 /* Écran d'étiquetage */
+#lab-screen textarea{background:#0b1220;border:1px solid var(--line);border-radius:6px;padding:5px 8px;font:inherit;color:inherit;resize:vertical}
 #lab-screen{position:fixed;inset:0;z-index:40;background:var(--bg);display:flex;flex-direction:column}
 #lab-screen[hidden]{display:none}
 .lab-top{display:flex;align-items:center;gap:10px;padding:8px 14px;background:#0b1220;border-bottom:1px solid var(--line)}

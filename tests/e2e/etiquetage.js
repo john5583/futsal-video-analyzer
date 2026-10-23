@@ -75,6 +75,12 @@ async function waitDisk(fn, ms) { const end = Date.now() + ms; while (Date.now()
   must(await waitFor(win, () => window.FSLabel.state().data.persons.length === 1, 3000), "fiche de personne ajoutée");
   await win.evaluate(() => { const s = document.getElementById("lab-sel-who"); s.value = s.options[1].value; s.dispatchEvent(new Event("change")); });
   must(await waitFor(win, (m) => { const f = window.FSLabel.state().data.frames[String(m)]; return f.boxes[0].who === "p1"; }, 3000, ms), "identité rattachée au cadre");
+  // plusieurs fiches d'un coup, puis un changement (entrée) à l'instant affiché
+  await win.evaluate(() => { document.getElementById("lab-pers-multi").value = "Remplaçant 12 ; BANC\nArbitre ; ARB\nligne illisible"; document.getElementById("lab-pers-import").click(); });
+  must(await waitFor(win, () => window.FSLabel.state().data.persons.length === 3, 3000), "import de plusieurs fiches (2 lues, 1 illisible gardée dans la case)");
+  must((await win.evaluate(() => document.getElementById("lab-pers-multi").value)) === "ligne illisible", "la ligne non comprise reste dans la case");
+  await win.evaluate(() => { const s = document.getElementById("lab-sub-who"); s.value = "p2"; s.dispatchEvent(new Event("change")); document.getElementById("lab-sub-in").click(); });
+  must(await waitFor(win, (m) => { const d = window.FSLabel.state().data; return d.subs.length === 1 && d.subs[0].who === "p2" && d.subs[0].sens === "entre" && d.subs[0].ms === m; }, 3000, ms), "changement « entre » enregistré à l'instant affiché");
   await win.keyboard.press("Enter");
   must(await waitFor(win, (m) => window.FSLabel.state().data.frames[String(m)].playersDone === true, 3000, ms), "« image terminée » enregistrée");
   const ms2 = (await st(win)).ms;
@@ -93,8 +99,9 @@ async function waitDisk(fn, ms) { const end = Date.now() + ms; while (Date.now()
   await win.evaluate(() => window.FSLabel.open());
   must(await waitFor(win, () => !document.getElementById("lab-resume").hidden, 5000), "bouton « Reprendre » proposé");
   await win.evaluate(() => document.getElementById("lab-resume").click());
-  must(await waitFor(win, () => window.FSLabel.state().data && window.FSLabel.state().data.persons.length === 1, 20000), "fiches relues après redémarrage");
+  must(await waitFor(win, () => window.FSLabel.state().data && window.FSLabel.state().data.persons.length === 3, 20000), "fiches relues après redémarrage");
   const s2 = await st(win);
+  must((await win.evaluate(() => window.FSLabel.state().data.subs.length)) === 1, "changement relu après redémarrage");
   must(s2.frames["0"].ball.state === "vu" && s2.ms === ms2, "ballon relu et position reprise (" + s2.ms + " ms)");
   await app.close();
 

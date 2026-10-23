@@ -101,7 +101,7 @@
     if (!data) return;
     const c = LS.counts(data), f = data.frames[String(ms)] || {};
     $("lab-time").textContent = fmt(ms) + " — image " + (Math.round((ms * LS.GRID_FPS) / 1000) + 1) + " sur " + (LS.gridCount(data.video.duration) + 1);
-    $("lab-counts").textContent = "Ballon : " + c.vu + " avec ballon, " + c.aucun + " sans ballon, " + c.incertain + " incertain(s). Joueurs : " + c.imagesJoueurs + " image(s) terminée(s), " + c.cadres + " cadre(s). Cette séance : " + session + " réponse(s).";
+    $("lab-counts").textContent = "Ballon : " + c.vu + " avec ballon, " + c.aucun + " sans ballon, " + c.incertain + " incertain(s). Joueurs : " + c.imagesJoueurs + " image(s) terminée(s), " + c.cadres + " cadre(s), " + c.changements + " changement(s). Cette séance : " + session + " réponse(s).";
     const b = f.ball;
     $("lab-this").textContent = mode === "ballon"
       ? (b ? (b.state === "vu" ? "Réponse : ballon désigné." : b.state === "aucun" ? "Réponse : aucun ballon visible." : "Réponse : incertain.") : "Pas encore de réponse sur cette image.")
@@ -113,7 +113,19 @@
     $("lab-sel").hidden = !bx;
     if (bx) { $("lab-sel-team").value = bx.team; fillWho($("lab-sel-who"), bx.who || ""); }
     $("lab-step").value = String(every[mode]);
-    renderPersons();
+    renderPersons(); renderSubs();
+  }
+  function renderSubs() {
+    const box = $("lab-subs"), sel = $("lab-sub-who"), keep = sel.value;
+    fillWho(sel, keep);
+    sel.options[0].textContent = "— choisir la personne —";
+    box.innerHTML = "";
+    (data.subs || []).forEach((x) => {
+      const p = data.persons.find((q) => q.id === x.who), row = document.createElement("div"); row.className = "lab-person";
+      const t = document.createElement("span"); t.textContent = fmt(x.ms) + " — " + (p ? p.nom || p.id : x.who) + " " + (x.sens === "entre" ? "entre" : "sort"); row.appendChild(t);
+      const b = document.createElement("button"); b.className = "ghost"; b.textContent = "Retirer"; b.addEventListener("click", () => { LS.removeSub(data, x.ms, x.who); changed(); }); row.appendChild(b);
+      box.appendChild(row);
+    });
   }
   function fillWho(s, v) {
     s.innerHTML = "";
@@ -269,6 +281,20 @@
   $("lab-sel-team").addEventListener("change", () => { if (sel && LS.setBoxTeam(data, ms, sel, $("lab-sel-team").value)) changed(); draw(); });
   $("lab-sel-who").addEventListener("change", () => { if (sel && LS.setBoxWho(data, ms, sel, $("lab-sel-who").value)) changed(); draw(); });
   $("lab-sel-del").addEventListener("click", () => { if (sel) { LS.removeBox(data, ms, sel); sel = null; changed(); draw(); } });
+  $("lab-pers-import").addEventListener("click", () => {
+    if (!data) return;
+    const r = LS.importPersons(data, $("lab-pers-multi").value);
+    $("lab-pers-multi").value = r.refused.join("\n");      // ce qui n'a pas pu être lu reste dans la case, à corriger
+    if (r.added.length) changed();
+    toast(r.added.length + " fiche(s) ajoutée(s)" + (r.refused.length ? " ; " + r.refused.length + " ligne(s) non comprise(s), laissée(s) dans la case (écris « nom ; type »)." : "."), r.refused.length > 0 && !r.added.length);
+  });
+  const sub = (sens) => {
+    if (!data) return;
+    if (!LS.addSub(data, ms, $("lab-sub-who").value, sens)) { toast("Choisis d'abord la personne dans la liste."); return; }
+    changed();
+  };
+  $("lab-sub-in").addEventListener("click", () => sub("entre"));
+  $("lab-sub-out").addEventListener("click", () => sub("sort"));
   $("lab-pers-team").innerHTML = TEAM_KEYS.map((k) => "<option value=\"" + k + "\">" + LS.TEAMS[k] + "</option>").join("");
   $("lab-pers-add").addEventListener("click", () => {
     if (!data) return;
