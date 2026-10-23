@@ -9,6 +9,8 @@
 
   const MIN_PLAYERS = 4;       // paires position au sol / pied de la boîte nécessaires pour retrouver la projection
   const MAX_ERR = 0.03;        // erreur de reprojection tolérée, en part de la hauteur d'un joueur (au-delà : pas de dessin)
+  const BALL_HOLD_MAX = 0.6;   // s : le ballon n'est jamais repris d'une détection plus éloignée que cela
+  const BALL_LINK_MAX = 1.0;   // s : le ballon n'est interpolé qu'entre deux détections au plus distantes de ce délai
   const MAX_GAP = 0.6;         // écart maximal (s) entre l'instant affiché et une image analysée utilisable
   const MIN_SPREAD = 12;       // m² : joueurs trop groupés (presque alignés) -> projection instable
 
@@ -119,13 +121,13 @@
   /* Joueurs (et ballon) à l'instant t, interpolés entre les deux images analysées voisines. */
   function stateAt(frames, t) {
     const fs = (frames || []).filter((f) => f && isFinite(f.t));
-    if (!fs.length) return { players: [], ball: null };
+    if (!fs.length) return { players: [], ball: null, fills: [] };
     const [lo, hi] = bracket(fs, t);
     const A = lo >= 0 ? fs[lo] : null, B = hi >= 0 ? fs[hi] : null;
     if (!A || !B || B.t - A.t > 2 * MAX_GAP) {
       const n = !A ? B : !B ? A : (t - A.t <= B.t - t ? A : B);
-      if (Math.abs(n.t - t) > MAX_GAP) return { players: [], ball: null };
-      return { players: n.players.map((p) => Object.assign({}, p)), ball: n.ball ? Object.assign({}, n.ball) : null };
+      if (Math.abs(n.t - t) > MAX_GAP) return { players: [], ball: null, fills: [] };
+      return { players: n.players.map((p) => Object.assign({}, p)), ball: n.ball ? Object.assign({}, n.ball) : null, fills: n.ball ? [{ kind: "ballon", from: Math.min(t, n.t), to: Math.max(t, n.t) }] : [] };
     }
     const w = (t - A.t) / (B.t - A.t), byId = new Map(B.players.map((p) => [p.id, p]));
     const lerp = (a, b) => a + (b - a) * w;
@@ -135,8 +137,14 @@
       return Object.assign({}, p, { x: lerp(p.x, q.x), y: lerp(p.y, q.y), b: p.b && q.b ? p.b.map((v, k) => lerp(v, q.b[k])) : p.b || q.b });
     }).filter(Boolean);
     B.players.forEach((q) => { if (w >= 0.5 && !players.some((p) => p.id === q.id)) players.push(Object.assign({}, q)); });
-    const ball = A.ball && B.ball ? { x: lerp(A.ball.x, B.ball.x), y: lerp(A.ball.y, B.ball.y) } : (w < 0.5 ? A.ball : B.ball) || null;
-    return { players, ball };
+    // le ballon n'est interpolé qu'entre deux détections distantes de 1 s au plus (il va jusqu'à 25 m/s) ; sinon on reprend l'image la plus proche (0,6 s au plus)
+    const near = w < 0.5 ? A : B, both = A.ball && B.ball && B.t - A.t <= BALL_LINK_MAX + 1e-9;
+    const ball = both ? { x: lerp(A.ball.x, B.ball.x), y: lerp(A.ball.y, B.ball.y) } : near.ball ? Object.assign({}, near.ball) : null;
+    // comblements effectués (règle d'or : jamais à travers un trou trop long)
+    const fills = [{ kind: "joueur", from: A.t, to: B.t }];
+    if (both) fills.push({ kind: "lien-ballon", from: A.t, to: B.t });
+    else if (near.ball) fills.push({ kind: "ballon", from: Math.min(t, near.t), to: Math.max(t, near.t) });
+    return { players, ball, fills };
   }
 
   /* ---------- dessins d'une erreur et correction conseillée ---------- */
@@ -183,7 +191,7 @@
     const st = stateAt(fs, t);
     const players = st.players.map((p) => { const [x, y] = N(p.x, p.y); return { id: p.id, team: p.team, x, y }; });
     let ball = st.ball ? (() => { const [x, y] = N(st.ball.x, st.ball.y); return { x, y }; })() : null;
-    if (!ball) { for (const dt of [0.2, -0.2, 0.4, -0.4, 0.6, -0.6]) { const s = stateAt(fs, t + dt); if (s.ball) { const [x, y] = N(s.ball.x, s.ball.y); ball = { x, y }; break; } } }
+    if (!ball) { for (const dt of [0.2, -0.2, 0.4, -0.4, 0.6, -0.6]) { const s = stateAt(fs, t + dt), hold = (s.fills || []).filter((f) => f.kind === "ballon").reduce((m, f) => Math.max(m, f.to - f.from), 0); if (s.ball && Math.abs(dt) + hold <= BALL_HOLD_MAX + 1e-9) { const [x, y] = N(s.ball.x, s.ball.y); ball = { x, y }; break; } } }
     const A = players.filter((p) => p.team === "A"), Bp = players.filter((p) => p.team === "B");
     const items = [], corr = { ghost: null, arrows: [], lines: [], crosses: [] };
     const R = (x, y) => N(x, y);                       // retour au repère réel (la symétrie est sa propre inverse)
@@ -391,5 +399,5 @@
     return out.filter((c) => c.length >= 2);
   }
 
-  return { actionWindow, clipLine, visibleZone, shapeFix, chooseCorner, frameProjection, Projector, stateAt, buildOverlay, footOf, MIN_PLAYERS, MAX_ERR, MAX_GAP };
+  return { actionWindow, clipLine, visibleZone, shapeFix, chooseCorner, frameProjection, Projector, stateAt, buildOverlay, footOf, MIN_PLAYERS, MAX_ERR, MAX_GAP, BALL_HOLD_MAX, BALL_LINK_MAX };
 });
