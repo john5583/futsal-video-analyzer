@@ -9,6 +9,8 @@
 
   const MIN_PLAYERS = 4;       // paires position au sol / pied de la boîte nécessaires pour retrouver la projection
   const MAX_ERR = 0.03;        // erreur de reprojection tolérée, en part de la hauteur d'un joueur (au-delà : pas de dessin)
+  const BALL_HOLD_MAX = 0.6;   // s : le ballon n'est jamais repris d'une détection plus éloignée que cela
+  const BALL_LINK_MAX = 1.0;   // s : le ballon n'est interpolé qu'entre deux détections au plus distantes de ce délai
   const MAX_GAP = 0.6;         // écart maximal (s) entre l'instant affiché et une image analysée utilisable
   const MIN_SPREAD = 12;       // m² : joueurs trop groupés (presque alignés) -> projection instable
 
@@ -119,13 +121,13 @@
   /* Joueurs (et ballon) à l'instant t, interpolés entre les deux images analysées voisines. */
   function stateAt(frames, t) {
     const fs = (frames || []).filter((f) => f && isFinite(f.t));
-    if (!fs.length) return { players: [], ball: null };
+    if (!fs.length) return { players: [], ball: null, fills: [] };
     const [lo, hi] = bracket(fs, t);
     const A = lo >= 0 ? fs[lo] : null, B = hi >= 0 ? fs[hi] : null;
     if (!A || !B || B.t - A.t > 2 * MAX_GAP) {
       const n = !A ? B : !B ? A : (t - A.t <= B.t - t ? A : B);
-      if (Math.abs(n.t - t) > MAX_GAP) return { players: [], ball: null };
-      return { players: n.players.map((p) => Object.assign({}, p)), ball: n.ball ? Object.assign({}, n.ball) : null };
+      if (Math.abs(n.t - t) > MAX_GAP) return { players: [], ball: null, fills: [] };
+      return { players: n.players.map((p) => Object.assign({}, p)), ball: n.ball ? Object.assign({}, n.ball) : null, fills: n.ball ? [{ kind: "ballon", from: Math.min(t, n.t), to: Math.max(t, n.t) }] : [] };
     }
     const w = (t - A.t) / (B.t - A.t), byId = new Map(B.players.map((p) => [p.id, p]));
     const lerp = (a, b) => a + (b - a) * w;
@@ -135,8 +137,14 @@
       return Object.assign({}, p, { x: lerp(p.x, q.x), y: lerp(p.y, q.y), b: p.b && q.b ? p.b.map((v, k) => lerp(v, q.b[k])) : p.b || q.b });
     }).filter(Boolean);
     B.players.forEach((q) => { if (w >= 0.5 && !players.some((p) => p.id === q.id)) players.push(Object.assign({}, q)); });
-    const ball = A.ball && B.ball ? { x: lerp(A.ball.x, B.ball.x), y: lerp(A.ball.y, B.ball.y) } : (w < 0.5 ? A.ball : B.ball) || null;
-    return { players, ball };
+    // le ballon n'est interpolé qu'entre deux détections distantes de 1 s au plus (il va jusqu'à 25 m/s) ; sinon on reprend l'image la plus proche (0,6 s au plus)
+    const near = w < 0.5 ? A : B, both = A.ball && B.ball && B.t - A.t <= BALL_LINK_MAX + 1e-9;
+    const ball = both ? { x: lerp(A.ball.x, B.ball.x), y: lerp(A.ball.y, B.ball.y) } : near.ball ? Object.assign({}, near.ball) : null;
+    // comblements effectués (règle d'or : jamais à travers un trou trop long)
+    const fills = [{ kind: "joueur", from: A.t, to: B.t }];
+    if (both) fills.push({ kind: "lien-ballon", from: A.t, to: B.t });
+    else if (near.ball) fills.push({ kind: "ballon", from: Math.min(t, near.t), to: Math.max(t, near.t) });
+    return { players, ball, fills };
   }
 
   /* ---------- dessins d'une erreur et correction conseillée ---------- */
@@ -183,7 +191,7 @@
     const st = stateAt(fs, t);
     const players = st.players.map((p) => { const [x, y] = N(p.x, p.y); return { id: p.id, team: p.team, x, y }; });
     let ball = st.ball ? (() => { const [x, y] = N(st.ball.x, st.ball.y); return { x, y }; })() : null;
-    if (!ball) { for (const dt of [0.2, -0.2, 0.4, -0.4, 0.6, -0.6]) { const s = stateAt(fs, t + dt); if (s.ball) { const [x, y] = N(s.ball.x, s.ball.y); ball = { x, y }; break; } } }
+    if (!ball) { for (const dt of [0.2, -0.2, 0.4, -0.4, 0.6, -0.6]) { const s = stateAt(fs, t + dt), hold = (s.fills || []).filter((f) => f.kind === "ballon").reduce((m, f) => Math.max(m, f.to - f.from), 0); if (s.ball && Math.abs(dt) + hold <= BALL_HOLD_MAX + 1e-9) { const [x, y] = N(s.ball.x, s.ball.y); ball = { x, y }; break; } } }
     const A = players.filter((p) => p.team === "A"), Bp = players.filter((p) => p.team === "B");
     const items = [], corr = { ghost: null, arrows: [], lines: [], crosses: [] };
     const R = (x, y) => N(x, y);                       // retour au repère réel (la symétrie est sa propre inverse)
@@ -233,7 +241,7 @@
       return out("plan");
     }
 
-    if (type === "perte_zone_mediane" || type === "perte_zone_def") {
+    if (type === "perte_zone_mediane" || type === "perte_zone_def" || type === "perte_inutile" || type === "relance_risquee") {
       const before = stateAt(fs, t - 0.4);
       const loserRaw = nearest(before.players.filter((p) => p.team === "A"), before.ball ? (() => { const [x, y] = N(before.ball.x, before.ball.y); return { x, y }; })() : ref);
       const loser = loserRaw ? (players.find((p) => p.id === loserRaw.id) || (() => { const [x, y] = N(loserRaw.x, loserRaw.y); return { id: loserRaw.id, team: "A", x, y }; })()) : nearest(A, ref);
@@ -336,6 +344,36 @@
       return out("attaque");
     }
 
+    // ----- règles de l'analyse v2 (le joueur concerné est donné par l'évènement : event.joueur) -----
+    const who = (id) => (id != null ? players.find((p) => p.id === id) || null : null);
+    const freeMate = (from) => A.filter((p) => p.id !== from.id && d2(p, from) >= 3 && d2(p, from) <= 12 && !Bp.some((b) => d2(b, p) < 3)).sort((a, b) => d2(a, from) - d2(b, from))[0] || null;
+    if (type === "dribble_excessif") {
+      const h = who(event.joueur) || nearest(A, ref);
+      if (h) {
+        ring(h, "err", "Garde trop longtemps");
+        const mate = freeMate(h);
+        if (mate) { ring(mate, "ok", "Libre"); corr.lines.push({ from: R(h.x, h.y), to: R(mate.x, mate.y), label: "Passe" }); }
+      }
+      return out("attaque");
+    }
+    if (type === "absence_mouvement") {
+      const p = who(event.joueur);
+      if (p) { ring(p, "err", "Immobile"); ghost(p, p.x + 4, p.y + (p.y < W / 2 ? 2 : -2), "Appel de balle"); }
+      return out("attaque");
+    }
+    if (type === "transition_off_lente" || type === "superiorite_non_convertie") {
+      const h = nearest(A, ref);
+      if (h) ring(h, "err", type === "transition_off_lente" ? "Trop lent" : "Supériorité");
+      if (type === "transition_off_lente") A.filter((p) => !h || (p.id !== h.id && p.x > ref.x + 5)).slice(0, 3).forEach((p) => { ring(p, "ok", "Libre devant"); if (h) corr.lines.push({ from: R(h.x, h.y), to: R(p.x, p.y), label: "Passe vers l'avant" }); });
+      else A.filter((p) => d2(p, ref) <= 8 && (!h || p.id !== h.id)).slice(0, 3).forEach((p) => { ring(p, "ok", null); if (h) corr.lines.push({ from: R(h.x, h.y), to: R(p.x, p.y), label: "Combiner et avancer" }); });
+      return out("attaque");
+    }
+    if (type === "regle_4s") {
+      const g = who(event.joueur) || players.find((p) => p.team === "GKA") || nearest(A, ref);
+      if (g) { ring(g, "err", "Plus de 4 s"); const mate = freeMate(g) || nearest(A.filter((p) => p.id !== g.id), g); if (mate) corr.lines.push({ from: R(g.x, g.y), to: R(mate.x, mate.y), label: "Relancer avant 4 s" }); }
+      return out("gardien");
+    }
+
     // erreur marquée à la main ou sans règle : les joueurs les plus proches du ballon, sans correction sur l'image
     players.filter((p) => FIELD[p.team]).sort((a, b) => d2(a, ref) - d2(b, ref)).slice(0, 3).forEach((p) => ring(p, p.team === "A" ? "err" : "opp", null));
     return out("generique");
@@ -391,5 +429,5 @@
     return out.filter((c) => c.length >= 2);
   }
 
-  return { actionWindow, clipLine, visibleZone, shapeFix, chooseCorner, frameProjection, Projector, stateAt, buildOverlay, footOf, MIN_PLAYERS, MAX_ERR, MAX_GAP };
+  return { actionWindow, clipLine, visibleZone, shapeFix, chooseCorner, frameProjection, Projector, stateAt, buildOverlay, footOf, MIN_PLAYERS, MAX_ERR, MAX_GAP, BALL_HOLD_MAX, BALL_LINK_MAX };
 });

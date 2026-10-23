@@ -44,3 +44,7 @@ jobs:
         run: xvfb-run -a node tests/e2e/etiquetage.js
         env:
           CI: "true"
+      - name: Analyse v2 (beta), case a cocher, couverture, validation et rejet des regles
+        run: xvfb-run -a node tests/e2e/analyse-v2.js
+        env:
+          CI: "true"

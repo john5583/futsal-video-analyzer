@@ -177,6 +177,13 @@
                 <span id="ai-bench-zones" class="muted"></span>
               </div>
             </div>
+            <div class="ai-v2">
+              <label><input type="checkbox" id="ai-v2"> <b>Analyse v2 (bêta)</b></label>
+              <div id="ai-v2-box" class="hint" hidden>
+                <p>Les 32 règles d'erreurs du coach. Celles que le programme sait mesurer s'affichent « <b>règle non validée</b> » tant que vous ne les avez pas validées ou rejetées ; les autres sont « <b>non évalué</b> » avec la raison. Si le ballon ou l'identité n'est pas fiable, l'erreur n'est pas affichée. Ballon : marge élargie autour du terrain et pleine définition des vidéos verticales (un peu meilleur sur les vidéos d'entraînement ; <b>non mesuré sur un match jamais vu</b>). L'analyse habituelle reste inchangée si cette case n'est pas cochée.</p>
+                <label><input type="checkbox" id="ai-v2-cont"> Lecture continue (toutes les images) : environ 2,7 fois plus lent ; <b>aucune amélioration mesurée</b> du ballon ni des identités ; pas de zoom automatique</label>
+              </div>
+            </div>
             <div class="ai-run">
               <button id="ai-run" class="primary">Lancer l'analyse</button>
               <button id="ai-cancel" hidden>Annuler</button>
@@ -199,6 +206,7 @@
             </div>
             <div id="ai-quality" class="ai-quality" hidden></div>
             <div id="ai-stats" class="ai-stats"></div>
+            <details id="ai-cov" hidden><summary><b>Couverture des erreurs (analyse v2)</b> <span id="ai-cov-sum" class="muted"></span></summary><div id="ai-cov-list"></div></details>
             <h3 class="ai-h">Erreurs suggérées <span id="ai-sugg-count" class="muted"></span></h3>
             <div class="ai-run"><button id="ai-accept-all">Tout accepter</button><button id="ai-clear-sugg" class="ghost">Tout écarter</button></div>
             <div id="ai-sugg" class="events"></div>
@@ -207,15 +215,17 @@
             <div id="ai-q" class="events"></div>
             <div class="muted" style="padding:4px">Étiquettes du ballon (clic droit ou clic sur la vidéo puis « Le ballon est ici ») : <span id="ai-bl-count">aucune étiquette</span>
               <button id="ai-bl-export" class="ghost" disabled title="Enregistre les images étiquetées dans un dossier de ton choix, pour entraîner le détecteur plus tard. Rien n'est envoyé sur Internet.">Exporter les images</button>
-              <button id="ai-bs-start" class="ghost" title="Le programme te montre des images une à une avec le ballon qu'il propose : tu valides, tu corriges ou tu dis « aucun ballon visible ». Seules tes réponses servent à entraîner le détecteur.">Session d'étiquetage</button></div>
+              <button id="ai-bs-start" class="ghost" title="Le programme te montre des images une à une avec le ballon qu'il propose : tu valides, tu corriges ou tu dis « aucun ballon visible ». Seules tes réponses servent à entraîner le détecteur.">Session d'étiquetage</button>
+              <button id="ai-bs-start-all" class="ghost" title="Toutes les images de la plage analysée, une par une (pour mesurer sur un match entier) ; environ 1 image sur 15 est une image de contrôle sans proposition.">Session complète (mesure)</button></div>
             <div id="ai-bs-box" hidden style="padding:6px;border:1px solid var(--line,#334);border-radius:8px;margin:4px 0">
               <div id="ai-bs-text" style="margin-bottom:6px"></div>
               <button id="ai-bs-ok" class="primary">Oui, c'est le ballon</button>
               <button id="ai-bs-none">Aucun ballon visible</button>
+              <button id="ai-bs-unsure" class="ghost" title="Tu hésites : l'image ne compte ni pour ni contre (raccourci : ?).">Incertain</button>
               <button id="ai-bs-skip" class="ghost">Je ne sais pas (passer)</button>
               <button id="ai-bs-prev" class="ghost">Image précédente</button>
               <button id="ai-bs-stop" class="ghost">Terminer</button>
-              <div class="muted" style="margin-top:4px">Pour placer le ballon ailleurs, clique dessus dans la vidéo puis « Le ballon est ici ».</div>
+              <div class="muted" style="margin-top:4px">Pour placer le ballon ailleurs, clique dessus dans la vidéo puis « Le ballon est ici ». « Visible » = au moins la moitié du ballon se voit sur cette image (main, flou reconnaissable : oui ; caché ou camouflé : « Aucun ballon visible »).</div>
             </div>
             <details id="ai-ans-box"><summary class="ai-h" style="cursor:pointer">Mes réponses <span id="ai-ans-count" class="muted"></span></summary>
               <p class="muted" style="padding:0 4px">Ce que vous avez répondu ou écarté dans ce projet. « Annuler » remet la situation comme avant et la question réapparaît.</p>
@@ -458,8 +468,12 @@
 <script src="ai/contour.js"></script>
 <script src="ai/silhouette.js"></script>
 <script src="ai/camera.js"></script>
+<script src="engine/regle-or.js"></script>
 <script src="ai/context.js"></script>
 <script src="ai/match.js"></script>
+<script src="engine/regles.js"></script>
+<script src="ai/bidirectionnel.js"></script>
+<script src="ai/match-v2.js"></script>
 <script src="ai/balltrack.js"></script>
 <script src="ai/pipeline.js"></script>
 <script src="ai/overlay.js"></script>

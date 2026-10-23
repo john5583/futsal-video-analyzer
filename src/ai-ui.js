@@ -2,7 +2,7 @@
 (function () {
   "use strict";
   const App = window.FSApp;
-  const KB = window.FutsalKB, HG = window.FutsalHomography, K = window.FutsalKit, P = window.FutsalPipeline, M = window.FutsalMatch, E = window.FutsalAnim, D = window.FutsalDoubt, BL = window.FutsalBallLabels, Z = window.FutsalZoom, O = window.FutsalOverlay, Q = window.FutsalQuality;
+  const KB = window.FutsalKB, HG = window.FutsalHomography, K = window.FutsalKit, P = window.FutsalPipeline, M = window.FutsalMatch, V2 = window.FutsalMatchV2, RG = window.FutsalRegles, E = window.FutsalAnim, D = window.FutsalDoubt, BL = window.FutsalBallLabels, Z = window.FutsalZoom, O = window.FutsalOverlay, Q = window.FutsalQuality;
   const $ = (id) => document.getElementById(id);
   const esc = App.esc;
   const video = App.video, api = App.api, state = App.state;
@@ -528,7 +528,7 @@
     if (!a.quality && frames.length) {                              // ancien projet : le contrôle est calculé une fois
       try {
         const s = a.settings || {};
-        updateQuality(M.analyze(frames, { L: L(), W: W(), dirAt, lost: a.lost || [], span: [s.t0 || frames[0].t, s.t1 || frames[frames.length - 1].t], bench: benchSetting(), benchSeen: a.benchSeen || null, subAnswers: subAnswers() }));
+        updateQuality(analyzeMatch(frames, { L: L(), W: W(), dirAt, lost: a.lost || [], span: [s.t0 || frames[0].t, s.t1 || frames[frames.length - 1].t], bench: benchSetting(), benchSeen: a.benchSeen || null, subAnswers: subAnswers() }));
       } catch (_e) { /* ignoré */ }
     }
     const q = a.quality;
@@ -572,7 +572,36 @@
     renderNext();
   }
 
+  /* ---------- analyse v2 (bêta) : validation des règles et couverture ---------- */
+  function ruleDecision(id, decision) {
+    const a = ai();
+    a.regles = RG.valider(a.regles || {}, id, decision);
+    reanalyzeSuggestions(); App.changed();
+    App.toast(decision === "validee" ? "Règle " + id + " validée." : decision === "rejetee" ? "Règle " + id + " rejetée : elle n'affichera plus rien." : "Règle " + id + " remise à « non validée ».");
+  }
+  function ruleButtons(r) {
+    const mk = (d, label) => "<button data-r=\"" + d + "\" class=\"ghost\">" + label + "</button>";
+    return (r.etatRegle === "validee" ? "" : mk("validee", "Valider")) + (r.etatRegle === "rejetee" ? "" : mk("rejetee", "Rejeter")) + (r.etatRegle === "non_validee" ? "" : mk("non_validee", "Remettre à non validée"));
+  }
+  function renderCoverage() {
+    const a = state.project.ai, box = $("ai-cov"), list = $("ai-cov-list"), rows = a && a.v2 && Array.isArray(a.couverture) ? a.couverture : null;
+    box.hidden = !rows;
+    if (!rows) return;
+    const sum = RG.resumeCouverture(rows);
+    $("ai-cov-sum").textContent = "— " + sum.evaluees + " règle(s) évaluée(s) sur " + sum.total + " (dont " + sum.nonValidees + " non validée(s)), " + sum.nonEvaluees + " non évaluée(s)";
+    list.innerHTML = "";
+    rows.forEach((r) => {
+      const row = document.createElement("div"); row.className = "cov-row";
+      const rule = RG.PAR_ID[r.id], state2 = r.statut === "evaluee"
+        ? "<span class=\"cov-ok\">évaluée</span> — " + r.nb + " erreur(s) trouvée(s)" + (r.sur != null ? " (ballon fiable sur " + r.sur + " % du temps)" : "") + (r.etatRegle === "validee" ? " — règle validée" : " — <b>règle non validée</b>")
+        : "<span class=\"" + (r.raison === "règle rejetée par le coach" ? "cov-rej" : "cov-no") + "\">non évalué</span> : " + esc(r.raison);
+      row.innerHTML = "<b>" + r.id + "</b><div><div>" + esc(r.titre) + "</div><div class=\"muted\">" + state2 + "</div>" + (rule && rule.codee ? "<div class=\"muted\" style=\"font-size:12px\">Mesure : " + esc(rule.mesure) + "</div>" : "") + "</div><div class=\"v2rule\">" + (rule && rule.codee ? ruleButtons(r) : "") + "</div>";
+      row.querySelectorAll("[data-r]").forEach((b) => b.addEventListener("click", () => ruleDecision(r.id, b.dataset.r)));
+      list.appendChild(row);
+    });
+  }
   function renderSuggestions() {
+    renderCoverage();
     const a = state.project.ai, list = $("ai-sugg");
     list.innerHTML = "";
     const items = (a && a.suggestedEvents) || [];
@@ -595,7 +624,13 @@
     if (!items.length) { list.innerHTML = "<p class=\"muted\" style=\"padding:6px\">Aucune erreur en attente.</p>"; uncNote(); renderQuestions(); return; }
     items.forEach((e) => {
       const row = document.createElement("div"); row.className = "ev";
-      row.innerHTML = "<button class=\"t\">" + App.fmt(e.t) + "</button><div><div class=\"lbl\"><span class=\"dot\" style=\"background:" + App.phaseColor(e.type) + "\"></span>" + esc(App.labelOf(e.type)) + "</div><div class=\"chips\">" + esc(e.note || "") + (typeof e.ballConf === "number" ? " · ballon vu sur " + Math.round(e.ballConf * 100) + " % des images" : "") + "</div></div><div class=\"btns\"><button data-a=\"ok\" title=\"Ajouter aux événements\">✔</button><button data-a=\"no\" title=\"Écarter\">✖</button></div>";
+      row.innerHTML = "<button class=\"t\">" + App.fmt(e.t) + "</button><div><div class=\"lbl\"><span class=\"dot\" style=\"background:" + App.phaseColor(e.type) + "\"></span>" + esc(App.labelOf(e.type)) + "</div><div class=\"chips\">" + esc(e.note || "") + (typeof e.ballConf === "number" ? " · ballon vu sur " + Math.round(e.ballConf * 100) + " % des images" : "") + (e.statut && window.FutsalRegleOr ? " · statut : " + window.FutsalRegleOr.decrire(e.statut) : "") + "</div></div><div class=\"btns\"><button data-a=\"ok\" title=\"Ajouter aux événements\">✔</button><button data-a=\"no\" title=\"Écarter\">✖</button></div>";
+      if (isV2() && e.regle) {
+        const c = document.createElement("div"); c.className = "chips v2rule";
+        c.innerHTML = "<span>Règle " + e.regle + " — " + (e.regleEtat === "validee" ? "règle validée" : "<b>règle non validée</b>") + "</span>" + ruleButtons({ etatRegle: e.regleEtat });
+        c.querySelectorAll("[data-r]").forEach((b) => b.addEventListener("click", () => ruleDecision(e.regle, b.dataset.r)));
+        row.children[1].appendChild(c);
+      }
       row.querySelector(".t").addEventListener("click", () => App.seek(Math.max(0, e.t - 3)));
       row.querySelector("[data-a=ok]").addEventListener("click", () => acceptSuggestion(e));
       row.querySelector("[data-a=no]").addEventListener("click", () => { D.reject(memory(), e); a.suggestedEvents = a.suggestedEvents.filter((x) => x.sid !== e.sid); a.suggested = a.suggestedEvents.length; renderSuggestions(); App.changed(); });
@@ -791,6 +826,9 @@
 
   /* La mémoire du projet filtre un résultat d'analyse : les erreurs que le coach a écartées ne reviennent pas. */
   const subAnswers = () => memory().answers.filter((x) => x.kind === "sub" || x.kind === "team");
+  /* Analyse v2 (bêta) : case cochée dans l'étape d'analyse ; sinon l'analyse habituelle (match.js), inchangée. */
+  const isV2 = () => !!(state.project.ai && state.project.ai.v2 && V2);
+  function analyzeMatch(fr, o) { return isV2() ? V2.analyze(fr, Object.assign({}, o, { validations: state.project.ai.regles || {} })) : M.analyze(fr, o); }
   function applyMemory(res) {
     const mem = memory();
     if (state.project.ai) state.project.ai.subs = res.subs || [];
@@ -983,25 +1021,31 @@
     return items;
   }
   /* Étiquette exacte du ballon (pixel cliqué) pour mesurer puis entraîner le détecteur ; jamais déduite par le programme. */
-  function saveBallLabel(t, ix, iy, H) {
+  function saveBallLabel(t, ix, iy, H, src, unsure) {
     const vw = video.videoWidth, vh = video.videoHeight;
     if (!vw || !vh) return;
-    const lab = ix == null ? { t, none: true, vw, vh } : Object.assign({ t, u: ix, v: iy, vw, vh }, BL.ballSize(ix, iy, vw, H, HG));
+    const origin = bs ? (bsBlind(t) ? "aveugle" : src || "clic") : undefined;      // d'où vient l'étiquette (mesure du biais des propositions)
+    const lab = unsure ? { t, unsure: true, vw, vh, src: origin } : ix == null ? { t, none: true, vw, vh, src: origin } : Object.assign({ t, u: ix, v: iy, vw, vh, src: origin }, BL.ballSize(ix, iy, vw, H, HG));
     if (!BL.add(memory(), lab)) { App.toast("Étiquette refusée : le clic est en dehors de l'image.", true); return; }
     renderBallLabels(); App.changed();
-    App.toast(ix == null ? "Noté : aucun ballon visible sur cette image." : "Étiquette du ballon enregistrée.");
+    App.toast(unsure ? "Noté : incertain (cette image ne compte ni pour ni contre)." : ix == null ? "Noté : aucun ballon visible sur cette image." : "Étiquette du ballon enregistrée.");
     if (bs && bs.list[bs.i] != null && Math.abs(bs.list[bs.i] - t) < 0.5) bsMove(1);
   }
   /* ---------- session d'étiquetage : des images une à une, le ballon proposé par le programme, la réponse est la tienne ---------- */
   let bs = null;                 // { list: [t…], i, n } ; null = pas de session
   const BS_MAX = 150;
+  /* Image de contrôle (session complète seulement) : environ 1 image sur 15, tirée de façon fixe, sans proposition, pour mesurer si les propositions guident la réponse. */
+  const bsBlind = (t) => !!(bs && bs.all) && (Math.imul(Math.round(t * 1000), 2654435761) >>> 0) % 10 === 0;
   function bsBox(show) { const b = $("ai-bs-box"); if (b) b.hidden = !show; }
-  function startBallSession() {
+  function startBallSession(all) {
     if (!App.isVideoReady() || !frames.length) { App.toast("Chargez la vidéo et lancez d'abord l'analyse : les images à étiqueter viennent de l'analyse.", true); return; }
     const done = BL.list(memory()), step = Math.max(1, Math.floor(frames.length / BS_MAX)), list = [];
-    for (let k = 0; k < frames.length && list.length < BS_MAX; k += step) { const t = frames[k].t; if (!done.some((l) => Math.abs(l.t - t) < BL.T_SAME)) list.push(t); }
+    if (all) {      // session complète : toutes les images de la plage analysée (grille de l'analyse), pour mesurer sur un match entier
+      const st = state.project.ai.settings || {}, tEnd = Math.min(st.t1 != null ? st.t1 : video.duration, video.duration - 0.05);
+      P.sampleTimes(st.t0 || 0, tEnd, 3).forEach((t) => { if (!done.some((l) => Math.abs(l.t - t) < BL.T_SAME)) list.push(t); });
+    } else for (let k = 0; k < frames.length && list.length < BS_MAX; k += step) { const t = frames[k].t; if (!done.some((l) => Math.abs(l.t - t) < BL.T_SAME)) list.push(t); }
     if (!list.length) { App.toast("Toutes les images proposées sont déjà étiquetées."); return; }
-    bs = { list, i: 0 }; bsBox(true); bsShow();
+    bs = { list, i: 0, all: !!all }; bsBox(true); bsShow();
     try { $("ai-bs-box").scrollIntoView({ block: "nearest" }); } catch (_e) { /* défilement indisponible */ }
   }
   function bsEnd(msg) { bs = null; qHighlight = null; bsBox(false); setZoom({ k: 1, tx: 0, ty: 0 }); if (msg) App.toast(msg); }
@@ -1014,29 +1058,31 @@
   function bsShow() {
     const t = bs.list[bs.i], f = P.frameNear(frames, t, 0.3), H = projectionAt(t);
     let pt = null;
-    if (f && f.ball && H) {
+    if (f && f.ball && H && !bsBlind(t)) {
       try { const q = HG.apply(HG.invert(H), f.ball.x, f.ball.y); if (isFinite(q[0]) && isFinite(q[1]) && q[0] >= 0 && q[1] >= 0 && q[0] <= video.videoWidth && q[1] <= video.videoHeight) pt = { u: q[0], v: q[1] }; } catch (_e) { pt = null; }
     }
     bs.pt = pt; bs.H = H;
     video.pause();
     qHighlight = { t, ballPt: pt, label: "Ballon proposé" };
-    $("ai-bs-text").textContent = "Image " + (bs.i + 1) + " sur " + bs.list.length + " (" + App.fmt(t) + ") — " + (pt ? "le programme propose le ballon dans le cercle orange. Est-ce bien le ballon ?" : "le programme ne propose aucun ballon. Vois-tu le ballon ?") + "  [Entrée = oui, N = aucun ballon, S = passer]";
+    $("ai-bs-text").textContent = "Image " + (bs.i + 1) + " sur " + bs.list.length + " (" + App.fmt(t) + ") — " + (bsBlind(t) ? "image de contrôle : le programme ne propose rien. Vois-tu le ballon (au moins la moitié visible) ? " : pt ? "le programme propose le ballon dans le cercle orange. Est-ce bien le ballon ?" : "le programme ne propose aucun ballon. Vois-tu le ballon ?") + "  [Entrée = oui, N = aucun ballon visible, ? = incertain, S = passer]";
     $("ai-bs-ok").disabled = !pt;
     App.seek(t);
     if (pt) zoomOnPoint(pt.u, pt.v, 5); else setZoom({ k: 1, tx: 0, ty: 0 });      // agrandissement automatique autour du ballon proposé
     prefetchContours(t);
     if (bs.list[bs.i + 1] != null) prefetchContours(bs.list[bs.i + 1]);            // l'image suivante est préparée pendant que tu réponds
   }
-  function bsOk() { if (bs && bs.pt) saveBallLabel(bs.list[bs.i], bs.pt.u, bs.pt.v, bs.H); }
+  function bsOk() { if (bs && bs.pt) saveBallLabel(bs.list[bs.i], bs.pt.u, bs.pt.v, bs.H, "propose"); }
+  function bsUnsure() { if (bs) saveBallLabel(bs.list[bs.i], undefined, undefined, null, undefined, true); }
   function bsNone() { if (bs) saveBallLabel(bs.list[bs.i], null, null, null); }
   function renderBallLabels() {
     const c = state.project.ai ? BL.counts(memory()) : { total: 0, positives: 0, negatives: 0 }, el = $("ai-bl-count");
-    if (el) el.textContent = c.total ? c.positives + " avec ballon, " + c.negatives + " sans ballon" : "aucune étiquette";
+    const un = state.project.ai ? BL.unsureCount(memory()) : 0;
+    if (el) el.textContent = c.total || un ? c.positives + " avec ballon, " + c.negatives + " sans ballon" + (un ? ", " + un + " incertain(s)" : "") : "aucune étiquette";
     const b = $("ai-bl-export"); if (b) b.disabled = !c.total;
   }
   /* Exporte les images étiquetées (JPEG + fichier YOLO) dans un dossier choisi : rien ne part sur Internet. */
   async function exportBallLabels() {
-    const labs = BL.list(memory()).slice();
+    const labs = BL.list(memory()).filter(BL.exportable);      // les « incertain » ne servent pas à l'entraînement
     if (!labs.length || !App.isVideoReady()) { App.toast("Chargez la vidéo et étiquetez au moins une image.", true); return; }
     const cv = document.createElement("canvas"), items = [], wasPaused = video.paused, t0 = video.currentTime;
     cv.width = video.videoWidth; cv.height = video.videoHeight;
@@ -1137,10 +1183,10 @@
     const a = state.project.ai;
     if (!a || !frames.length) return;
     const s = a.settings || {};
-    const res = applyMemory(M.analyze(frames, { L: L(), W: W(), dirAt, lost: a.lost || [], span: [s.t0 || frames[0].t, s.t1 || frames[frames.length - 1].t], bench: benchSetting(), benchSeen: a.benchSeen || null, subAnswers: subAnswers() }));
+    const res = applyMemory(analyzeMatch(frames, { L: L(), W: W(), dirAt, lost: a.lost || [], span: [s.t0 || frames[0].t, s.t1 || frames[frames.length - 1].t], bench: benchSetting(), benchSeen: a.benchSeen || null, subAnswers: subAnswers() }));
     a.stats = Object.assign({}, res.stats); renderStats();
     a.suggestedEvents = res.events.filter((e) => !state.project.events.some((x) => x.type === e.type && Math.abs(x.t - e.t) < 2)).map((e, i) => Object.assign({ sid: "s" + Date.now().toString(36) + i }, e));
-    a.suggested = a.suggestedEvents.length; a.uncertain = res.uncertain; a.context = res.context;
+    a.suggested = a.suggestedEvents.length; a.uncertain = res.uncertain; a.context = res.context; a.couverture = res.couverture || null;
     updateQuality(res); renderQuality();
     renderSuggestions(); App.changed();
   }
@@ -1192,7 +1238,7 @@
   }
   /* p : réglages de l'analyse { fps, tiles, camera } ; par défaut ceux affichés. */
   function estimate(range, withFactor, p) {
-    p = p || { fps: Number($("ai-fps").value), tiles: Number($("ai-tiles").value), camera: $("ai-camera").value };
+    p = p || (isV2() ? { fps: 3, tiles: 3, camera: $("ai-camera").value } : { fps: Number($("ai-fps").value), tiles: Number($("ai-tiles").value), camera: $("ai-camera").value });
     return P.estimateDuration({ t0: range[0], t1: range[1], fps: p.fps, tiles: p.tiles, camera: p.camera,
       calibrations: ai().calibrations, kind: engineKind, factor: withFactor ? estFactor() : 1 });
   }
@@ -1201,11 +1247,13 @@
     if (plan.images < 20 || !(plan.seconds > 0)) return;   // trop court pour être représentatif
     try { localStorage.setItem(factorKey(), String(P.learnFactor(estFactor(), plan.seconds, realSeconds))); } catch (_e) { /* stockage indisponible */ }
   }
+  const CONT_FACTOR = 2.7;
   function updateEstimate() {
     const r = readRange(), e = $("ai-est");
     if (!r) { e.textContent = ""; return; }
-    const est = estimate(r, true);
-    e.textContent = "Durée estimée : environ " + fmtEta(est.seconds) + " (" + est.images + " images, calcul sur " + (engineKind === "dml" ? "la carte graphique" : "le processeur") + "). Pour un match entier, analysez d'abord un extrait ou choisissez « Rapide ».";
+    const est = estimate(r, true), cont = isV2() && $("ai-v2-cont").checked;
+    if (cont) est.seconds *= CONT_FACTOR;      // mesuré : 534 s contre 199 s sur la même vidéo (voir la PR de l'analyse continue)
+    e.textContent = (isV2() ? "Analyse v2 (bêta). " : "") + "Durée estimée : environ " + fmtEta(est.seconds) + " (" + est.images + " images, calcul sur " + (engineKind === "dml" ? "la carte graphique" : "le processeur") + "). Pour un match entier, analysez d'abord un extrait ou choisissez « Rapide ».";
   }
 
   function fmtEta(s) { s = Math.max(0, Math.round(s)); return Math.floor(s / 60) + " min " + String(s % 60).padStart(2, "0") + " s"; }
@@ -1221,15 +1269,16 @@
     const range = readRange();
     if (!range) { msg.textContent = "Plage de temps invalide."; return false; }
     if (frames.length && !(opts && opts.noConfirm) && !confirm("Une analyse existe déjà : la remplacer ?")) return false;
-    const fps = Number($("ai-fps").value), tiles = Number($("ai-tiles").value);
+    const v2 = isV2(), fps = v2 ? 3 : Number($("ai-fps").value), tiles = v2 ? 3 : Number($("ai-tiles").value);      // v2 : 3 images/s, zoom automatique
     running = true; abort = new AbortController(); live = null;
     const startedAt = Date.now();
     $("ai-run").disabled = true; $("ai-device").disabled = true; $("ai-cancel").hidden = false; $("ai-progress").hidden = false; $("ai-bar").style.width = "0%";
     msg.textContent = "Chargement du modèle de détection…";
     try {
       const camera = $("ai-camera").value;
-      const result = await P.analyseVideo({
-        url: App.getVideoUrl(), t0: range[0], t1: range[1], fps, tiles, camera, tol: tol(), L: L(), W: W(), calibrations: a.calibrations, refs: r, floorMarks: floorMarks(), benchZones: a.benchZones || [], benchFollow: memory().benchFollow !== false, dirAt, signal: abort.signal, api,
+      const continuous = !!(opts && opts.continuous) || (v2 && $("ai-v2-cont").checked);        // analyse continue : chaque image de la vidéo (voir pipeline.js)
+      const result = await (continuous ? P.analyseVideoContinuous : P.analyseVideo)({
+        url: App.getVideoUrl(), t0: range[0], t1: range[1], fps, tiles, camera, tol: tol(), L: L(), W: W(), calibrations: a.calibrations, refs: r, floorMarks: floorMarks(), benchZones: a.benchZones || [], benchFollow: memory().benchFollow !== false, dirAt, signal: abort.signal, api, ballMargin: (opts && opts.extra && opts.extra.ballMargin) || (v2 ? 6 : undefined), fullRes: !!(opts && opts.extra && opts.extra.fullRes) || v2,
         onProgress: (p) => {
           $("ai-bar").style.width = Math.round((p.done / p.total) * 100) + "%";
           msg.textContent = "Image " + p.done + " / " + p.total + " — reste environ " + fmtEta(p.eta) + (p.lost ? " (caméra perdue sur cette image)" : "");
@@ -1244,22 +1293,23 @@
       qGroup = null; qThumbs.clear();                    // les numéros de pistes d'une nouvelle analyse n'ont rien à voir avec les anciens
       D.applyAnswers(frames, memory().answers);
       a.camera = camera; a.lost = result.lost; a.notes = result.notes; a.recalage = result.recalage || [];
+      a.trace = result.trace ? P.compactFrames(result.trace) : null; a.continuous = result.continuous || null;        // trajectoires continues (~10 images/s) et preuve de la lecture (images dupliquées / sautées)
       a.frames = P.compactFrames(frames);
       a.benchSeen = result.bench || null;
-      const res = applyMemory(M.analyze(frames, { L: L(), W: W(), dirAt, lost: result.lost, span: range, bench: benchSetting(), benchSeen: a.benchSeen, subAnswers: subAnswers() }));
+      const res = applyMemory(analyzeMatch(frames, { L: L(), W: W(), dirAt, lost: result.lost, span: range, bench: benchSetting(), benchSeen: a.benchSeen, subAnswers: subAnswers() }));
       a.stats = Object.assign({}, res.stats);
       a.suggestedEvents = res.events.map((e, i) => Object.assign({ sid: "s" + Date.now().toString(36) + i }, e));
       a.suggested = a.suggestedEvents.length;
-      a.uncertain = res.uncertain;
+      a.uncertain = res.uncertain; a.couverture = res.couverture || null;
       a.context = res.context;
-      a.settings = { fps, tiles, t0: range[0], t1: range[1], tol: tol(), floorMarks: floorMarks(), bench: benchSetting() };
+      a.settings = { fps: continuous ? 3.33 : fps, tiles, t0: range[0], t1: range[1], tol: tol(), floorMarks: floorMarks(), bench: benchSetting(), continuous, v2 };
       const lostTxt = result.lost.length ? " Caméra perdue : " + result.lost.map((l) => App.fmt(l[0]) + "–" + App.fmt(l[1])).join(", ") + "." : "";
       updateQuality(res);
       if (out.length && Q && Q.unusable(a.quality)) {
         // jamais « 0 erreur » en gros quand presque rien n'a été analysé : on dit que l'analyse est inutilisable
         msg.textContent = "⛔ Analyse inutilisable : seulement " + Math.round(res.context.reliable.ratio * 100) + " % du temps a pu être analysé de façon fiable. Aucune conclusion sur les erreurs n'est possible (« 0 erreur » ne veut pas dire « aucune erreur »)." + lostTxt + recalageHint(a);
       } else msg.textContent = (out.length ? "Analyse terminée : " + out.length + " images, " + a.suggestedEvents.length + " erreur(s) suggérée(s)" + (res.uncertain.length ? ", " + res.uncertain.length + " non signalée(s) (contexte incertain)" : "") + ". Temps de jeu analysé de façon fiable : " + Math.round(res.context.reliable.ratio * 100) + " %." : "Analyse terminée, mais aucun joueur n'a été retenu : vérifiez le calibrage et les tenues.") + (result.notes.length ? " " + result.notes.join(" ") : "") + lostTxt;
-      if (out.length) learnDuration(range, { fps, tiles, camera }, (Date.now() - startedAt) / 1000);
+      if (out.length && !continuous) learnDuration(range, { fps, tiles, camera }, (Date.now() - startedAt) / 1000);
       renderStats(); renderSuggestions(); refreshLive(); updateEstimate(); App.changed(true);
       okRun = out.length > 0;
     } catch (e) {
@@ -1318,6 +1368,7 @@
     $("ai-fps").value = String((d.settings && d.settings.fps) || 3); $("ai-tiles").value = String((d.settings && d.settings.tiles) || 1);
     $("ai-camera").value = d.camera || "mobile"; $("ai-tol").value = String((d.settings && d.settings.tol) || 42); $("ai-tol-v").textContent = "(" + $("ai-tol").value + ")";
     pip = null; preview = null; lastTest = null; renderPipette(); $("ai-test-msg").textContent = "";
+    $("ai-v2").checked = !!d.v2; $("ai-v2-cont").checked = !!(d.settings && d.settings.continuous && d.v2); $("ai-v2-box").hidden = !d.v2;
     $("ai-marks").checked = !(d.settings && d.settings.floorMarks === false);
     $("ai-bench").value = (d.settings && ["left", "right"].includes(d.settings.bench)) ? d.settings.bench : "auto";
     benchMark = null; renderBenchZones();
@@ -1344,7 +1395,17 @@
     $("ai-bench-mark").addEventListener("click", startBenchMark);
     $("ai-bl-export").addEventListener("click", exportBallLabels);
     bindZoom();
-    $("ai-bs-start").addEventListener("click", startBallSession);
+    $("ai-v2").addEventListener("change", () => {
+      const a = ai(); a.v2 = $("ai-v2").checked; $("ai-v2-box").hidden = !a.v2;
+      if (!a.v2) a.couverture = null;
+      updateEstimate();
+      if (frames.length) reanalyzeSuggestions(); else renderSuggestions();
+      App.changed();
+    });
+    $("ai-v2-cont").addEventListener("change", () => { updateEstimate(); });
+    $("ai-bs-start").addEventListener("click", () => startBallSession(false));
+    if ($("ai-bs-start-all")) $("ai-bs-start-all").addEventListener("click", () => startBallSession(true));
+    $("ai-bs-unsure").addEventListener("click", bsUnsure);
     $("ai-bs-ok").addEventListener("click", bsOk); $("ai-bs-none").addEventListener("click", bsNone);
     $("ai-bs-skip").addEventListener("click", () => bsMove(1)); $("ai-bs-prev").addEventListener("click", () => bsMove(-1));
     $("ai-bs-stop").addEventListener("click", () => bsEnd());
@@ -1355,6 +1416,7 @@
       if (tg === "INPUT" || tg === "TEXTAREA" || tg === "SELECT" || (e.target && e.target.isContentEditable)) return;
       if (e.key === "Enter") { e.preventDefault(); bsOk(); }
       else if (e.key === "n" || e.key === "N") { e.preventDefault(); bsNone(); }
+      else if (e.key === "?") { e.preventDefault(); bsUnsure(); }
       else if (e.key === "s" || e.key === "S") { e.preventDefault(); bsMove(1); }
     });
     $("ai-bench-clear").addEventListener("click", () => { const a = ai(); a.benchZones = []; renderBenchZones(); drawOverlay(); App.changed(); });
@@ -1472,14 +1534,14 @@
   }
 
   const FSAI = window.FSAI = {
-    hooks: {}, segmentImpl: null,
+    hooks: {}, segmentImpl: null, reanalyze: () => reanalyzeSuggestions(),
     ai, memory, refs, kitWarnings, quality: () => (state.project.ai ? state.project.ai.quality : null), grabSam, renderKits, renderStats, renderCalibs, renderPoints, validateCalibration, runAnalysis, updateEstimate,
     addLayer: (fn) => { layers.push(fn); }, setPointer: (p) => { pointer = p; updateOverlayMode(); }, redraw: refreshLive,
     beginPlacing: (id) => { if (!App.isVideoReady()) return false; video.pause(); pickRole = null; pip = null; renderPipette(); placing = id; $("ai-landmark").value = id; updateOverlayMode(); return true; },
     cancelPlacing: () => { placing = null; updateOverlayMode(); },
     getPoints: () => pts.slice(), clearPoints: () => { pts = []; placing = null; renderPoints(); updateOverlayMode(); },
     removePoint: (id) => { pts = pts.filter((q) => q.id !== id); renderPoints(); refreshLive(); },
-    clearAnalysis: () => { frames = []; const a = ai(); a.frames = null; a.stats = null; a.suggestedEvents = []; a.uncertain = []; a.context = null; a.suggested = 0; renderStats(); renderSuggestions(); refreshLive(); },
+    clearAnalysis: () => { frames = []; const a = ai(); a.frames = null; a.stats = null; a.suggestedEvents = []; a.uncertain = []; a.context = null; a.couverture = null; a.suggested = 0; renderStats(); renderSuggestions(); refreshLive(); },
     setRange: (t0, t1) => { $("ai-t0").value = App.fmt(t0); $("ai-t1").value = App.fmt(t1); updateEstimate(); },
     setCamera: (v) => { $("ai-camera").value = v; $("ai-camera").dispatchEvent(new Event("change")); },
     setDirection: (v) => { $("ai-dir").value = String(v); $("ai-dir").dispatchEvent(new Event("change")); },

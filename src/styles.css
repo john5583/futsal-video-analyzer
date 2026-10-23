@@ -301,3 +301,10 @@ fieldset.plan-q label.plan-opt{display:flex;flex-direction:row;gap:8px;align-ite
 .lab-teams{display:flex;flex-direction:column;gap:3px}.lab-teams button{text-align:left}.lab-teams button.active{background:var(--panel2);border-color:var(--blue);font-weight:600}
 .lab-sel{display:flex;flex-direction:column;gap:6px;padding:8px;border:1px solid var(--line);border-radius:8px}
 .lab-person{display:flex;justify-content:space-between;gap:6px;align-items:center}
+
+.ai-v2{margin:8px 0;padding:8px;border:1px dashed var(--line);border-radius:8px}
+.ai-v2 p{margin:6px 0}
+.v2rule{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:4px}
+.v2rule button{padding:2px 8px;font-size:12px}
+.cov-row{display:grid;grid-template-columns:42px 1fr auto;gap:6px;padding:4px 0;border-bottom:1px solid var(--line);align-items:start}
+.cov-ok{color:#86efac}.cov-no{color:#fcd34d}.cov-rej{color:#fca5a5}

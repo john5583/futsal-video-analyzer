@@ -14,7 +14,7 @@
      opts.appearance (faux par défaut) : tenues proches, les détections portent une signature d'apparence (d.sig, voir signature.js) ;
      un petit surcoût borné écarte une piste d'une personne qui ne lui ressemble pas. Sans signature fiable : aucun effet. */
   function Tracker(opts) {
-    this.opts = Object.assign({ maxSpeed: MAX_SPEED, maxMissed: MAX_MISSED, soft: 0, appearance: false, sig0: SIG0, sigv: SIGV, chi: CHI }, opts || {});
+    this.opts = Object.assign({ maxSpeed: MAX_SPEED, maxMissed: MAX_MISSED, soft: 0, appearance: false, sig0: SIG0, sigv: SIGV, chi: CHI, sa: KF_SA, sm: KF_SM, v0: KF_V0, decay: KF_DECAY, kfChi: KF_CHI }, opts || {});
     this.tracks = [];
     this.nextId = 1;
   }
@@ -93,6 +93,7 @@
      coût de vraisemblance, affectation globale ; activé par l'analyse quand les tenues sont proches). Essayé et écarté : refuser les paires ambiguës (sur matchs fabriqués, ça multiplie
      par 3 les pistes en trop sans réduire les échanges de joueurs). */
   Tracker.prototype.update = function (t, dets) {
+    if (this.opts.method === "kalman") return updateKalman(this, t, dets);
     const live = this.tracks.filter((tr) => t - tr.lastT <= this.opts.maxMissed);
     const soft = this.opts.soft > 0 ? this.opts.soft : 0;
     const greedy = this.opts.method !== "optimal", o = this.opts;
@@ -157,6 +158,72 @@
     this.tracks = this.tracks.filter((tr) => t - tr.lastT <= this.opts.maxMissed || tr.n >= 3);
     return dets;
   };
+
+  /* ---- Suivi à filtre de Kalman (analyse continue) ----
+     Chaque piste garde, pour x et pour y, une position, une vitesse et leur incertitude. La prévision tient compte du temps réellement écoulé (dt) :
+     le même réglage vaut à 3 images/s comme à 30 images/s (le suivi « position-vitesse » historique, réglé pour 3 images/s, se trompe quand les
+     images arrivent vite : le bruit de position est alors divisé par un très petit dt). Association globale (hongroise) sur la vraisemblance. */
+  const KF_SA = 3.0;          // m/s² : accélération aléatoire d'un joueur (écart-type)
+  const KF_SM = 0.5;          // m : bruit de position d'une détection (pieds projetés sur le terrain)
+  const KF_V0 = 3.0;          // m/s : incertitude sur la vitesse d'une piste qui naît
+  const KF_DECAY = 3.0;       // s : la vitesse s'éteint doucement quand la piste n'est plus vue
+  const KF_CHI = 5.0;         // coût de laisser une piste sans détection / de créer une piste
+  function kfPredict(a, dt, o) {
+    const q = o.sa * o.sa, f = Math.exp(-dt / o.decay);
+    return {
+      p: a.p + a.v * dt, v: a.v * f,
+      P00: a.P00 + 2 * dt * a.P01 + dt * dt * a.P11 + (q * Math.pow(dt, 4)) / 4,
+      P01: a.P01 + dt * a.P11 + (q * Math.pow(dt, 3)) / 2,
+      P11: a.P11 + q * dt * dt
+    };
+  }
+  function kfUpdate(a, z, S) {
+    const k0 = a.P00 / S, k1 = a.P01 / S, y = z - a.p;
+    return { p: a.p + k0 * y, v: a.v + k1 * y, P00: (1 - k0) * a.P00, P01: (1 - k0) * a.P01, P11: a.P11 - k1 * a.P01 };
+  }
+  function updateKalman(self, t, dets) {
+    const o = self.opts, soft = o.soft > 0 ? o.soft : 0, R = o.sm * o.sm;
+    const live = self.tracks.filter((tr) => t - tr.lastT <= o.maxMissed);
+    const pred = live.map((tr) => { const dt = Math.max(0.01, t - tr.lastT); return { x: kfPredict(tr.kx, dt, o), y: kfPredict(tr.ky, dt, o), dt }; });
+    const cost = live.map(() => new Array(dets.length).fill(Infinity));
+    live.forEach((tr, i) => {
+      const pr = pred[i], Sv = pr.x.P00 + R;
+      dets.forEach((d, j) => {
+        const ok = compatible(tr.team, d.team);
+        if (!ok && !soft) return;
+        const dx = d.x - pr.x.p, dy = d.y - pr.y.p;
+        if (Math.hypot(dx, dy) > o.maxSpeed * pr.dt + 1.5) return;
+        const look = o.appearance ? S.penalty(tr.sig, d.sig) : 0;
+        const pen = ((ok ? (tr.team !== d.team ? 1.5 : 0) : soft) + look) / 0.7;                // surcoûts en mètres (équipe, apparence)
+        cost[i][j] = 0.5 * ((dx * dx + dy * dy) / Sv) + 0.5 * Math.log(Sv / R) + pen;
+      });
+    });
+    const used = new Set();
+    assign(cost, live.length, dets.length, o.kfChi, o.kfChi).forEach(({ ti, di }) => {
+      used.add(di);
+      const tr = live[ti], d = dets[di], pr = pred[ti], Sv = pr.x.P00 + R;
+      tr.kx = kfUpdate(pr.x, d.x, Sv); tr.ky = kfUpdate(pr.y, d.y, Sv);
+      tr.lastT = t; tr.n += 1;
+      if (d.team !== "UNK") {
+        if (soft) Object.keys(tr.votes).forEach((k) => { tr.votes[k] *= 0.9; });
+        tr.votes[d.team] = (tr.votes[d.team] || 0) + 1;
+      }
+      tr.team = bestVote(tr.votes, tr.team);
+      if (o.appearance) tr.sig = S.blend(tr.sig, d.sig);
+      d.id = tr.id;
+    });
+    dets.forEach((d, j) => {
+      if (used.has(j)) return;
+      const ax = (p) => ({ p, v: 0, P00: R, P01: 0, P11: o.v0 * o.v0 });
+      const tr = { id: self.nextId++, team: d.team, kx: ax(d.x), ky: ax(d.y), lastT: t, n: 1, votes: {} };
+      if (d.team !== "UNK") tr.votes[d.team] = 1;
+      if (o.appearance) tr.sig = S.blend(null, d.sig);
+      self.tracks.push(tr);
+      d.id = tr.id;
+    });
+    self.tracks = self.tracks.filter((tr) => t - tr.lastT <= o.maxMissed || tr.n >= 3);
+    return dets;
+  }
 
   function bestVote(votes, fallback) {
     let best = fallback, bv = 0;

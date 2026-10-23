@@ -3,9 +3,9 @@
    A = mon équipe. Le moteur remet toujours le terrain « de mon équipe qui attaque vers x croissant ».
    Sortie : événements suggérés (à valider par le coach) et statistiques de match. */
 (function (root, factory) {
-  if (typeof module === "object" && module.exports) module.exports = factory(require("./context"));
-  else root.FutsalMatch = factory(root.FutsalContext);
-})(typeof self !== "undefined" ? self : this, function (C) {
+  if (typeof module === "object" && module.exports) module.exports = factory(require("./context"), require("../engine/regle-or"));
+  else root.FutsalMatch = factory(root.FutsalContext, root.FutsalRegleOr);
+})(typeof self !== "undefined" ? self : this, function (C, R) {
   "use strict";
 
   const POSSESSION_RADIUS = 2.2;     // m : le ballon est « au pied » du joueur le plus proche
@@ -382,7 +382,8 @@
       const h = ctx.states[i] && ctx.states[i].held;
       return !r.team && h && h.conf >= C.CONF_MIN ? Object.assign({}, r, { team: h.team, held: h }) : r;
     });
-    return { events, uncertain, subs: subsInfo.list, playStates: ctx.states.map((x) => x.play), possession: shown, context: { passages: ctx.passages, reliable: ctx.reliable, bench: bench ? { side: bench.side, source: bench.source } : null }, stats: stats(nf, shown, L, W), normalized: nf };
+    // règle d'or : chaque évènement porte son statut (déduit, preuve à l'appui) ; chaque évènement écarté, le sien (non évalué + raison)
+    return R.guardResult({ events, uncertain, subs: subsInfo.list, playStates: ctx.states.map((x) => x.play), possession: shown, context: { passages: ctx.passages, reliable: ctx.reliable, bench: bench ? { side: bench.side, source: bench.source } : null }, stats: stats(nf, shown, L, W), normalized: nf });
   }
 
   /* Raison de ne pas suggérer une erreur à l'instant t : arrêt de jeu ou ballon non visible dans la seconde qui précède. */

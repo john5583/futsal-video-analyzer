@@ -167,3 +167,67 @@ test("re-liaison : par défaut, comportement inchangé (trou de 1 s au plus)", (
   const g = framesOf([{ id: 1, t0: 0, t1: 3, x0: 10, y0: 5, vx: 2 }, { id: 2, t0: 5, t1: 8, x0: 22, y0: 5, vx: 2 }]);
   assert.equal(T.relinkTracks(g, { 1: "A", 2: "A" }, A), 0, "trou de 2 s : pas relié par défaut");
 });
+
+/* ---------- filtre de Kalman (analyse continue) ---------- */
+test("Kalman : deux joueurs qui se croisent gardent leur identité, à 3 comme à 30 images/s", () => {
+  [3, 30].forEach((fps) => {
+    const dt = 1 / fps, n = Math.round(3 * fps), tr = new T.Tracker({ method: "kalman" }), ids = [];
+    for (let i = 0; i < n; i++) {
+      const t = i * dt, d = [det(10 + 2 * t, 10), det(16 - 2 * t, 10.3)];       // A vers la droite, B vers la gauche, 2 m/s, ils se croisent à 0,3 m
+      tr.update(t, d); ids.push(d.map((q) => q.id));
+    }
+    ids.forEach((r, i) => assert.deepEqual(r, [1, 2], fps + " im/s, image " + i));
+  });
+});
+
+test("Kalman : une piste qui disparaît 2 s retrouve son joueur ; une détection impossible reste une nouvelle piste", () => {
+  const tr = new T.Tracker({ method: "kalman" });
+  const a = [det(10, 10)]; tr.update(0, a);
+  const b = [det(10.4, 10)]; tr.update(0.33, b);
+  const c = [det(12, 10)]; tr.update(2.3, c);
+  assert.equal(c[0].id, a[0].id);
+  const far = [det(35, 3)]; tr.update(2.63, far);
+  assert.notEqual(far[0].id, a[0].id);
+});
+
+test("Kalman : la méthode par défaut reste l'ancienne ; Kalman n'est actif que sur demande", () => {
+  assert.equal(new T.Tracker().opts.method === "kalman", false);
+  const steps = [[[5, 5], [20, 12]], [[5.5, 5], [20.4, 12]], [[6, 5.1], [20.9, 12.1]]];
+  assert.deepEqual(run({}, steps), run({ method: "greedy" }, steps));
+});
+
+test("Kalman : jamais deux fois la même piste sur une image, ni aux cadences extrêmes", () => {
+  [3, 10, 30].forEach((fps) => ["realiste", "tenuesProches"].forEach((scene) => {
+    const tr = new T.Tracker({ method: "kalman", soft: scene === "tenuesProches" ? 2 : 0 });
+    Syn.makeMatch({ seed: 5, scene, fps, seconds: 30 }).forEach((f) => {
+      const d = f.dets.map((x) => Object.assign({}, x)); tr.update(f.t, d);
+      const ids = d.map((x) => x.id);
+      assert.equal(new Set(ids).size, ids.length, scene + " " + fps + " im/s t=" + f.t);
+    });
+  }));
+});
+
+/* graines 101 à 110 : jamais utilisées pour choisir les réglages */
+function totalAt(scene, fps, opts) {
+  return seeds.reduce((acc, sd) => {
+    const r = Syn.evaluate(Syn.makeMatch({ seed: sd, scene, fps, seconds: 90 }), opts);
+    acc.swaps += r.swaps; acc.fragments += r.fragments; acc.impurity += r.impurity / seeds.length; return acc;
+  }, { swaps: 0, fragments: 0, impurity: 0 });
+}
+test("matchs fabriqués : Kalman fait mieux que l'ancien suivi à 30 images/s (impureté, échanges)", () => {
+  ["realiste", "tenuesProches"].forEach((scene) => {
+    const soft = scene === "tenuesProches" ? 2 : 0;
+    const old = totalAt(scene, 30, { method: "greedy", soft }), kal = totalAt(scene, 30, { method: "kalman", soft });
+    assert.ok(kal.impurity < old.impurity, scene + " : impureté " + (old.impurity * 100).toFixed(1) + " % -> " + (kal.impurity * 100).toFixed(1) + " %");
+    assert.ok(kal.swaps < old.swaps, scene + " : échanges " + old.swaps + " -> " + kal.swaps);
+  });
+});
+
+test("matchs fabriqués : Kalman jamais pire que l'ancien suivi à 3 images/s (marge de 5 %)", () => {
+  ["realiste", "tenuesProches"].forEach((scene) => {
+    const soft = scene === "tenuesProches" ? 2 : 0;
+    const old = totalAt(scene, 3, { method: "greedy", soft }), kal = totalAt(scene, 3, { method: "kalman", soft });
+    assert.ok(kal.swaps <= old.swaps * 1.05, scene + " : échanges " + old.swaps + " -> " + kal.swaps);
+    assert.ok(kal.fragments <= old.fragments * 1.1, scene + " : pistes recréées " + old.fragments + " -> " + kal.fragments);
+  });
+});

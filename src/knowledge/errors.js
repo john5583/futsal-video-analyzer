@@ -86,6 +86,14 @@
       ["Regarde le gardien", "Frappe croisée côté opposé", "Reste lucide"],
       ["finition_cadence"], []),
 
+    E("perte_inutile", "Perte de balle inutile (sans pression, partenaire libre)", "OFF", 3, true,
+      "Le ballon est perdu alors qu'aucune pression ne l'imposait et qu'un partenaire libre était à portée de passe.",
+      ["Passe ou contrôle manqué sans adversaire proche", "Un partenaire libre à 3–12 m n'a pas été servi", "Perte « gratuite » qui lance la transition adverse"],
+      ["Passe trop risquée ou précipitée", "Manque de lecture du partenaire libre", "Contrôle orienté trop loin"],
+      ["Jouer le partenaire libre quand aucune pression n'existe", "Lever la tête avant de recevoir pour repérer l'appui", "Choisir la passe la plus sûre quand l'équipe mène ou défend un résultat"],
+      ["Pas de pression : joue simple", "Regarde l'appui libre avant de recevoir"],
+      ["rondo_4v2", "relance_pression"], []),
+
     E("dribble_excessif", "Dribble excessif ou conservation trop longue", "OFF", 2, true,
       "Le porteur garde le ballon trop longtemps et perd le tempo collectif.",
       ["Plusieurs touches avant de passer", "Perte au 1c2", "Collectif en attente"],

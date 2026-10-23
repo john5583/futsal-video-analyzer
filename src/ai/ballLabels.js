@@ -2,7 +2,9 @@
    à entraîner le détecteur. Rien n'est deviné : une étiquette est soit « le ballon est ici » (centre en pixels de l'image),
    soit « aucun ballon visible » (image négative). Taille de la boîte : estimée à partir du diamètre réel d'un ballon de futsal
    (≈ 0,20 m) quand la projection du terrain est connue, sinon valeur par défaut ; l'étiquette le note (« est »).
-   Mémoire : mem.ballLabels = [{ t, u, v, w, h, est, vw, vh } | { t, none: true, vw, vh }], u et v en pixels vidéo. */
+   Troisième état, « incertain » (le coach hésite) : { t, unsure: true } ; ni positif ni négatif, jamais exporté pour l'entraînement, rapporté à part.
+   Origine facultative (src) : « propose » (proposition du programme confirmée), « clic » (le coach a désigné le ballon), « aveugle » (image de contrôle sans proposition).
+   Mémoire : mem.ballLabels = [{ t, u, v, w, h, est, vw, vh, src? } | { t, none: true, vw, vh, src? } | { t, unsure: true, vw, vh, src? }], u et v en pixels vidéo. */
 (function (root, factory) {
   if (typeof module === "object" && module.exports) module.exports = factory();
   else root.FutsalBallLabels = factory();
@@ -29,11 +31,16 @@
     } catch (_e) { return { w: fallback, h: fallback, est: true }; }
   }
 
+  const SRC = { propose: 1, clic: 1, aveugle: 1 };
   function add(mem, lab) {
     if (!lab || !isFinite(lab.t) || !(lab.vw > 0) || !(lab.vh > 0)) return null;
-    if (!lab.none && !(isFinite(lab.u) && isFinite(lab.v) && lab.u >= 0 && lab.v >= 0 && lab.u <= lab.vw && lab.v <= lab.vh)) return null;
+    if (!lab.none && !lab.unsure && !(isFinite(lab.u) && isFinite(lab.v) && lab.u >= 0 && lab.v >= 0 && lab.u <= lab.vw && lab.v <= lab.vh)) return null;
     const l = list(mem).filter((o) => Math.abs(o.t - lab.t) >= T_SAME);
-    l.push(lab.none ? { t: lab.t, none: true, vw: lab.vw, vh: lab.vh } : { t: lab.t, u: Math.round(lab.u), v: Math.round(lab.v), w: lab.w, h: lab.h, est: lab.est !== false, vw: lab.vw, vh: lab.vh });
+    const o = lab.unsure ? { t: lab.t, unsure: true, vw: lab.vw, vh: lab.vh }
+      : lab.none ? { t: lab.t, none: true, vw: lab.vw, vh: lab.vh }
+      : { t: lab.t, u: Math.round(lab.u), v: Math.round(lab.v), w: lab.w, h: lab.h, est: lab.est !== false, vw: lab.vw, vh: lab.vh };
+    if (SRC[lab.src]) o.src = lab.src;
+    l.push(o);
     mem.ballLabels = l.sort((a, b) => a.t - b.t);
     return mem.ballLabels.find((o) => Math.abs(o.t - lab.t) < 1e-9);
   }
@@ -41,14 +48,17 @@
 
   /* Ligne au format YOLO (« 0 cx cy w h » normalisés) ; fichier vide pour une image sans ballon. */
   function yoloLine(l) {
-    if (l.none) return "";
+    if (l.none || l.unsure) return "";
     const cl = (x) => Math.min(1, Math.max(0, x));
     const f = (x) => cl(x).toFixed(6);
     return "0 " + f(l.u / l.vw) + " " + f(l.v / l.vh) + " " + f(l.w / l.vw) + " " + f(l.h / l.vh) + "\n";
   }
   function counts(mem) {
-    const l = list(mem), pos = l.filter((o) => !o.none).length;
+    const l = list(mem).filter((o) => !o.unsure), pos = l.filter((o) => !o.none).length;      // « incertain » à part : ni positif ni négatif
     return { total: l.length, positives: pos, negatives: l.length - pos };
   }
-  return { add, clear, list, counts, yoloLine, ballSize, T_SAME, BALL_M };
+  const unsureCount = (mem) => list(mem).filter((o) => o.unsure).length;
+  /* Une étiquette sert à l'entraînement seulement si le coach a tranché (ballon ici, ou aucun ballon visible). */
+  const exportable = (l) => !!l && !l.unsure;
+  return { add, clear, list, counts, unsureCount, exportable, yoloLine, ballSize, T_SAME, BALL_M };
 });
