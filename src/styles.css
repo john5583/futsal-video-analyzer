@@ -304,7 +304,26 @@ fieldset.plan-q label.plan-opt{display:flex;flex-direction:row;gap:8px;align-ite
 
 .ai-v2{margin:8px 0;padding:8px;border:1px dashed var(--line);border-radius:8px}
 .ai-v2 p{margin:6px 0}
+.ex-panel{margin:10px 0;padding:8px;border:1px solid var(--line);border-radius:8px;background:#0b1220}
+.ex-panel h4{margin:0 0 4px}
+.ex-nav{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:6px 0}
+.ex-nav input{width:64px}
+.ex-cat{margin:8px 0;padding-top:6px;border-top:1px solid var(--line)}
+.ex-head{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.ex-dot{width:10px;height:10px;border-radius:50%;display:inline-block}
+.ex-btns{display:flex;flex-wrap:wrap;gap:4px;margin-left:auto}
+.ex-btns button,.ex-row button,.ex-nav button{padding:2px 8px;font-size:12px}
+.ex-chip{font-size:11px;padding:1px 8px;border-radius:99px;background:#0b1220;border:1px solid var(--line)}
+.ex-chip.assez{color:#86efac;border-color:#166534}
+.ex-chip.plus{color:#fcd34d;border-color:#92400e}
+.ex-chip.fac{color:var(--muted)}
+.ex-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:3px 0 3px 18px;font-size:12px}
+.ex-row .ex-t{font-variant-numeric:tabular-nums;min-width:68px}
+.ex-row .sw{width:14px;height:14px;border-radius:3px;display:inline-block;margin-right:2px;border:1px solid #fff4}
+.ex-ask{color:#fcd34d}
 .v2rule{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:4px}
 .v2rule button{padding:2px 8px;font-size:12px}
 .cov-row{display:grid;grid-template-columns:42px 1fr auto;gap:6px;padding:4px 0;border-bottom:1px solid var(--line);align-items:start}
 .cov-ok{color:#86efac}.cov-no{color:#fcd34d}.cov-rej{color:#fca5a5}
+.wiz-exd{margin:8px 0}
+.wiz-exd>summary{cursor:pointer;color:var(--muted);font-size:12px}

@@ -2,7 +2,7 @@
    Étapes : choix des vidéos → terrain → silhouettes (mon équipe, adversaires, gardiens, arbitre) → analyse → résultats. */
 (function () {
   "use strict";
-  const App = window.FSApp, AI = window.FSAI, K = window.FutsalKit, HG = window.FutsalHomography, CF = window.FutsalCourtFit, GL = window.FutsalGoal, QL = window.FutsalQuality;
+  const App = window.FSApp, AI = window.FSAI, K = window.FutsalKit, HG = window.FutsalHomography, CF = window.FutsalCourtFit, GL = window.FutsalGoal, QL = window.FutsalQuality, EXM = window.FutsalExemples;
   const $ = (id) => document.getElementById(id);
   const esc = App.esc, api = App.api, video = App.video;
 
@@ -20,6 +20,7 @@
     lmIdx: 0, terrainT: null, msg: "",
     catIdx: 0, det: null, hover: -1, addMode: false, drag: null, busy: "",
     progress: 0, running: false,
+    ret: null,                // retour après un exemple supplémentaire : { step: "run" } ou { step: "players", catIdx }
     internalLoad: 0,          // > 0 pendant les chargements de projet faits par l'assistant lui-même
     T: null                   // repérage automatique du terrain (voir startTerrain)
   };
@@ -59,6 +60,8 @@
     const fn = { idle: rIdle, choose: rChoose, loading: rLoading, terrain: rTerrain, players: rPlayers, run: rRun, done: rDone }[W.step] || rIdle;
     root.innerHTML = fn();
     root.className = "wiz wiz-" + W.step;
+    const host = $("wiz-ex");
+    if (host && AI.examplesPanel && !W.busy && !W.running) host.appendChild(AI.examplesPanel({ nav: true, onMore: wizMore, onChange: render }));
   }
 
   function rIdle() {
@@ -166,6 +169,8 @@
     }
     return queueHeader() + progressDots() + "<h3>2. Apprendre les tenues par les silhouettes</h3>" + chips() + body +
       (W.msg ? "<p class=\"wiz-err\">" + esc(W.msg) + "</p>" : "") +
+      (W.ret ? "<div class=\"wiz-btns\"><button data-act=\"exBack\">← Retour sans autre exemple</button></div>" : "") +
+      (EXM ? "<div id=\"wiz-ex\"></div>" : "") +
       "<div class=\"wiz-btns\"><button class=\"ghost\" data-act=\"cancel\">Annuler l'assistant</button></div>";
   }
 
@@ -176,7 +181,9 @@
     const warn = AI.kitWarnings ? AI.kitWarnings(r) : [];
     const pre = QL ? QL.preflight(AI.ai(), App.state.project, { refs: r, durationSec: (Number(String($("ai-t1").value).split(":")[0]) * 60 + Number(String($("ai-t1").value).split(":")[1] || 0)) - (Number(String($("ai-t0").value).split(":")[0]) * 60 + Number(String($("ai-t0").value).split(":")[1] || 0)) }) : [];
     const checklist = pre.length ? "<ul class=\"wiz-pre\">" + pre.map((x) => "<li class=\"" + (x.ok ? "ok" : "ko") + "\">" + (x.ok ? "✔ " : "⚠ ") + esc(x.text) + (x.ok ? "" : " <span class=\"muted\">— " + esc(x.fix) + "</span>") + "</li>").join("") + "</ul>" : "";
+    const manque = EXM ? EXM.etats(AI.ai().kits).filter((e) => e.etat === "insuffisant").length : 0;
     return queueHeader() + progressDots() + "<h3>3. Lancer l'analyse</h3>" + chips() + checklist +
+      (EXM ? "<details class=\"wiz-exd\"" + (manque ? " open" : "") + "><summary>Mes exemples d'identification" + (manque ? " — " + manque + " catégorie(s) avec « il en faut plus » (l'analyse peut quand même partir)" : "") + "</summary><div id=\"wiz-ex\"></div></details>" : "") +
       warn.map((m) => "<p class=\"wiz-hint kit-warn\">⚠ " + esc(m) + "</p>").join("") +
       "<div class=\"wiz-grid\"><label>De (mm:ss)<input data-set=\"t0\" type=\"text\" value=\"" + esc(t0) + "\" pattern=\"[0-9]{1,3}:[0-5][0-9]\"></label><label>À (mm:ss)<input data-set=\"t1\" type=\"text\" value=\"" + esc(t1) + "\" pattern=\"[0-9]{1,3}:[0-5][0-9]\"></label>" +
       "<label>Détail (ballon, joueurs lointains)<select data-set=\"tiles\"><option value=\"1\"" + ($("ai-tiles").value === "1" ? " selected" : "") + ">Standard</option><option value=\"2\"" + ($("ai-tiles").value === "2" ? " selected" : "") + ">Renforcé (2× plus lent)</option><option value=\"3\"" + ($("ai-tiles").value === "3" ? " selected" : "") + ">Zoom automatique (le plus précis)</option></select></label><label>Précision<select data-set=\"fps\"><option value=\"2\"" + (fpsv === "2" ? " selected" : "") + ">Rapide</option><option value=\"3\"" + (fpsv === "3" ? " selected" : "") + ">Équilibrée</option><option value=\"5\"" + (fpsv === "5" ? " selected" : "") + ">Fine (plus lent)</option></select></label></div>" +
@@ -202,6 +209,7 @@
       "<button data-act=\"seeTop\">🧭 Vue de dessus</button>" +
       "<button data-act=\"seeReport\">📋 Rapport &amp; solutions</button>" +
       "<button data-act=\"seeAnim\">🎬 Corrections animées</button>" +
+      "<button data-act=\"moreExamples\">＋ Donner d'autres exemples d'identification (utilisés à la prochaine analyse)</button>" +
       "<button data-act=\"fixTeams\">🎨 Corriger les équipes (recommencer les silhouettes)</button>" +
       "<button data-act=\"saveAs\">💾 Enregistrer le projet…</button></div>" +
       (more ? "<div class=\"wiz-btns\"><button class=\"primary big\" data-act=\"next\">Vidéo suivante ▶ (" + (W.idx + 2) + " / " + W.queue.length + ")</button></div>" : "") +
@@ -265,7 +273,9 @@
       else { W.msg = $("ai-calib-msg").textContent; render(); }
     },
     async detect() { await detectPlayers(); },
-    async redetect() { W.det = null; W.hover = -1; W.addMode = false; AI.setPointer(null); render(); AI.redraw(); },
+    async redetect() { W.det = null; W.hover = -1; W.addMode = false; AI.setPointer(pointerHandlers); render(); AI.redraw(); },
+    exBack() { retour(); },
+    moreExamples() { W.ret = null; enterRun(); },
     addMode() { W.addMode = !W.addMode; render(); },
     validateCat() { validateCategory(); },
     skipCat() { advanceCategory(); },
@@ -587,14 +597,14 @@
       AI.setDirection(a.dir); AI.setCamera(a.camera); AI.renderKits();
     }
     AI.setRange(0, video.duration || 0);
-    W.catIdx = 0; W.det = null; W.hover = -1; W.addMode = false; W.lmIdx = 0; W.terrainT = null; W.progress = 0; W.running = false;
+    W.catIdx = 0; W.det = null; W.hover = -1; W.addMode = false; W.lmIdx = 0; W.terrainT = null; W.progress = 0; W.running = false; W.ret = null;
     AI.clearPoints();
     video.pause(); video.currentTime = 0;
     await startTerrain();
   }
 
   function enterPlayers() {
-    W.catIdx = 0; W.det = null; W.hover = -1; W.addMode = false; AI.setPointer(pointerHandlers);
+    W.ret = null; W.catIdx = 0; W.det = null; W.hover = -1; W.addMode = false; AI.setPointer(pointerHandlers);
     // première catégorie déjà connue (cas d'une reprise) : on passe aux suivantes
     const r = AI.refs();
     while (W.catIdx < CATS.length && r[CATS[W.catIdx].key]) W.catIdx++;
@@ -642,7 +652,7 @@
     const c = cur(), d = W.det; if (!d) return;
     const sel = d.players.filter((p) => p.cat === c.key && !p.locked);
     const feats = [];
-    sel.forEach((p) => { const f = K.fromMask(d.frame.img, p.box, p.mask); if (f) feats.push(f); });
+    sel.forEach((p) => { const f = K.fromMask(d.frame.img, p.box, p.mask); if (f) feats.push(EXM ? EXM.marquer(f, { t: typeof d.frame.t === "number" ? d.frame.t : video.currentTime, v: App.state.project.videoName || null, src: "silhouette" }) : f); });
     if (!feats.length) { W.msg = "Silhouette trop petite pour lire la tenue : choisissez une image où le joueur est plus grand (bouton « Autre image »)."; render(); return; }
     const a = AI.ai();
     a.kits[c.key] = (a.kits[c.key] || []).concat(feats);
@@ -651,7 +661,21 @@
     advanceCategory();
   }
 
+  /* « ＋ Autre exemple » : on redonne un exemple pour une catégorie, puis on revient où on en était (jamais bloquant). */
+  function wizMore(key) {
+    const i = CATS.findIndex((c) => c.key === key);
+    if (i < 0) return;
+    if (!W.ret) W.ret = W.step === "players" ? { step: "players", catIdx: W.catIdx } : { step: "run" };
+    W.catIdx = i; W.det = null; W.hover = -1; W.addMode = false; AI.setPointer(pointerHandlers);
+    setStep("players");
+  }
+  function retour() {
+    const r = W.ret; W.ret = null; W.det = null; W.hover = -1; W.addMode = false; W.msg = "";
+    if (r && r.step === "players") { W.catIdx = r.catIdx; AI.setPointer(pointerHandlers); render(); AI.redraw(); return; }
+    enterRun();
+  }
   function advanceCategory() {
+    if (W.ret) { retour(); return; }
     W.catIdx++; W.msg = ""; W.addMode = false;
     const r = AI.refs();
     while (W.catIdx < CATS.length && r[CATS[W.catIdx].key]) W.catIdx++;
@@ -792,6 +816,7 @@
     if (bar) bar.style.width = Math.round(f * 100) + "%";
     if (m) m.textContent = msg;
   };
+  AI.hooks.examplesChanged = () => { if (W.step === "players" || W.step === "run") render(); };
   AI.hooks.pointPlaced = (id) => {
     if (W.step !== "terrain") return;
     if (W.terrainT == null) W.terrainT = video.currentTime;
@@ -840,7 +865,7 @@
     if (W.T) W.T.cancel = true;
     if (W.running) { const c = $("ai-cancel"); if (c) c.click(); }
     AI.cancelPlacing(); AI.clearPoints(); AI.setPointer(null);
-    W.T = null; W.det = null; W.queue = []; W.idx = 0; W.running = false; W.same = false; W.shared = null; W.results = []; W.acceptedCount = 0; W.msg = ""; W.busy = ""; W.addMode = false; W.hover = -1;
+    W.T = null; W.det = null; W.queue = []; W.idx = 0; W.running = false; W.same = false; W.shared = null; W.results = []; W.acceptedCount = 0; W.msg = ""; W.busy = ""; W.addMode = false; W.hover = -1; W.ret = null;
     const pg = $("ai-progress"); if (pg) pg.hidden = true; const bar = $("ai-bar"); if (bar) bar.style.width = "0%";
     W.step = "idle"; render(); AI.redraw();
   }

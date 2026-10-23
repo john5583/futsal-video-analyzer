@@ -106,3 +106,10 @@ test("ancien projet sans plage enregistrée : la part perdue se calcule comme av
   const r = Q.evaluate({ res, ai: ai({ lost: [[10, 30]] }), project: {}, L });
   assert.ok(Math.abs(r.measures.lost - 0.2) < 1e-9);
 });
+
+test("exemples d'identification en nombre insuffisant : constat « moins fiable », jamais bloquant", () => {
+  const Q = require("../src/engine/quality");
+  const r = Q.evaluate({ res: { teams: {} }, ai: { frames: [] }, project: {}, L: 40, exemples: [{ cat: "REF", nom: "Arbitre", texte: "il en faut plus : au moins 2 exemples (il y en a 1)" }] });
+  const it = r.items.find((i) => i.id === "exemples-REF");
+  assert.ok(it); assert.equal(it.level, "info"); assert.match(it.title, /Arbitre/); assert.equal(Q.unusable(r), false);
+});
