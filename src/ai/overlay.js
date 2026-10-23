@@ -429,5 +429,11 @@
     return out.filter((c) => c.length >= 2);
   }
 
-  return { actionWindow, clipLine, visibleZone, shapeFix, chooseCorner, frameProjection, Projector, stateAt, buildOverlay, footOf, MIN_PLAYERS, MAX_ERR, MAX_GAP, BALL_HOLD_MAX, BALL_LINK_MAX };
+  /* Passage où la caméra est perdue à l'instant t (lost : [[de, a]]) : { de, a } ou null. */
+  function lostAt(lost, t) {
+    const r = (Array.isArray(lost) ? lost : []).find((x) => Array.isArray(x) && x.length >= 2 && t >= x[0] - 0.05 && t <= x[1] + 0.05);
+    return r ? { de: r[0], a: r[1] } : null;
+  }
+
+  return { actionWindow, clipLine, lostAt, visibleZone, shapeFix, chooseCorner, frameProjection, Projector, stateAt, buildOverlay, footOf, MIN_PLAYERS, MAX_ERR, MAX_GAP, BALL_HOLD_MAX, BALL_LINK_MAX };
 });

@@ -2,11 +2,11 @@
    reconnaissance des équipes, suivi, et lecture de la vidéo image par image (navigateur). */
 (function (root, factory) {
   if (typeof module === "object" && module.exports) {
-    module.exports = factory(require("./yolox"), require("./homography"), require("./kit"), require("./tracker"), require("./camera"), require("./balltrack"), require("./doubt"), require("./signature"));
+    module.exports = factory(require("./yolox"), require("./homography"), require("./kit"), require("./tracker"), require("./camera"), require("./balltrack"), require("./doubt"), require("./signature"), require("./orb"));
   } else {
-    root.FutsalPipeline = factory(root.FutsalYolox, root.FutsalHomography, root.FutsalKit, root.FutsalTracker, root.FutsalCamera, root.FutsalBallTrack, root.FutsalDoubt, root.FutsalSignature);
+    root.FutsalPipeline = factory(root.FutsalYolox, root.FutsalHomography, root.FutsalKit, root.FutsalTracker, root.FutsalCamera, root.FutsalBallTrack, root.FutsalDoubt, root.FutsalSignature, root.FutsalOrb);
   }
-})(typeof self !== "undefined" ? self : this, function (Y, HG, K, T, Cam, BT, D, S) {
+})(typeof self !== "undefined" ? self : this, function (Y, HG, K, T, Cam, BT, D, S, Orb) {
   "use strict";
 
   const TEAM_CODE = { A: "A", B: "B", GKA: "a", GKB: "b" };
@@ -535,6 +535,42 @@
   }
 
   const IDENTITY = [1, 0, 0, 0, 1, 0, 0, 0, 1];
+  /* Recalage de la caméra par appariement de points (voir orb.js) quand le suivi image par image décroche (flou, zoom, balayage rapide).
+     STEP : deux images voisines ; WIDE : image courante contre une image clé plus ancienne (plus strict). Jamais deviné : sans assez d'appariements
+     concordants, la caméra reste « perdue ». */
+  const ORB_STEP = { minInliers: 25, minRatio: 0.35 };
+  const ORB_WIDE = { minInliers: 30, minRatio: 0.45 };
+  const ORB_AGREE_PX = 40;        // px d'origine : deux images clés doivent donner la même position (à ce nombre de pixels près)
+  /* Mouvement entre deux images préparées : suivi de points ; en cas d'échec seulement, appariement de points. stats.orb compte les pas rattrapés. */
+  function motionRobust(from, cur, stats) {
+    const r = Cam.estimateMotion(from, cur, from.mask, cur.mask, { maxCorners: 320 });
+    if (r.ok || !Orb) return r;
+    const o = Orb.estimateBetween(from, cur, ORB_STEP);
+    if (!o.ok) return r;
+    if (stats) stats.orb++;
+    return o;
+  }
+  /* Retrouve la position de la caméra à partir des images clés déjà suivies. Suivi de points d'abord (comme avant) ; sinon appariement de points,
+     accepté seulement si DEUX images clés différentes donnent la même position (garde-fou contre un faux appariement). Renvoie la matrice M ou null. */
+  function relocateKeys(keys, cur, gs, vw, vh, stats) {
+    for (let i = keys.length - 1; i >= 0; i--) {
+      const k = keys[i], r = Cam.estimateMotion(k.prev, cur, k.prev.mask, cur.mask, { maxCorners: 320 });
+      if (r.ok) return HG.mul3(k.M, HG.invert(Cam.toNative(r.H, gs)));
+    }
+    if (!Orb) return null;
+    const cands = [], pts = [[0, 0], [vw, 0], [0, vh], [vw, vh], [vw / 2, vh / 2]];
+    for (let i = keys.length - 1; i >= 0; i--) {
+      const k = keys[i], r = Orb.estimateBetween(k.prev, cur, ORB_WIDE);
+      if (!r.ok) continue;
+      const M = HG.mul3(k.M, HG.invert(Cam.toNative(r.H, gs)));
+      for (const c of cands) {
+        const d = Math.max.apply(null, pts.map((p) => { const a = HG.apply(c, p[0], p[1]), b = HG.apply(M, p[0], p[1]); return Math.hypot(a[0] - b[0], a[1] - b[1]); }));
+        if (d <= ORB_AGREE_PX) { if (stats) stats.reloc++; return M; }
+      }
+      cands.push(M);
+    }
+    return null;
+  }
 
   /* Analyse complète d'une plage de la vidéo.
      opts : { url, t0, t1, fps, tiles, camera ("fixed" | "mobile"), tol, L, W, calibrations, refs, floorMarks (false = garder les ballons jaunes),
@@ -579,7 +615,7 @@
     const trk = { anchor: null, M: IDENTITY, prev: null, t: 0, boxes: [], keys: [], failCount: 0 };
     const STEP = 0.1;
     const grabSmall = (boxes) => { gctx.drawImage(video, 0, 0, gw, gh); return Cam.prepare(gctx.getImageData(0, 0, gw, gh).data, gw, gh, boxes, 4); };
-    const motion = (from, cur) => Cam.estimateMotion(from, cur, from.mask, cur.mask, { maxCorners: 320 });
+    const motion = (from, cur) => motionRobust(from, cur, camStats);
     const addKey = (st) => { const last = st.keys[st.keys.length - 1]; if (!last || st.t - last.t >= 1) { st.keys.push({ prev: st.prev, M: st.M, t: st.t }); if (st.keys.length > 14) st.keys.splice(1, 1); } };
     /* Avance le suivi de st.t jusqu'à toT par pas courts ; en cas d'échec, on retente avec un pas deux fois plus court. */
     async function advanceMotion(st, toT) {
@@ -615,17 +651,12 @@
       } else await restartProbe(t);
     }
     function relocalize(st, cur, t) {
-      for (let i = st.keys.length - 1; i >= 0; i--) {
-        const k = st.keys[i], r = motion(k.prev, cur);
-        if (r.ok) {
-          st.M = HG.mul3(k.M, HG.invert(Cam.toNative(r.H, gs)));
-          st.prev = cur; st.t = t; addKey(st); st.failCount = 0;
-          return true;
-        }
-      }
+      const M = relocateKeys(st.keys, cur, gs, vw, vh, camStats);
+      if (M) { st.M = M; st.prev = cur; st.t = t; addKey(st); st.failCount = 0; return true; }
       st.failCount++;
       return false;
     }
+    const camStats = { orb: 0, reloc: 0 };
     const started = Date.now();
     for (let i = 0; i < times.length; i++) {
       if (opts.signal && opts.signal.aborted) throw new Error("Analyse interrompue");
@@ -685,6 +716,7 @@
     if (lostStart != null) { lost.push([lostStart, times[times.length - 1]]); recalage.push({ de: curLost.de, a: times[times.length - 1], reprise: curLost.reprise }); }
     video.removeAttribute("src"); video.load();
     if (lost.length) notes.push("Suivi de la caméra perdu sur " + lost.length + " passage(s) : ces images sont ignorées. Ajoutez un calibrage dans ces passages (flou, caméra trop rapide ou sol sans détails).");
+    if (camStats.orb + camStats.reloc) notes.push("Caméra rattrapée automatiquement " + (camStats.orb + camStats.reloc) + " fois (flou, zoom ou balayage rapide) en appariant les points du terrain.");
     const finalFrames = finalizeFrames(frames, { L: opts.L, W: opts.W, dirAt: opts.dirAt, roles: amb.close || amb.roles, doubts });
     if (bench.drift && bench.drift.d >= BENCH_ASK) doubts.push({ kind: "bench", t: bench.drift.t, d: bench.drift.d, zones: bench.drift.zones });
     return { frames: finalFrames, lost, notes, bench, doubts, recalage };
@@ -750,7 +782,8 @@
 
     /* ---- caméra ---- */
     const trk = { anchor: null, M: IDENTITY, prev: null, keys: [], lastStep: null, bridge: null, Mprev: IDENTITY, anchorPrev: null, kPrev: -1, bridged: 0 };
-    const motion = (from, cur) => Cam.estimateMotion(from, cur, from.mask, cur.mask, { maxCorners: 320 });
+    const camStats = { orb: 0, reloc: 0 };
+    const motion = (from, cur) => motionRobust(from, cur, camStats);
     const prep = (fr) => fr.prep || (fr.prep = Cam.prepare(fr.small.data, gw, gh, lastBoxes, 4));
     const addKey = (t) => { const last = trk.keys[trk.keys.length - 1]; if (!last || t - last.t >= 1) { trk.keys.push({ prev: trk.prev, M: trk.M, t }); if (trk.keys.length > 14) trk.keys.splice(1, 1); } };
     /* Un pas mesuré avec succès. Si une image floue vient d'être sautée : on n'enjambe que si le pas précédent et le pas suivant se ressemblent
@@ -774,11 +807,10 @@
       return "pending";
     }
     function relocalize(cur, t) {
-      for (let i = trk.keys.length - 1; i >= 0; i--) {
-        const k = trk.keys[i], r = motion(k.prev, cur);
-        if (r.ok) { trk.M = HG.mul3(k.M, HG.invert(Cam.toNative(r.H, gs))); trk.prev = cur; trk.lastStep = null; trk.bridge = null; addKey(t); return true; }
-      }
-      return false;
+      const M = relocateKeys(trk.keys, cur, gs, vw, vh, camStats);
+      if (!M) return false;
+      trk.M = M; trk.prev = cur; trk.lastStep = null; trk.bridge = null; addKey(t);
+      return true;
     }
     /* Mesure du mouvement jusqu'à l'image fr (between : images intermédiaires, en cas d'échec on refait le chemin image par image).
        Renvoie { reliable, anchor, M, Mprev, anchorPrev, kPrev }. */

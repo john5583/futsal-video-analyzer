@@ -10,8 +10,17 @@ const W = 480, H = 270;
 const noise = (x, y) => { const v = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453; return v - Math.floor(v); };
 
 /* Contenu de l'image à l'instant t : scène A (panoramique lent), puis flou plat sur [blurFrom, blurTo[, puis scène B toute différente. */
+/* Scène « blocs » (beaucoup de coins) : panoramique lent, puis, après le flou, un saut de 100 px et un zoom de 1,05 que le suivi image par image ne peut pas rattraper. */
+const blockHash = (a, b) => { let h = Math.imul((a * 73856093) ^ (b * 19349663), 2654435761); h ^= h >>> 15; h = Math.imul(h, 2246822519); h ^= h >>> 13; return (h >>> 0) / 4294967296; };
+function blocks(x, y, t, sc) {
+  const after = t >= sc.blurTo, z = after ? 1.05 : 1, u = x * z + 20 * t + (after ? 100 : 0), v = y * z;
+  let c = 40 + 180 * blockHash(Math.floor(u / 6), Math.floor(v / 6));
+  if (Math.abs(((u + 300) % 70) - 35) < 1.2) c = 250;
+  return c;
+}
 function pixel(x, y, t, sc) {
   if (t >= sc.blurFrom && t < sc.blurTo) return 120 + noise(x, y) * 2;
+  if (sc.blocks) return blocks(x, y, t, sc);
   const B = t >= sc.blurTo && sc.sceneB;
   const s = 20 * t;
   return B
@@ -88,4 +97,11 @@ test("la caméra ne se stabilise jamais : aucun point de reprise inventé", asyn
   const r = await run(4.5);
   assert.equal(r.recalage.length, 1);
   assert.equal(r.recalage[0].reprise, null);
+});
+
+test("flou puis saut de 100 px avec zoom : la caméra est retrouvée par appariement de points (perdue seulement pendant le flou)", async () => {
+  fakeBrowser({ blurFrom: 2.0, blurTo: 2.4, blocks: true });
+  const r = await run(5);
+  assert.ok(r.lost.length <= 1 && r.lost.every((l) => l[1] <= 3), "perdu seulement pendant l'image floue, puis retrouvé : " + JSON.stringify(r.lost));
+  assert.ok(r.notes.some((n) => /rattrapée automatiquement/.test(n)), "la note dit que la caméra a été rattrapée : " + r.notes.join(" | "));
 });

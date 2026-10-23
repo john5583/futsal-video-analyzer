@@ -52,3 +52,7 @@ jobs:
         run: xvfb-run -a node tests/e2e/exemples.js
         env:
           CI: "true"
+      - name: Camera perdue (bouton point de reprise, message, bandeau sur la video)
+        run: xvfb-run -a node tests/e2e/camera-reprise.js
+        env:
+          CI: "true"

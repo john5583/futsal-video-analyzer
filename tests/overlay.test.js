@@ -198,3 +198,14 @@ test("ligne du terrain découpée : seuls les morceaux dans la fenêtre restent,
   const u = O.clipLine([[6, 1], [6, 20], [8, 20], [8, 1]], win, 0.5);
   assert.equal(u.length, 2);
 });
+
+test("lostAt : passage où la caméra est perdue à un instant donné (bandeau « Caméra perdue »)", () => {
+  const lost = [[66, 120.5], [300, 305]];
+  assert.deepEqual(O.lostAt(lost, 66), { de: 66, a: 120.5 });
+  assert.deepEqual(O.lostAt(lost, 100), { de: 66, a: 120.5 });
+  assert.equal(O.lostAt(lost, 65), null);
+  assert.equal(O.lostAt(lost, 200), null);
+  assert.deepEqual(O.lostAt(lost, 305.03), { de: 300, a: 305 });
+  assert.equal(O.lostAt(undefined, 10), null);
+  assert.equal(O.lostAt([], 10), null);
+});
