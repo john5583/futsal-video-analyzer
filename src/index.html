@@ -191,8 +191,7 @@
           <details class="ai-step" open id="ai-d4">
             <summary><b>4. Résultats</b> <span id="ai-s4-state" class="chip"></span></summary>
             <div class="ai-toggles">
-              <label><input type="checkbox" id="ov-boxes" checked> Cadres</label>
-              <label><input type="checkbox" id="ov-sil"> Silhouettes</label>
+              <label title="Silhouette dessinée quand elle est fiable, sinon cercle au sol. Jamais de cadre."><input type="checkbox" id="ov-boxes" checked> Joueurs</label>
               <label><input type="checkbox" id="ov-ids" checked> Numéros</label>
               <label><input type="checkbox" id="ov-trails" checked> Trajectoires</label>
               <label><input type="checkbox" id="ov-heat"> Chaleur</label>
@@ -350,7 +349,7 @@
         </li>
         <li>Ouvrez <strong>Rapport &amp; solutions</strong> : erreurs classées par gravité, schémas récurrents, solutions, consignes, exercices et plan d'entraînement. Exportez en PDF pour vos joueurs ou votre staff.</li>
         <li><strong>Corrections animées</strong> : pour chaque erreur, une animation en vue de dessus montre l'erreur puis la correction et la consigne ; les exercices sont animés aussi. Exportez une vidéo (MP4) à envoyer à vos joueurs, ou la vidéo complète des corrections du match.</li>
-        <li><strong>Questions du programme</strong> (sous les erreurs suggérées) : quand il ne peut pas trancher seul (équipe douteuse, personne jamais identifiée, erreur incertaine, remplaçant ou joueur, zone de banc qui a dérivé), le programme vous pose la question au lieu de deviner. « ▶ Voir dans la vidéo » montre l'image exacte avec un cadre orange. Vos réponses sont retenues dans le projet ; <strong>« Mes réponses »</strong> permet de les annuler. Sans réponse, le cas reste « non analysé ». Un projet analysé avant la version 1.3 doit être analysé à nouveau pour recevoir ces questions.</li>
+        <li><strong>Questions du programme</strong> (sous les erreurs suggérées) : quand il ne peut pas trancher seul (équipe douteuse, personne jamais identifiée, erreur incertaine, remplaçant ou joueur, zone de banc qui a dérivé), le programme vous pose la question au lieu de deviner. « ▶ Voir dans la vidéo » montre l'image exacte avec un repère orange sur la personne (silhouette ou cercle au sol). Vos réponses sont retenues dans le projet ; <strong>« Mes réponses »</strong> permet de les annuler. Sans réponse, le cas reste « non analysé ». Un projet analysé avant la version 1.3 doit être analysé à nouveau pour recevoir ces questions.</li>
         <li><strong>Mon plan tactique</strong> : répondez à six questions (système de jeu, hauteur du bloc, compacité, pressing, pertes en zone défensive, gardien-joueur) ; le programme compare votre plan à ce qu'il a mesuré sur le match et vous montre ce qu'il ne faut pas faire et ce qu'il faudrait faire, sur la vraie vidéo. Quand il y a trop peu d'images exploitables, la consigne est dite « indicative ». Il ne lit pas le score et ne vérifie pas la sortie de balle, les coups de pied arrêtés ni les rôles individuels.</li>
         <li>La <strong>Base de connaissances</strong> regroupe les lois du jeu, les systèmes tactiques, les rôles, le vocabulaire, le catalogue des erreurs et la bibliothèque d'exercices.</li>
       </ol>
@@ -379,6 +378,50 @@
 
 <div id="toast" class="toast" hidden></div>
 
+<div id="lab-screen" hidden>
+  <div class="lab-top">
+    <b>Étiquetage</b> <span id="lab-name" class="muted"></span>
+    <span id="lab-status" class="muted" style="flex:1"></span>
+    <button id="lab-folder" class="ghost" title="Montre le fichier d'étiquettes dans l'explorateur Windows.">Ouvrir le dossier</button>
+    <button id="lab-pick2" class="ghost">Autre vidéo…</button>
+    <button id="lab-close" class="primary">Fermer (tout est déjà enregistré)</button>
+  </div>
+  <div id="lab-empty" class="lab-empty">
+    <p>Ici, tu désignes toi-même le ballon et tu cadres les personnes sur les images d'une vidéo. Le programme ne propose rien. Tout est enregistré tout de suite : tu peux t'arrêter et reprendre quand tu veux.</p>
+    <p><button id="lab-pick" class="primary big">Choisir la vidéo…</button> <button id="lab-resume" class="big" hidden></button></p>
+  </div>
+  <div id="lab-main" class="lab-main" hidden>
+    <div id="lab-stage" class="lab-stage"><div id="lab-zoom"><video id="lab-video" muted preload="auto"></video><canvas id="lab-canvas"></canvas></div></div>
+    <div class="lab-side">
+      <div class="lab-modes"><button data-mode="ballon">Ballon</button><button data-mode="joueurs">Joueurs</button></div>
+      <div id="lab-time" style="font-weight:600"></div>
+      <div id="lab-this" class="muted"></div>
+      <label>Pas entre les images <select id="lab-step"></select></label>
+      <div class="lab-row"><button id="lab-prev" title="Image précédente à faire">◀ Précédente à faire</button><button id="lab-next" class="primary" title="Entrée">Suivante à faire ▶</button></div>
+      <div class="lab-row"><input id="lab-goto" placeholder="Aller à 12:30" style="flex:1"><button id="lab-go">Aller</button><button id="lab-zoom-reset" title="Touche 0">Zoom 1×</button></div>
+      <div id="lab-ball-tools">
+        <p class="muted">Clique sur le <b>centre du ballon</b> (molette = zoom, clic droit glissé = déplacer). Si tu ne vois pas au moins la moitié du ballon : « Aucun ballon visible ». Un ballon masqué ou camouflé compte comme non visible.</p>
+        <div class="lab-row"><button id="lab-none" title="Touche N">Aucun ballon visible (N)</button><button id="lab-unsure" title="Touche ?">Incertain (?)</button><button id="lab-clear" title="Suppr">Effacer</button></div>
+      </div>
+      <div id="lab-players-tools" hidden>
+        <p class="muted">Choisis le type (touches 1 à 8), puis <b>trace un cadre</b> autour de chaque personne visible, en tirant avec la souris. Clique un cadre pour le choisir. Quand toutes les personnes de l'image sont cadrées : « Image terminée » (Entrée).</p>
+        <div id="lab-teams" class="lab-teams"></div>
+        <div id="lab-sel" hidden class="lab-sel">
+          <label>Type <select id="lab-sel-team"></select></label>
+          <label>Qui est-ce ? <select id="lab-sel-who"></select></label>
+          <button id="lab-sel-del" class="danger">Supprimer ce cadre (Suppr)</button>
+        </div>
+        <button id="lab-done" class="ok big">Image terminée (Entrée)</button>
+        <details><summary>Fiches des personnes</summary>
+          <div id="lab-persons" class="muted"></div>
+          <div class="lab-row"><input id="lab-pers-nom" placeholder="Nom ou numéro" style="flex:1"><select id="lab-pers-team"></select></div>
+          <div class="lab-row"><input id="lab-pers-role" placeholder="Rôle (facultatif)" style="flex:1"><button id="lab-pers-add">Ajouter la fiche</button></div>
+        </details>
+      </div>
+      <div id="lab-counts" class="muted"></div>
+    </div>
+  </div>
+</div>
 <script src="knowledge/rules.js"></script>
 <script src="knowledge/tactics.js"></script>
 <script src="knowledge/systems.js"></script>
@@ -405,8 +448,10 @@
 <script src="ai/tracker.js"></script>
 <script src="ai/doubt.js"></script>
 <script src="ai/ballLabels.js"></script>
+<script src="ai/labelStore.js"></script>
 <script src="ai/zoom.js"></script>
 <script src="ai/contour.js"></script>
+<script src="ai/silhouette.js"></script>
 <script src="ai/camera.js"></script>
 <script src="ai/context.js"></script>
 <script src="ai/match.js"></script>
@@ -423,5 +468,6 @@
 <script src="engine/compliance.js"></script>
 <script src="corrections-ui.js"></script>
 <script src="plan-ui.js"></script>
+<script src="labelling-ui.js"></script>
 </body>
 </html>

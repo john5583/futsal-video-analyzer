@@ -15,7 +15,7 @@
   let pickRole = null;       // rôle de tenue à choisir
   let qGroup = null;         // proposition d'appliquer la même réponse aux pistes de la même personne : { team, q, group }
   let qHighlight = null;     // personne désignée par une question : { t, b } (cadre orange sur la vidéo)
-  const CT = window.FutsalContour;
+  const CT = window.FutsalContour, SIL = window.FutsalSilhouette;
   const contours = new Map();          // contours des personnes par image : temps (ms) -> { state: "pending" | "ready" | "fail", items: [{ id, mask }], k, p }
   let contChain = Promise.resolve(), shadow = null, shadowUrl = "";
   let benchMark = null;      // marquage d'une zone de banc en cours : { t, H, first: [x, y] | null }
@@ -117,7 +117,7 @@
   }
 
   /* ---------- contours des personnes (MobileSAM, hors ligne) ----------
-     Une silhouette découpée remplace le cadre : elle ne contient que la personne (pas le ballon posé à côté d'un pied). Calculée à la demande
+     Une silhouette découpée (seulement si elle est fiable, sinon cercle au sol) : elle ne contient que la personne (pas le ballon posé à côté d'un pied). Calculée à la demande
      pour l'image affichée (1 à 2 s) et en avance pour la suivante ; jamais pour toute la vidéo. Si la découpe échoue, rien n'est inventé. */
   const loadShadow = async () => {
     const url = App.getVideoUrl();
@@ -155,11 +155,17 @@
         const g = cv.getContext("2d", { willReadFrequently: true });
         g.drawImage(v, 0, 0, w, h);
         const img = g.getImageData(0, 0, w, h);
-        const boxes = list.map((p) => [(p.b[0] / 1000) * w, (p.b[1] / 1000) * h, (p.b[2] / 1000) * w, (p.b[3] / 1000) * h]);
-        const res = await FSAI.segment({ imgId: "c" + key + "-" + Date.now().toString(36), width: w, height: h, buffer: img.data.buffer.slice(0), boxes });
+        const allp = f.players.filter((p) => Array.isArray(p.b) && p.b.length === 4), px = (p) => [(p.b[0] / 1000) * w, (p.b[1] / 1000) * h, (p.b[2] / 1000) * w, (p.b[3] / 1000) * h];
+        const around = allp.map((p) => ({ id: p.id, box: px(p) }));      // toutes les personnes de l'image : les voisins servent à ne pas les mélanger
+        const boxes = list.map(px), negs = list.map((p) => SIL.negativesFor(allp.indexOf(p), around));
+        const res = await FSAI.segment({ imgId: "c" + key + "-" + Date.now().toString(36), width: w, height: h, buffer: img.data.buffer.slice(0), boxes, negs });
         if (!res || res.error) throw new Error(res && res.error ? res.error : "réponse vide");
-        e.items = list.map((p, i) => ({ id: p.id, mask: res.masks[i] && res.masks[i].data ? { x0: res.masks[i].x0, y0: res.masks[i].y0, w: res.masks[i].w, h: res.masks[i].h, data: res.masks[i].data instanceof Uint8Array ? res.masks[i].data : new Uint8Array(res.masks[i].data), area: res.masks[i].area } : null }))
+        e.items = list.map((p, i) => ({ id: p.id, mask: res.masks[i] && res.masks[i].data ? { x0: res.masks[i].x0, y0: res.masks[i].y0, w: res.masks[i].w, h: res.masks[i].h, data: res.masks[i].data instanceof Uint8Array ? res.masks[i].data : new Uint8Array(res.masks[i].data), area: res.masks[i].area, iou: res.masks[i].iou, stab: res.masks[i].stab } : null }))
           .filter((it) => it.mask && it.mask.area > 30);
+        // seule une silhouette FIABLE est gardée ; les autres personnes auront un cercle au sol (jamais une découpe douteuse, jamais un cadre)
+        const have = new Map(e.items.map((it) => [it.id, it.mask])), verdict = SIL.evaluateAll(around.map((a) => ({ id: a.id, box: a.box, mask: have.get(a.id) || null })));
+        const okIds = new Set(verdict.filter((v) => v.ok).map((v) => v.id));
+        e.items = e.items.filter((it) => okIds.has(it.id)).map((it) => Object.assign(it, { box: around.find((a) => a.id === it.id).box }));
         e.state = "ready";
       } catch (_err) { e.state = "fail"; }
       drawOverlay();
@@ -192,7 +198,17 @@
       }
       drawn = true;
     });
-    return drawn || e.items.length === 0;
+    return drawn;
+  }
+  /* Cercle au sol d'une personne (jamais de cadre) : projeté avec le terrain de cette image quand il est cohérent avec ses pieds, sinon petite ellipse sous les pieds. */
+  const groundInverse = (f) => { try { return f && Array.isArray(f.h) && f.h.length === 9 ? HG.invert(f.h) : null; } catch (_e) { return null; } };
+  function drawGround(ctx, p, col, hInv, r, lw) {
+    const pts = SIL.groundCircle(p, r.vw, r.vh, hInv, (Hi, x, y) => { const q = HG.apply(Hi, x, y); return [q[0] * r.vw, q[1] * r.vh]; });
+    if (!pts) return;
+    ctx.fillStyle = col + "33"; ctx.strokeStyle = col; ctx.lineWidth = lw || 2; ctx.lineJoin = "round";
+    ctx.beginPath();
+    pts.forEach((q, k) => { const v = toView(q[0], q[1]); if (k) ctx.lineTo(v[0], v[1]); else ctx.moveTo(v[0], v[1]); });
+    ctx.closePath(); ctx.fill(); ctx.stroke();
   }
   let ctTimer = null;
   const scheduleContours = (f) => { clearTimeout(ctTimer); ctTimer = setTimeout(() => { if (video.paused && frames.length && Math.abs(f.t - (video.currentTime || 0)) < 0.15) getContours(f); }, 600); };
@@ -256,25 +272,19 @@
     }
     // joueurs détectés
     const f = preview || live || (frames.length ? P.frameNear(frames, t, 0.8) : null);
-    if (f && ($("ov-boxes").checked || $("ov-sil").checked)) {
-      // image arrêtée : le vrai contour de chaque personne remplace le cadre (calculé en arrière-plan, 1 à 2 s) ; en lecture ou en attendant, cadres
-      const still = $("ov-boxes").checked && !preview && !live && video.paused && Math.abs(f.t - t) < 0.15;
+    if (f && $("ov-boxes").checked) {
+      // Jamais de cadre. Image arrêtée : silhouette FIABLE de la personne (calculée en arrière-plan, 1 à 2 s) ; sinon, et en lecture, cercle au sol.
+      const still = !preview && !live && video.paused && Math.abs(f.t - t) < 0.15;
       const ceGen = still ? contoursReady(f) : null;
       if (ceGen) drawContours(ctx, f); else if (still) scheduleContours(f);
+      const sil = new Set(ceGen ? ceGen.items.map((it) => it.id) : []), hInv = groundInverse(f);
       f.players.forEach((p) => {
         if (!p.b || p.b.length < 4) return;
         const x1 = (p.b[0] / 1000) * r.vw, y1 = (p.b[1] / 1000) * r.vh, x2 = (p.b[2] / 1000) * r.vw, y2 = (p.b[3] / 1000) * r.vh;
         const a1 = toView(x1, y1), a2 = toView(x2, y2);
         const col = TEAM_COLOR[p.team] || TEAM_COLOR.UNK;
         const w = a2[0] - a1[0], h = a2[1] - a1[1];
-        if ($("ov-sil").checked) {
-          ctx.fillStyle = col + "66"; ctx.strokeStyle = col; ctx.lineWidth = 1.5;
-          ctx.beginPath(); ctx.ellipse(a1[0] + w / 2, a1[1] + h * 0.1, w * 0.22, h * 0.09, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-          ctx.beginPath(); ctx.roundRect(a1[0] + w * 0.1, a1[1] + h * 0.2, w * 0.8, h * 0.8, w * 0.25); ctx.fill(); ctx.stroke();
-        }
-        if ($("ov-boxes").checked && !ceGen) {
-          ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.strokeRect(a1[0], a1[1], w, h);
-        }
+        if (!sil.has(p.id)) drawGround(ctx, p, col, hInv, r, 2);
         if ($("ov-ids").checked) {
           const label = p.team === "UNK" ? "non reconnu" : p.team === "REF" ? "arbitre" : (p.team === "A" ? "" : p.team === "B" ? "Adv. " : p.team === "GKA" ? "GB " : "GB adv. ") + (p.id != null ? "#" + p.id : (p.team === "A" ? "Mon équipe" : ""));
           ctx.font = "600 12px 'Segoe UI',Arial,sans-serif";
@@ -293,8 +303,9 @@
     const qf = qHighlight && qHighlight.id != null && frames.length ? P.frameNear(frames, qHighlight.t, 0.3) : null;
     const qDone = qf && Math.abs((video.currentTime || 0) - qHighlight.t) < 0.4 && drawContours(ctx, qf, qHighlight.id, qHighlight.label);
     if (qHighlight && !qDone && Math.abs((video.currentTime || 0) - qHighlight.t) < 0.4 && Array.isArray(qHighlight.b)) {
-      const b = qHighlight.b, a1 = toView((b[0] / 1000) * r.vw, (b[1] / 1000) * r.vh), a2 = toView((b[2] / 1000) * r.vw, (b[3] / 1000) * r.vh);
-      ctx.strokeStyle = "#f97316"; ctx.lineWidth = 4; ctx.strokeRect(a1[0], a1[1], a2[0] - a1[0], a2[1] - a1[1]);
+      const b = qHighlight.b, a1 = toView((b[0] / 1000) * r.vw, (b[1] / 1000) * r.vh);
+      const qp = qf ? qf.players.find((p) => p.id === qHighlight.id) : null;      // pas de silhouette fiable : cercle orange au sol, jamais un cadre
+      drawGround(ctx, qp || { b }, "#f97316", qf ? groundInverse(qf) : null, r, 4);
       ctx.font = "700 13px 'Segoe UI',Arial,sans-serif";
       const label = qHighlight.label || "Question", tw = ctx.measureText(label).width + 10;
       ctx.fillStyle = "#f97316"; ctx.fillRect(a1[0], a1[1] - 20, tw, 20);
@@ -422,7 +433,7 @@
       done = true;
       title = "Analyse terminée ✔";
       steps = [
-        "Dans « 4. Résultats », cochez Cadres, Silhouettes ou Trajectoires pour voir les joueurs sur la vidéo.",
+        "Dans « 4. Résultats », cochez Joueurs ou Trajectoires pour voir les joueurs sur la vidéo.",
         "Acceptez ou écartez les « Erreurs suggérées ».",
         "Ouvrez ensuite l'onglet « Rapport & solutions », puis « Corrections animées » pour obtenir les vidéos à partager."
       ];
@@ -854,7 +865,7 @@
       const add = (label, fn, cls) => { const b = document.createElement("button"); b.textContent = label; if (cls) b.className = cls; b.addEventListener("click", fn); bt.appendChild(b); };
       add("▶ Voir dans la vidéo", () => showQuestion(q), "primary");
       if (q.kind === "team") {
-        tx.textContent = App.fmt(q.t) + " — Qui est la personne dans le cadre orange ? (" + q.why + ")";
+        tx.textContent = App.fmt(q.t) + " — Qui est la personne marquée en orange ? (" + q.why + ")";
         add("Mon équipe", () => answerTeam(q, "A")); add("Adversaire", () => answerTeam(q, "B"));
         add("Gardien (nous)", () => answerTeam(q, "GKA")); add("Gardien adverse", () => answerTeam(q, "GKB"));
         Object.keys(D.ROLE_LABEL).forEach((k) => add(D.ROLE_LABEL[k][0].toUpperCase() + D.ROLE_LABEL[k].slice(1) + " (ne pas compter)", () => answerTeam(q, "NONE", k)));
@@ -926,7 +937,7 @@
   /* Clic sur un cadre : « qui est cette personne ? » ; clic ailleurs : « le ballon est ici ? ». Rien n'est changé sans ta réponse ; tout est annulable. */
   let clickBusy = false;
   /* Un clic sur la vidéo : dans la silhouette d'une personne = « qui est-ce ? » ; en dehors = « le ballon est ici ? ». Si la silhouette n'est pas
-     disponible (découpe en échec), on retombe sur le cadre de la détection, comme avant. */
+     disponible (découpe en échec), on retombe sur la zone de la détection (jamais affichée), comme avant. */
   async function personClick(e, ix, iy) {
     if (!frames.length || !state.project.ai || clickBusy) return;
     const t = video.currentTime || 0, f = P.frameNear(frames, t, 0.8), vw = video.videoWidth, vh = video.videoHeight;
@@ -941,9 +952,11 @@
       if (ce) {
         const hit = CT.pick(ce.items, ix * ce.k, iy * ce.k);
         if (hit) best = f.players.find((p) => p.id === hit.id) || null;
-      } else {
+      }
+      const withSil = new Set(ce ? ce.items.map((it) => it.id) : []);
+      if (!best) {      // seules les personnes SANS silhouette fiable se retrouvent par leur zone (un clic hors d'une silhouette dessinée = le ballon)
         f.players.forEach((p) => {
-          if (!p.b || p.b.length < 4) return;
+          if (!p.b || p.b.length < 4 || withSil.has(p.id)) return;
           const x1 = (p.b[0] / 1000) * vw, y1 = (p.b[1] / 1000) * vh, x2 = (p.b[2] / 1000) * vw, y2 = (p.b[3] / 1000) * vh;
           if (ix >= x1 - 6 && ix <= x2 + 6 && iy >= y1 - 6 && iy <= y2 + 6 && (x2 - x1) * (y2 - y1) < area) { area = (x2 - x1) * (y2 - y1); best = p; }
         });
@@ -1366,7 +1379,7 @@
     $("ai-pipette").querySelectorAll("button[data-part]").forEach((b) => b.addEventListener("click", () => { if (pip) { pip.part = b.dataset.part; renderPipette(); drawOverlay(); } }));
     ["ai-t0", "ai-t1", "ai-fps", "ai-tiles"].forEach((id) => $(id).addEventListener("input", updateEstimate));
     $("ai-t0").addEventListener("change", updateEstimate); $("ai-t1").addEventListener("change", updateEstimate);
-    ["ov-boxes", "ov-sil", "ov-ids", "ov-trails", "ov-heat", "ov-court"].forEach((id) => $(id).addEventListener("change", refreshLive));
+    ["ov-boxes", "ov-ids", "ov-trails", "ov-heat", "ov-court"].forEach((id) => $(id).addEventListener("change", refreshLive));
   }
 
   function init() {
@@ -1494,7 +1507,7 @@
     videoSize: () => ({ w: video.videoWidth, h: video.videoHeight }),
     segment: (req) => (FSAI.segmentImpl ? FSAI.segmentImpl(req) : api.aiSegment(req)),
     detectPersons: async (canvas) => (await P.detectCanvas(canvas, 2, api, { minPerson: 0.3, minBall: 0.12 })).filter((d) => d.cls === 0),
-    toggle: (id, on) => { $(id).checked = on; refreshLive(); }
+    toggle: (id, on) => { const e = $(id); if (e) { e.checked = on; refreshLive(); } }
   };
 
   window.FSApp.ai = { syncFromProject, dirAt, refreshLive, getFrames: () => frames };

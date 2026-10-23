@@ -105,5 +105,9 @@ test("découpe réelle : chaque personne détectée donne une silhouette cohére
     for (let y = 0; y < m.h; y++) for (let x = 0; x < m.w; x++) if (m.data[y * m.w + x]) { const px = m.x0 + x, py = m.y0 + y; if (px < b[0] - 20 || px > b[2] + 20 || py < b[1] - 20 || py > b[3] + 20) out++; }
     assert.ok(out < m.area * 0.15, "silhouette débordant de la boîte : " + out);
   }
+  // points négatifs : demander « ceci n'est pas la personne » (un point sur son voisin) ne casse rien et la silhouette reste plausible
+  const d0 = people[0], b0 = [d0.x1 / r * fit.s, d0.y1 / r * fit.s, d0.x2 / r * fit.s, d0.y2 / r * fit.s];
+  const withNeg = await sam.segmentBox(b0, "bus", [[b0[2] + 40, (b0[1] + b0[3]) / 2], [NaN, 3]]);      // le point invalide est ignoré
+  assert.ok(withNeg.area > 0 && withNeg.iou > 0.5, "découpe avec points négatifs : aire " + withNeg.area);
   await ys.release();
 });

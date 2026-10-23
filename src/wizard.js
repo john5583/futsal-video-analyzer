@@ -271,7 +271,7 @@
     skipCat() { advanceCategory(); },
     async run() { await runNow(); },
     stopRun() { $("ai-cancel").click(); },
-    seeVideo() { AI.toggle("ov-boxes", true); AI.toggle("ov-sil", true); AI.toggle("ov-court", false); App.showTab("analyse"); video.scrollIntoView({ block: "center" }); },
+    seeVideo() { AI.toggle("ov-boxes", true); AI.toggle("ov-court", false); App.showTab("analyse"); video.scrollIntoView({ block: "center" }); },
     seeTop() { App.showTab("analyse"); const m = $("minimap-box"); if (m) m.scrollIntoView({ block: "center" }); },
     seeReport() { App.showTab("rapport"); },
     seeAnim() { App.showTab("corrections"); },
