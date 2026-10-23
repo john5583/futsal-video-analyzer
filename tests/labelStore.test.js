@@ -19,7 +19,7 @@ test("ballon : trois états, clic hors image refusé, remplacement sur la même 
   LS.setBall(d, 1000, "aucun");
   assert.deepEqual(d.frames["1000"].ball, { state: "aucun" });
   LS.setBall(d, 1333, "incertain");
-  assert.deepEqual(LS.counts(d), { vu: 0, aucun: 1, incertain: 1, imagesJoueurs: 0, cadres: 0 });
+  assert.deepEqual(LS.counts(d), { vu: 0, aucun: 1, incertain: 1, imagesJoueurs: 0, cadres: 0, changements: 0 });
   LS.clearBall(d, 1000);
   assert.equal(d.frames["1000"], undefined, "image vide supprimée");
 });
@@ -108,4 +108,33 @@ test("la dernière image regardée est gardée dans le fichier (reprise au même
   const d = vid(); d.pos = 12000;
   assert.equal(LS.normalize(JSON.parse(JSON.stringify(d))).pos, 12000);
   d.pos = -5; assert.equal(LS.normalize(JSON.parse(JSON.stringify(d))).pos, undefined);
+});
+
+test("changements : une personne entre ou sort à un instant ; personne inconnue ou sens inventé refusés ; remplacés par instant", () => {
+  const d = vid(); const p = LS.addPerson(d, { nom: "Sami 9", team: "BANC" });
+  assert.equal(LS.addSub(d, 5000, "p99", "entre"), null);
+  assert.equal(LS.addSub(d, 5000, p.id, "saute"), null);
+  assert.equal(LS.addSub(d, -1, p.id, "entre"), null);
+  assert.deepEqual(LS.addSub(d, 5000, p.id, "entre"), { ms: 5000, who: p.id, sens: "entre" });
+  LS.addSub(d, 5000, p.id, "sort");
+  assert.deepEqual(d.subs, [{ ms: 5000, who: p.id, sens: "sort" }], "un seul par personne et par instant");
+  LS.addSub(d, 2000, p.id, "entre");
+  assert.deepEqual(d.subs.map((x) => x.ms), [2000, 5000], "triés par instant");
+  assert.equal(LS.counts(d).changements, 2);
+  const back = LS.normalize(JSON.parse(JSON.stringify(d)));
+  assert.deepEqual(back.subs, d.subs, "relus à l'identique");
+  assert.equal(LS.removeSub(d, 2000, p.id), true);
+  LS.removePerson(d, p.id);
+  assert.deepEqual(d.subs, [], "retirer la fiche retire ses changements");
+});
+test("changements illisibles dans un fichier : écartés sans erreur", () => {
+  const d = LS.normalize({ version: 1, video: { name: "a", vw: 10, vh: 10, duration: 5 }, persons: [{ id: "p1", nom: "x", team: "A" }], subs: [{ ms: 1000, who: "p1", sens: "entre" }, { ms: "x", who: "p1", sens: "entre" }, { ms: 5, who: "p2", sens: "sort" }, { ms: 7, who: "p1", sens: "autre" }] });
+  assert.deepEqual(d.subs, [{ ms: 1000, who: "p1", sens: "entre" }]);
+});
+test("import de plusieurs fiches : « nom ; type », types par code ou nom complet, lignes non comprises renvoyées", () => {
+  const d = vid();
+  const r = LS.importPersons(d, "Karim 7 ; A ; ala\nSami 9 ; Adversaire\r\n\nArbitre ; ARB\nInconnu ; XYZ\nsans type\n;A\nLéo ; gardien adverse");
+  assert.deepEqual(d.persons.map((p) => [p.nom, p.team, p.role]), [["Karim 7", "A", "ala"], ["Sami 9", "B", ""], ["Arbitre", "ARB", ""], ["Léo", "GKB", ""]]);
+  assert.deepEqual(r.refused, ["Inconnu ; XYZ", "sans type", ";A"]);
+  assert.equal(r.added.length, 4);
 });

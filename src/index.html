@@ -414,6 +414,13 @@
           <div id="lab-persons" class="muted"></div>
           <div class="lab-row"><input id="lab-pers-nom" placeholder="Nom ou numéro" style="flex:1"><select id="lab-pers-team"></select></div>
           <div class="lab-row"><input id="lab-pers-role" placeholder="Rôle (facultatif)" style="flex:1"><button id="lab-pers-add">Ajouter la fiche</button></div>
+          <div class="lab-row"><textarea id="lab-pers-multi" rows="4" placeholder="Plusieurs fiches d'un coup : une ligne par personne, « nom ; type »&#10;type : A, B, GKA, GKB, ARB, BANC, PUBLIC, AUTRE" style="flex:1"></textarea><button id="lab-pers-import">Ajouter ces fiches</button></div>
+        </details>
+        <details><summary>Changements (entrées et sorties)</summary>
+          <p class="muted">Au moment où une personne entre sur le terrain (ou en sort), place la vidéo sur cet instant, choisis la personne, puis le bouton.</p>
+          <div class="lab-row"><select id="lab-sub-who" style="flex:1"></select></div>
+          <div class="lab-row"><button id="lab-sub-in">Entre à cet instant</button><button id="lab-sub-out">Sort à cet instant</button></div>
+          <div id="lab-subs" class="muted"></div>
         </details>
       </div>
       <div id="lab-counts" class="muted"></div>
