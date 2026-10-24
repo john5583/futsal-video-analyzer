@@ -243,6 +243,15 @@
       if (fb && !drawContours(ctx, fb)) getContours(fb);           // le contour arrive en 1 à 2 s ; en attendant, rien n'est dessiné sur les personnes
       drawBallMarker(ctx); return;
     }          // session d'étiquetage : image propre, pour voir le ballon sans cadre, silhouette ni terrain par-dessus
+    // caméra perdue à cet instant : bandeau d'explication (les images de ce passage ne sont pas analysées)
+    const lostNow = a ? O.lostAt(a.lost, t) : null;
+    if (lostNow) {
+      const msg = "Caméra perdue de " + App.fmt(lostNow.de) + " à " + App.fmt(lostNow.a) + " : ces images ne sont pas analysées";
+      ctx.save(); ctx.font = "600 13px 'Segoe UI',Arial,sans-serif";
+      const w = ctx.measureText(msg).width + 16;
+      ctx.fillStyle = "rgba(185,28,28,.9)"; ctx.fillRect(8, 8, w, 26);
+      ctx.fillStyle = "#fff"; ctx.fillText(msg, 16, 26); ctx.restore();
+    }
     // aperçu du terrain calibré
     // (tracé seulement si la projection est fiable à cet instant ; sinon un message l'explique, pas de lignes absurdes)
     if (a && $("ov-court").checked) {
@@ -633,8 +642,15 @@
       const f = document.createElement("div"); f.className = "muted"; f.textContent = "À faire : " + it.fix; row.appendChild(f);
       const rc = it.blocking ? mainRecalage(a) : null;
       if (rc) {
-        const go = document.createElement("button"); go.type = "button"; go.textContent = "▶ Aller à " + App.fmt(rc.reprise) + " (point de reprise)";
-        go.addEventListener("click", () => App.seek(rc.reprise)); row.appendChild(go);
+        const surPlace = rc.reprise <= rc.de + 0.5;      // le point de reprise est le début du passage perdu : la caméra est stable juste après le décrochage
+        const go = document.createElement("button"); go.type = "button"; go.textContent = "▶ Aller à " + App.fmt(rc.reprise) + (surPlace ? " (là où la caméra décroche)" : " (point de reprise)");
+        go.addEventListener("click", () => {
+          video.pause(); App.seek(rc.reprise);
+          try { video.scrollIntoView({ block: "nearest" }); } catch (_e) { /* ignoré */ }
+          App.toast("Vidéo placée à " + App.fmt(rc.reprise) + (surPlace ? " : c'est ici que le suivi de la caméra décroche (passage perdu jusqu'à " + App.fmt(rc.a) + ")." : " : la caméra y redevient stable."));
+          drawOverlay();
+        });
+        row.appendChild(go);
       }
       box.appendChild(row);
     });
