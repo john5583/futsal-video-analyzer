@@ -68,6 +68,10 @@ jobs:
         run: xvfb-run -a node tests/e2e/suivi-camera.js
         env:
           CI: "true"
+      - name: Terrain recale sur les vraies lignes (couleur donnee, question de couleur, ecart a la verite)
+        run: xvfb-run -a node tests/e2e/lignes-recalage.js
+        env:
+          CI: "true"
       - name: Bancs reconnus tout seuls (fiches, entree reconnue, questions non bloquantes)
         run: xvfb-run -a node tests/e2e/bancs-auto.js
         env:

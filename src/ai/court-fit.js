@@ -344,5 +344,5 @@
     return { H, points: pointsFromH(H, L, W, vw, vh), err: cal.err };
   }
 
-  return { WORK_W, COLORS, prepare, ridgeMap, colorCandidates, snapToRidge, modelPoints, cameraBasis, focalPx, project, groundAt, patternSearch, peopleError, poseFromGoal, distanceTransform, lineScore, calibrationFromPose, rotateCalibration, pointsFromH };
+  return { WORK_W, COLORS, levenberg, solveSmall, prepare, ridgeMap, colorCandidates, snapToRidge, modelPoints, cameraBasis, focalPx, project, groundAt, patternSearch, peopleError, poseFromGoal, distanceTransform, lineScore, calibrationFromPose, rotateCalibration, pointsFromH };
 });
