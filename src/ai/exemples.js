@@ -134,34 +134,52 @@
     return out;
   }
 
-  /* Instant où proposer un autre exemple pour la catégorie cat.
-     frames : images déjà analysées (peut être vide) ; la catégorie y est « probablement visible » si l'analyse y a vu une personne de cette catégorie.
-     Choix : l'instant le plus éloigné des exemples déjà donnés (même vidéo), parmi ceux où elle semble visible. */
+  /* Instant où proposer un autre exemple pour la catégorie cat. Différent à chaque appel (o.rotation = nombre de clics déjà faits ; o.dernier = dernier instant proposé).
+     frames : images déjà analysées (peut être vide) ; lost : passages à caméra perdue [[de, a], …].
+     Avec analyse : images où la caméra est suivie, où une personne de la catégorie est détectée, assez grande et non coupée par le bord, à plus de 20 s des exemples déjà donnés.
+     Les meilleurs candidats (taille, éloignement), séparés d'au moins 20 s, tournent à chaque clic. Sans analyse : instants répartis dans la vidéo, hors passages perdus. */
+  const HAUT_MIN = 45, BORD = 6;   // hauteur minimale du joueur (millièmes de l'image) ; marge au bord
   function prochainInstant(o) {
-    const kits = o.kits || {}, cat = o.cat, dur = o.duree || 0, videoNom = o.v || null;
+    const kits = o.kits || {}, cat = o.cat, dur = o.duree || 0, videoNom = o.v || null, rot = Math.max(0, o.rotation | 0), lost = o.lost || [];
     const deja = liste(kits, cat).filter((e) => e.t != null && (!e.v || !videoNom || e.v === videoNom)).map((e) => e.t);
     const loin = (t) => (deja.length ? Math.min.apply(null, deja.map((x) => Math.abs(x - t))) : Infinity);
+    const perdu = (t) => lost.some((l) => t >= l[0] - 0.5 && t <= l[1] + 0.5);
     const ecart = dur > 0 ? Math.min(LIMITES.INSTANT_ECART_S, Math.max(1, dur / 6)) : LIMITES.INSTANT_ECART_S;   // une très courte vidéo ne permet pas 20 s d'écart
-    let cands = [];
+    const dernier = typeof o.dernier === "number" ? o.dernier : null;
+    const choisir = (liste_, sep) => {
+      const sel = [];
+      liste_.forEach((c) => { if (sel.length < 8 && sel.every((x) => Math.abs(x.t - c.t) >= sep)) sel.push(c); });
+      if (!sel.length) return null;
+      let k = rot % sel.length;
+      if (sel.length > 1 && dernier != null && Math.abs(sel[k].t - dernier) < 0.15) k = (k + 1) % sel.length;
+      return sel[k];
+    };
+    const cands = [];
     (o.frames || []).forEach((f) => {
-      const ps = (f.players || []).filter((p) => p.team === cat);
-      if (!ps.length) return;
-      const taille = Math.max.apply(null, ps.map((p) => (p.b ? p.b[3] - p.b[1] : 0)));
-      cands.push({ t: f.t, taille });
+      if (perdu(f.t) || (f.h !== undefined && !(Array.isArray(f.h) && f.h.length === 9))) return;
+      let best = null;
+      (f.players || []).forEach((p) => {
+        if (p.team !== cat || !p.b) return;
+        const haut = p.b[3] - p.b[1], coupe = p.b[0] < BORD || p.b[1] < BORD || p.b[2] > 1000 - BORD || p.b[3] > 1000 - BORD;
+        if (!best || haut > best.haut) best = { haut, coupe };
+      });
+      if (best) cands.push({ t: f.t, haut: best.haut, coupe: best.coupe });
     });
-    cands = cands.filter((c) => loin(c.t) >= ecart);
-    if (cands.length) {
-      cands.sort((a, b) => (Math.min(loin(b.t), 120) - Math.min(loin(a.t), 120)) || (b.taille - a.taille));
-      return { t: Math.round(cands[0].t * 10) / 10, probable: true, raison: "l'analyse déjà faite y a vu cette catégorie, loin de vos autres exemples" };
+    const score = (c) => Math.min(loin(c.t), 120) * 2 + Math.min(c.haut, 200);
+    for (const strict of [true, false]) {
+      const l = cands.filter((c) => loin(c.t) >= ecart && (!strict || (!c.coupe && c.haut >= HAUT_MIN))).sort((x, y) => score(y) - score(x) || x.t - y.t);
+      const c = choisir(l, ecart);
+      if (c) return { t: Math.round(c.t * 10) / 10, probable: true, raison: strict
+        ? "l'analyse y a vu cette catégorie, joueur assez grand et entier, caméra suivie, à " + (deja.length ? Math.round(loin(c.t)) + " s de votre exemple le plus proche" : "un moment sans exemple")
+        : "l'analyse y a vu cette catégorie mais le joueur est petit ou coupé par le bord : à vérifier avant de cliquer" };
     }
     if (!dur) return null;
-    let best = null;
-    for (let i = 1; i <= 12; i++) {
-      const t = (dur * i) / 13, l = loin(t);
-      if (!best || l > best.l) best = { t, l };
-    }
-    if (!best || best.l < ecart) return null;
-    return { t: Math.round(best.t * 10) / 10, probable: false, raison: "instant éloigné de vos autres exemples ; je ne sais pas encore si on y voit cette catégorie" };
+    const pas = [];
+    for (let i = 1; i <= 24; i++) { const t = (dur * i) / 25; if (!perdu(t) && loin(t) >= ecart) pas.push({ t, l: loin(t) }); }
+    pas.sort((x, y) => Math.min(y.l, 120) - Math.min(x.l, 120) || x.t - y.t);
+    const c = choisir(pas, Math.max(1, dur / 12));
+    if (!c) return null;
+    return { t: Math.round(c.t * 10) / 10, probable: false, raison: "instant réparti dans la vidéo, loin de vos autres exemples" + (lost.length ? " et hors des passages à caméra perdue" : "") + " ; je ne sais pas encore si on y voit cette catégorie" };
   }
 
   /* Phrase de demande (jamais bloquante) pour la première catégorie qui manque d'exemples. */
