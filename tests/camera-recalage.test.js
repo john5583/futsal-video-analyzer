@@ -105,3 +105,30 @@ test("flou puis saut de 100 px avec zoom : la caméra est retrouvée par apparie
   assert.ok(r.lost.length <= 1 && r.lost.every((l) => l[1] <= 3), "perdu seulement pendant l'image floue, puis retrouvé : " + JSON.stringify(r.lost));
   assert.ok(r.notes.some((n) => /rattrapée automatiquement/.test(n)), "la note dit que la caméra a été rattrapée : " + r.notes.join(" | "));
 });
+
+/* Deux calibrages : à l'arrivée du second, on mesure de combien le suivi issu du premier s'écartait (jamais corrigé en douce). */
+test("dérive mesurée au second calibrage : suivi exact = écart quasi nul ; second calibrage décalé de 2 m = écart d'environ 2 m, dit dans les notes", async () => {
+  const c1 = calib();
+  const second = (dx) => {
+    const src = [[0, 0], [W, 0], [W, H], [0, H]];
+    return { t: 3, H: HG.solve(src, src.map((p) => { const q = HG.apply(c1.H, p[0] + 60, p[1]); return [q[0] + dx, q[1]]; })) };      // la scène défile de 20 px/s : à 3 s, 60 px
+  };
+  const go = (dx) => P.analyseVideo({ url: "x", t0: 0, t1: 5, fps: 3, tiles: 1, camera: "mobile", tol: 42, L: 40, W: 20, calibrations: [c1, second(dx)], api: { aiDetect: async () => ({ dets: [] }) } });
+  fakeBrowser({ blurFrom: 1e9, blurTo: 1e9, sceneB: false });
+  const ok = await go(0);
+  assert.equal(ok.derive.length, 1);
+  assert.ok(ok.derive[0].med < 0.3, "suivi exact : écart " + ok.derive[0].med + " m");
+  assert.ok(ok.notes.some((n) => /le suivi tient bien/.test(n)), ok.notes.join(" | "));
+  const ko = await go(2);
+  assert.ok(Math.abs(ko.derive[0].med - 2) < 0.4, "second calibrage décalé de 2 m : écart mesuré " + ko.derive[0].med + " m");
+  assert.ok(ko.notes.some((n) => /s'écartait de 1,\d m/.test(n) && /le tracé a pu glisser/.test(n)), ko.notes.join(" | "));
+  assert.deepEqual(ko.lost, []);
+  assert.ok(!ok.notes.some((n) => /Un seul calibrage/.test(n)), "deux calibrages : pas de conseil");
+});
+
+test("un seul calibrage sur une longue vidéo : la dérive n'est pas mesurable, on propose un instant ; pas de conseil sinon", () => {
+  assert.match(P.conseilCalibrage(true, 1, 17, 817), /Un seul calibrage pour 13 min.*vers 6:57/);
+  assert.equal(P.conseilCalibrage(true, 2, 17, 817), null);
+  assert.equal(P.conseilCalibrage(true, 1, 0, 200), null);
+  assert.equal(P.conseilCalibrage(false, 1, 0, 900), null);
+});

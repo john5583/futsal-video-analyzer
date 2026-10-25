@@ -17,7 +17,8 @@
   let more = null;           // « ＋ Autre exemple » depuis la liste des équipes : { key, t } (t = instant où revenir après validation)
   let qGroup = null;         // proposition d'appliquer la même réponse aux pistes de la même personne : { team, q, group }
   let qHighlight = null;     // personne désignée par une question : { t, b } (cadre orange sur la vidéo)
-  const CT = window.FutsalContour, SIL = window.FutsalSilhouette;
+  const CT = window.FutsalContour, SIL = window.FutsalSilhouette, ACC = window.FutsalAccroche;
+  let selPt = null;          // repère sélectionné dans la liste (flèches du clavier : décalage fin)
   const contours = new Map();          // contours des personnes par image : temps (ms) -> { state: "pending" | "ready" | "fail", items: [{ id, mask }], k, p }
   let contChain = Promise.resolve(), shadow = null, shadowUrl = "";
   let benchMark = null;      // marquage d'une zone de banc en cours : { t, H, first: [x, y] | null }
@@ -228,6 +229,14 @@
     ctx.font = "700 13px 'Segoe UI',Arial,sans-serif"; const lb = qHighlight.label || "Ballon proposé", tw = ctx.measureText(lb).width + 10;
     ctx.fillStyle = "#f97316"; ctx.fillRect(v[0] - tw / 2, v[1] - 46, tw, 20); ctx.fillStyle = "#fff"; ctx.fillText(lb, v[0] - tw / 2 + 5, v[1] - 31);
   }
+  /* Raison pour laquelle le terrain n'est pas tracé à l'instant t (jamais « non tracé » sans le dire). */
+  function noTraceReason(a, t) {
+    const l = a ? O.lostAt(a.lost, t) : null, s = (a && a.settings) || {};
+    if (l) return "caméra perdue de " + App.fmt(l.de) + " à " + App.fmt(l.a) + " (suivi interrompu)";
+    if (!frames.length) return "la caméra a bougé depuis le calibrage (lancez l'analyse pour suivre la caméra)";
+    if (typeof s.t0 === "number" && typeof s.t1 === "number" && (t < s.t0 - 0.5 || t > s.t1 + 0.5)) return "hors de la plage analysée (" + App.fmt(s.t0) + " à " + App.fmt(s.t1) + ")";
+    return "aucune image analysée près de cet instant, la caméra a bougé depuis le calibrage";
+  }
   function drawOverlay() {
     const c = $("overlay");
     if (c.hidden) return;
@@ -282,7 +291,7 @@
       } else if (ch) {
         ctx.fillStyle = "rgba(11,18,32,.85)"; ctx.fillRect(8, 8, Math.min(520, boxSize().w - 16), 26);
         ctx.fillStyle = "#fff"; ctx.font = "600 13px 'Segoe UI',Arial,sans-serif";
-        ctx.fillText("Terrain non tracé ici : la caméra a bougé depuis le calibrage.", 16, 26);
+        ctx.fillText("Terrain non tracé ici : " + noTraceReason(a, t) + ".", 16, 26);
       }
     }
     // joueurs détectés
@@ -330,7 +339,8 @@
     // repères de calibrage
     pts.forEach((p) => {
       const v = toView(p.ix, p.iy);
-      ctx.strokeStyle = "#00e6ff"; ctx.fillStyle = "#00e6ff"; ctx.lineWidth = 2;
+      const col = p.sus ? "#ff4d4d" : p.id === selPt ? "#ffe14d" : "#00e6ff";
+      ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = 2;
       ctx.beginPath(); ctx.arc(v[0], v[1], 6, 0, Math.PI * 2); ctx.stroke();
       ctx.beginPath(); ctx.moveTo(v[0] - 10, v[1]); ctx.lineTo(v[0] + 10, v[1]); ctx.moveTo(v[0], v[1] - 10); ctx.lineTo(v[0], v[1] + 10); ctx.stroke();
       ctx.font = "600 12px 'Segoe UI',Arial,sans-serif"; ctx.fillText(p.label.slice(0, 28), v[0] + 10, v[1] - 8);
@@ -460,15 +470,64 @@
   /* ---------- volet de droite ---------- */
   function setChip(id, text, cls) { const e = $(id); e.textContent = text; e.className = "chip " + (cls || ""); }
 
+  /* Repères en cours de pose : écart de chaque repère à la projection calculée avec les autres (dès 5 repères), repère suspect signalé,
+     « Replacer » pour le reposer, flèches du clavier pour le décaler finement. */
   function renderPoints() {
     const l = $("ai-points");
     l.innerHTML = "";
+    const lm = Object.fromEntries(HG.landmarks(L(), W()).map((q) => [q.id, q]));
+    const errs = ACC ? ACC.pointErrors(pts, lm) : [];
     pts.forEach((p) => {
-      const d = document.createElement("div"); d.className = "ai-item";
-      d.innerHTML = "<span class=\"grow\">" + esc(p.label) + "</span><button title=\"Retirer\">×</button>";
-      d.querySelector("button").addEventListener("click", () => { pts = pts.filter((q) => q.id !== p.id); renderPoints(); refreshLive(); });
+      const e = errs.find((x) => x.id === p.id) || {};
+      p.sus = !!e.suspect;      // « à replacer » seulement pour le repère dont le retrait rend tous les autres cohérents ; un grand écart seul est affiché sans accusation
+      const d = document.createElement("div"); d.className = "ai-item" + (p.sus ? " sus" : "") + (selPt === p.id ? " sel" : "");
+      d.innerHTML = "<span class=\"grow\" style=\"cursor:pointer\" title=\"Cliquer pour choisir ce repère, puis les flèches du clavier le décalent d'un demi-pixel (Maj : 2 pixels)\">" + esc(p.label) + "</span>" +
+        (e.err != null ? "<span class=\"pt-err\" title=\"Écart entre ce repère et la position calculée avec tous les autres repères\">" + (e.err < 0.1 ? Math.round(e.err * 100) + " cm" : e.err.toFixed(2) + " m") + (p.sus ? " ⚠ à replacer" : "") + "</span>" : "") +
+        "<button data-a=\"re\" title=\"Replacer ce repère\">Replacer</button><button data-a=\"x\" title=\"Retirer\">×</button>";
+      d.querySelector(".grow").addEventListener("click", () => { selPt = p.id; renderPoints(); drawOverlay(); });
+      d.querySelector("[data-a=re]").addEventListener("click", () => { $("ai-landmark").value = p.id; startPlacing(); });
+      d.querySelector("[data-a=x]").addEventListener("click", () => { pts = pts.filter((q) => q.id !== p.id); renderPoints(); refreshLive(); drawOverlay(); });
       l.appendChild(d);
     });
+    if (pts.length === 4) { const m = document.createElement("p"); m.className = "hint"; m.textContent = "Avec 4 repères, l'erreur de chaque repère ne peut pas être mesurée : ajoutez un 5e repère pour la voir."; l.appendChild(m); }
+  }
+
+  /* ---------- accrochage et loupe (calibrage) ---------- */
+  const SNAP_H = ACC ? ACC.RAYON + ACC.MARGE : 24;      // demi-côté (pixels vidéo) de la zone lue pour chercher un croisement
+  function cropGray(cx, cy, h) {
+    if (!video.videoWidth) return null;
+    const x0 = Math.round(cx) - h, y0 = Math.round(cy) - h, n = 2 * h + 1;
+    if (x0 < 0 || y0 < 0 || x0 + n > video.videoWidth || y0 + n > video.videoHeight) return null;
+    const c = document.createElement("canvas"); c.width = n; c.height = n;
+    const g = c.getContext("2d", { willReadFrequently: true });
+    try {
+      g.drawImage(video, x0, y0, n, n, 0, 0, n, n);
+      const px = g.getImageData(0, 0, n, n).data, d = new Float32Array(n * n);
+      for (let i = 0; i < n * n; i++) d[i] = 0.299 * px[4 * i] + 0.587 * px[4 * i + 1] + 0.114 * px[4 * i + 2];
+      return { data: d, width: n, height: n, x0, y0 };
+    } catch (_e) { return null; }
+  }
+  /* Croisement de lignes le plus proche du clic (null si l'accrochage est coupé ou si rien de net n'est trouvé : le clic reste tel quel). */
+  function snapAt(ix, iy) {
+    if (!ACC || !$("ai-snap") || !$("ai-snap").checked) return null;
+    const g = cropGray(ix, iy, SNAP_H); if (!g) return null;
+    const r = ACC.snap(g, ix - g.x0, iy - g.y0);
+    return r.ok ? { x: r.x + g.x0, y: r.y + g.y0, dx: r.dx, dy: r.dy } : null;
+  }
+  function drawLoupe(ox, oy) {
+    const lp = $("loupe"); if (!lp) return;
+    if (!placing || ox == null) { lp.hidden = true; return; }
+    const [ix, iy] = toVideo(ox, oy), half = 14;
+    if (ix < 0 || iy < 0 || ix > video.videoWidth || iy > video.videoHeight) { lp.hidden = true; return; }
+    const k = lp.width / (2 * half + 1), g = lp.getContext("2d"), s = snapAt(ix, iy);
+    g.imageSmoothingEnabled = false; g.fillStyle = "#000"; g.fillRect(0, 0, lp.width, lp.height);
+    try { g.drawImage(video, Math.round(ix) - half, Math.round(iy) - half, 2 * half + 1, 2 * half + 1, 0, 0, lp.width, lp.height); } catch (_e) { /* image pas prête */ }
+    g.strokeStyle = "#00e6ff"; g.lineWidth = 1; g.beginPath(); g.moveTo(lp.width / 2, 0); g.lineTo(lp.width / 2, lp.height); g.moveTo(0, lp.height / 2); g.lineTo(lp.width, lp.height / 2); g.stroke();
+    if (s) { const sx = (s.x - Math.round(ix) + half + 0.5) * k, sy = (s.y - Math.round(iy) + half + 0.5) * k; g.strokeStyle = "#3ddc84"; g.lineWidth = 2; g.beginPath(); g.arc(sx, sy, 9, 0, Math.PI * 2); g.stroke(); }
+    const bw = boxSize();
+    lp.style.left = Math.max(4, Math.min(bw.w - lp.width - 4, ox + 26 + lp.width > bw.w ? ox - 26 - lp.width : ox + 26)) + "px";
+    lp.style.top = Math.max(4, Math.min(bw.h - lp.height - 4, oy - lp.height / 2)) + "px";
+    lp.hidden = false;
   }
 
   function renderCalibs() {
@@ -1437,7 +1496,7 @@
       a.doubts = result.doubts || [];
       qGroup = null; qThumbs.clear();                    // les numéros de pistes d'une nouvelle analyse n'ont rien à voir avec les anciens
       D.applyAnswers(frames, memory().answers);
-      a.camera = camera; a.lost = result.lost; a.notes = result.notes; a.recalage = result.recalage || [];
+      a.camera = camera; a.lost = result.lost; a.notes = result.notes; a.derive = result.derive || []; a.recalage = result.recalage || [];
       a.trace = result.trace ? P.compactFrames(result.trace) : null; a.continuous = result.continuous || null;        // trajectoires continues (~10 images/s) et preuve de la lecture (images dupliquées / sautées)
       a.frames = P.compactFrames(frames);
       a.benchSeen = result.bench || null;
@@ -1599,6 +1658,16 @@
       const q = inVideo(e);
       pointer[n](q.ix, q.iy, q.ok, e);
     }));
+    $("overlay").addEventListener("mousemove", (e) => { if (placing) drawLoupe(e.offsetX, e.offsetY); });
+    $("overlay").addEventListener("mouseleave", () => { $("loupe").hidden = true; });
+    document.addEventListener("keydown", (e) => {
+      if (!selPt || placing || !/^Arrow(Left|Right|Up|Down)$/.test(e.key)) return;
+      const tg = e.target; if (tg && /^(INPUT|SELECT|TEXTAREA)$/.test(tg.tagName)) return;
+      const p = pts.find((q) => q.id === selPt); if (!p) return;
+      const st = e.shiftKey ? 2 : 0.5;
+      p.ix += e.key === "ArrowLeft" ? -st : e.key === "ArrowRight" ? st : 0; p.iy += e.key === "ArrowUp" ? -st : e.key === "ArrowDown" ? st : 0;
+      e.preventDefault(); renderPoints(); refreshLive(); drawOverlay();
+    });
     $("overlay").addEventListener("click", (e) => {
       const [ix, iy] = toVideo(e.offsetX, e.offsetY);
       if (benchMark) { if (ix >= 0 && iy >= 0 && ix <= video.videoWidth && iy <= video.videoHeight) benchClick(ix, iy); return; }
@@ -1607,7 +1676,10 @@
       if (benchMark) { benchClick(ix, iy); return; }
       if (placing) {
         const lm = HG.landmarks(L(), W()).find((l) => l.id === placing);
-        pts = pts.filter((p) => p.id !== placing).concat([{ id: placing, label: lm.label, ix, iy }]);
+        const sn = snapAt(ix, iy);
+        pts = pts.filter((p) => p.id !== placing).concat([sn ? { id: placing, label: lm.label, ix: sn.x, iy: sn.y, snap: Math.hypot(sn.dx, sn.dy) } : { id: placing, label: lm.label, ix, iy }]);
+        selPt = placing;
+        $("loupe").hidden = true;
         const order = HG.landmarks(L(), W()).map((l) => l.id);
         const next = order.find((id) => !pts.some((p) => p.id === id));
         const placedId = placing;

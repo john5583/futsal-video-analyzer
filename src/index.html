@@ -45,6 +45,7 @@
           </div>
           <video id="video" crossorigin="anonymous" preload="metadata" hidden></video>
           <canvas id="overlay" class="overlay" hidden></canvas>
+          <canvas id="loupe" class="loupe" width="168" height="168" hidden></canvas>
           <div id="zoom-ctl" class="zoom-ctl" title="Molette de la souris : zoom ; glisser : déplacer l'image">
             <button id="zm-in" title="Agrandir (ou molette de la souris)">＋</button>
             <button id="zm-out" title="Réduire">－</button>
@@ -122,6 +123,7 @@
               <label class="row"><input id="ai-flip" type="checkbox" checked> Inverser à la 2e période</label>
             </div>
             <p class="hint">Mettez la vidéo sur une image où des lignes du terrain sont visibles, choisissez un repère, cliquez-le sur l'image. Au moins 4 repères bien répartis.</p>
+            <label class="row" title="Le clic est ramené sur le coin ou le croisement de lignes le plus net dans un rayon de 6 pixels ; s'il n'y en a pas, le clic n'est pas déplacé. Mesuré sur une scène d'essai : utile sur les coins nets, pas fiable sur les lignes courbes ; désactivé par défaut. La loupe (cercle vert) montre où le clic ira."><input id="ai-snap" type="checkbox"> Accrocher sur le croisement de lignes le plus proche (essai : voir la mesure ; la loupe montre où le clic ira)</label>
             <div class="ai-grid">
               <label class="wide">Repère à placer <select id="ai-landmark"></select></label>
               <button id="ai-place">Placer sur l'image</button>
@@ -458,6 +460,7 @@
 <script src="anim/gif.js"></script>
 <script src="ai/yolox.js"></script>
 <script src="ai/homography.js"></script>
+<script src="ai/accroche.js"></script>
 <script src="ai/kit.js"></script>
 <script src="ai/exemples.js"></script>
 <script src="ai/signature.js"></script>

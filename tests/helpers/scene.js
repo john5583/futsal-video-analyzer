@@ -3,7 +3,7 @@
 const CF = require("../../src/ai/court-fit");
 
 function render(pose, w, h, L, W, opts) {
-  const o = Object.assign({ goalAtEnd: false, lines: true, floor: [70, 110, 160], goalColors: [[200, 40, 40], [235, 235, 235]] }, opts || {});
+  const o = Object.assign({ goalAtEnd: false, lines: true, lineHalf: 0.08, floor: [70, 110, 160], goalColors: [[200, 40, 40], [235, 235, 235]] }, opts || {});
   const data = new Uint8ClampedArray(w * h * 4);
   for (let i = 0; i < w * h; i++) { data[i * 4] = o.floor[0]; data[i * 4 + 1] = o.floor[1]; data[i * 4 + 2] = o.floor[2]; data[i * 4 + 3] = 255; }
   const B = CF.cameraBasis(pose), f = CF.focalPx(w, pose[5]);
@@ -16,7 +16,7 @@ function render(pose, w, h, L, W, opts) {
   if (o.lines) {
     CF.modelPoints(L, W, { step: 0.03 }).forEach((p) => {
       const q = CF.project(B, f, w, h, p[0], p[1], 0);
-      if (q) disk(q.u, q.v, Math.max(1.1, 0.08 * f / q.z), [15, 15, 15]);
+      if (q) disk(q.u, q.v, Math.max(1.1, o.lineHalf * f / q.z), [15, 15, 15]);
     });
   }
   const xg = o.goalAtEnd ? L : 0, cy = W / 2;
