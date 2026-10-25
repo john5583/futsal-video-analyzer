@@ -68,3 +68,7 @@ jobs:
         run: xvfb-run -a node tests/e2e/suivi-camera.js
         env:
           CI: "true"
+      - name: Bancs reconnus tout seuls (fiches, entree reconnue, questions non bloquantes)
+        run: xvfb-run -a node tests/e2e/bancs-auto.js
+        env:
+          CI: "true"

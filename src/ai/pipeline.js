@@ -2,11 +2,11 @@
    reconnaissance des équipes, suivi, et lecture de la vidéo image par image (navigateur). */
 (function (root, factory) {
   if (typeof module === "object" && module.exports) {
-    module.exports = factory(require("./yolox"), require("./homography"), require("./kit"), require("./tracker"), require("./camera"), require("./balltrack"), require("./doubt"), require("./signature"), require("./orb"));
+    module.exports = factory(require("./yolox"), require("./homography"), require("./kit"), require("./tracker"), require("./camera"), require("./balltrack"), require("./doubt"), require("./signature"), require("./orb"), require("./bancs"));
   } else {
-    root.FutsalPipeline = factory(root.FutsalYolox, root.FutsalHomography, root.FutsalKit, root.FutsalTracker, root.FutsalCamera, root.FutsalBallTrack, root.FutsalDoubt, root.FutsalSignature, root.FutsalOrb);
+    root.FutsalPipeline = factory(root.FutsalYolox, root.FutsalHomography, root.FutsalKit, root.FutsalTracker, root.FutsalCamera, root.FutsalBallTrack, root.FutsalDoubt, root.FutsalSignature, root.FutsalOrb, root.FutsalBancs);
   }
-})(typeof self !== "undefined" ? self : this, function (Y, HG, K, T, Cam, BT, D, S, Orb) {
+})(typeof self !== "undefined" ? self : this, function (Y, HG, K, T, Cam, BT, D, S, Orb, BC) {
   "use strict";
 
   const TEAM_CODE = { A: "A", B: "B", GKA: "a", GKB: "b" };
@@ -235,12 +235,24 @@
     // zones des bancs, décalées pour suivre la dérive du suivi de la caméra (voir followBenches)
     const zones = shiftedZones(ctx.benchZones, ctx.benchDrift);
     const seatedIn = zones ? zones.map(() => []) : null;
+    const bn = [];                  // personnes vues près des lignes de touche (bancs) : voir bancs.js
+    const bnOn = !!(BC && S && ctx.img && ctx.bancs !== false && !ctx.noBn);
     persons.forEach((d) => {
       const fx = (d.x1 + d.x2) / 2 / ctx.scale, fy = d.y2 / ctx.scale;
       const p = HG.apply(ctx.H, fx, fy);
       if (!isFinite(p[0]) || !isFinite(p[1])) return;
       // personne assise dans une zone de banc marquée : remplaçant, pas un joueur
       const seated = (d.y2 - d.y1) < BENCH_SEATED * (d.x2 - d.x1);
+      if (bnOn && p[0] >= -2 && p[0] <= ctx.L + 2) {
+        const dh = p[1] < 0 ? -p[1] : p[1] > ctx.W ? p[1] - ctx.W : -Math.min(p[1], ctx.W - p[1]);     // > 0 : hors du terrain ; < 0 : sur le terrain, à cette distance de la ligne
+        const hors = dh >= BC.DEBUT_PROF_OFF && dh <= BC.PROFONDEUR, bord = dh < 0 && -dh <= BC.BORD_TERRAIN && p[0] >= 0 && p[0] <= ctx.L;
+        if (hors || bord) {
+          const bx = [d.x1, d.y1, d.x2, d.y2], e = [hors ? 0 : 1, Math.round(p[0] * 100) / 100, Math.round(p[1] * 100) / 100, seated ? 1 : 0, BC.aplatir(S.sample(ctx.img, bx))];
+          // hors terrain : la tenue ressemble-t-elle à celle d'une des deux équipes ? (un remplaçant porte la tenue de son équipe, un spectateur rarement)
+          if (hors && ctx.refs && ctx.refs.A && ctx.refs.B) { const ft = K.sample(ctx.img, bx), tm = ft ? K.classify(ft, { A: ctx.refs.A, B: ctx.refs.B }, { reject: ctx.reject }).team : null; e.push(tm === "A" || tm === "B" ? tm : ""); }
+          bn.push(e);
+        }
+      }
       if (seated && zones) zones.forEach((z, i) => { if (inBenchZone(p, [z], BENCH_FOLLOW)) seatedIn[i].push(p); });
       if (seated && inBenchZone(p, zones)) { if (stats) ctx.bench.zone = (ctx.bench.zone || 0) + 1; return; }
       if (p[0] < -margin || p[0] > ctx.L + margin || p[1] < -margin || p[1] > ctx.W + margin) {
@@ -293,6 +305,7 @@
     };
     const h = normalizedProjection(ctx.H, ctx.frameW / ctx.scale, ctx.frameH / ctx.scale);
     if (h) out.h = h;
+    if (bn.length) out.bn = bn;
     return out;
   }
 
@@ -377,6 +390,7 @@
         })
       };
       if (f.h) o.h = f.h;
+      if (f.bn) o.bn = f.bn;
       return o;
     });
   }
@@ -453,7 +467,8 @@
   function compactFrames(frames) {
     return frames.map((f) => {
       const c = [Math.round(f.t * 100) / 100, f.players.map((p) => [p.id, TEAM_CODE[p.team], p.x, p.y].concat(p.b || [])), f.ball ? [f.ball.x, f.ball.y] : null];
-      if (Array.isArray(f.h) && f.h.length === 9) c.push(f.h);
+      if (Array.isArray(f.bn) && f.bn.length) { c.push(Array.isArray(f.h) && f.h.length === 9 ? f.h : null); c.push(f.bn); }
+      else if (Array.isArray(f.h) && f.h.length === 9) c.push(f.h);
       return c;
     });
   }
@@ -465,6 +480,7 @@
         players: c[1].map((p) => ({ id: p[0], team: CODE_TEAM[p[1]], x: p[2], y: p[3], b: p.slice(4, 8) }))
       };
       if (Array.isArray(c[3]) && c[3].length === 9 && c[3].every(Number.isFinite)) f.h = c[3];
+      if (Array.isArray(c[4]) && c[4].length) f.bn = c[4];
       return f;
     });
   }
@@ -705,6 +721,11 @@
     } finally { video.removeAttribute("src"); video.load(); }
   }
 
+  /* Bancs reconnus, fiches des personnes au banc, entrées de remplaçants (voir bancs.js) ; null si rien n'est lisible. */
+  function analyseBancs(frames, opts) {
+    try { return BC ? BC.analyser(frames, { L: opts.L, W: opts.W, decisions: opts.bancsDecisions, anciennes: opts.fiches }) : null; } catch (_e) { return null; }
+  }
+
   /* Analyse complète d'une plage de la vidéo.
      opts : { url, t0, t1, fps, tiles, camera ("fixed" | "mobile"), tol, L, W, calibrations, refs, floorMarks (false = garder les ballons jaunes),
               dirAt (sens de jeu de l'équipe A, pour savoir quel gardien défend quel but), signal, onProgress, api }
@@ -878,7 +899,7 @@
     derive.forEach((d) => notes.push("Au calibrage de " + fmtMin(d.t) + ", le suivi issu du calibrage de " + fmtMin(d.de) + " s'écartait de " + d.med.toFixed(1).replace(".", ",") + " m (médiane sur le terrain visible, " + d.max.toFixed(1).replace(".", ",") + " m au plus)" + (d.med >= 1 ? " : le tracé a pu glisser avant cet instant ; ajouter des calibrages plus rapprochés le limite." : " : le suivi tient bien.")));
     const finalFrames = finalizeFrames(frames, { L: opts.L, W: opts.W, dirAt: opts.dirAt, roles: amb.close || amb.roles, doubts });
     if (bench.drift && bench.drift.d >= BENCH_ASK) doubts.push({ kind: "bench", t: bench.drift.t, d: bench.drift.d, zones: bench.drift.zones });
-    return { frames: finalFrames, lost, notes, bench, doubts, recalage, derive };
+    return { frames: finalFrames, lost, notes, bench, doubts, recalage, derive, bancs: analyseBancs(finalFrames, opts) };
   }
 
   /* ---- Analyse continue ----
@@ -1070,7 +1091,7 @@
         const dets = dropFloorMarks(await fr.detP, fr.img, opts.floorMarks);
         lastBoxes = dets.filter((d) => d.cls === Y.CLASS_PERSON).map((d) => [d.x1 * (gw / cw), d.y1 * (gh / ch), d.x2 * (gw / cw), d.y2 * (gh / ch)]);
         const legacy = fr.k % (CAM_EVERY * LEGACY_EVERY) === 0;
-        const o = processDetections(dets, { frameW: cw, frameH: ch, scale, img: fr.img, H, L: opts.L, W: opts.W, refs: opts.refs, reject: opts.tol, tracker, t: fr.t, close: amb.close, appearance: amb.close, bench, benchZones: opts.benchZones, benchDrift, noBenchStats: !legacy });
+        const o = processDetections(dets, { frameW: cw, frameH: ch, scale, img: fr.img, H, L: opts.L, W: opts.W, refs: opts.refs, reject: opts.tol, noBn: !legacy, tracker, t: fr.t, close: amb.close, appearance: amb.close, bench, benchZones: opts.benchZones, benchDrift, noBenchStats: !legacy });
         analysed++;
         if (fr.k % CAM_EVERY === 0) trace.push(o);
         if (legacy) frames.push(o);
@@ -1148,9 +1169,10 @@
       });
       const o = { t: f.t, players, ball: pickOf.get(f) || null };
       if (f.h) o.h = f.h;
+      if (f.bn) o.bn = f.bn;
       return o;
     });
-    return { frames: finalFrames, trace: traceOut, lost, notes, bench, doubts, recalage, continuous: { videoFps: Math.round((1 / dtEst) * 100) / 100, images: n, analysed, duplicated: dup, skipped, withoutFrameTime: noMt, bridged: trk.bridged } };
+    return { frames: finalFrames, trace: traceOut, lost, notes, bench, doubts, recalage, bancs: analyseBancs(finalFrames, opts), continuous: { videoFps: Math.round((1 / dtEst) * 100) / 100, images: n, analysed, duplicated: dup, skipped, withoutFrameTime: noMt, bridged: trk.bridged } };
   }
 
   /* Vignettes JPEG de la vidéo à des instants donnés (illustrations des erreurs acceptées). */
