@@ -13,6 +13,7 @@
   let pts = [];              // repères en cours de placement : { id, label, ix, iy }
   let placing = null;        // identifiant du repère à placer
   let pickRole = null;       // rôle de tenue à choisir
+  let more = null;           // « ＋ Autre exemple » depuis la liste des équipes : { key, t } (t = instant où revenir après validation)
   let qGroup = null;         // proposition d'appliquer la même réponse aux pistes de la même personne : { team, q, group }
   let qHighlight = null;     // personne désignée par une question : { t, b } (cadre orange sur la vidéo)
   const CT = window.FutsalContour, SIL = window.FutsalSilhouette;
@@ -365,7 +366,7 @@
       ctx.fillStyle = "#fff"; ctx.font = "600 13px 'Segoe UI',Arial,sans-serif";
       const label = placing ? "Cliquez sur : " + (HG.landmarks(L(), W()).find((l) => l.id === placing) || {}).label
         : pip ? "Pipette (" + (ROLES.find((q) => q[0] === pip.role) || [])[1] + ") : cliquez sur " + PARTS[pip.part] + " d'un joueur (Échap : annuler)"
-        : "Cliquez sur un joueur : " + (ROLES.find((q) => q[0] === pickRole) || [])[1];
+        : "Cliquez sur la silhouette de : " + (ROLES.find((q) => q[0] === pickRole) || [])[1];
       ctx.fillText(label, 16, 26);
     }
   }
@@ -512,7 +513,7 @@
       box.appendChild(row);
     });
     kitWarnings(r).forEach((m) => { const p = document.createElement("p"); p.className = "hint kit-warn"; p.textContent = "⚠ " + m; box.appendChild(p); });
-    if (EX) box.appendChild(examplesPanel({ bench: false }));
+    if (EX) box.appendChild(examplesPanel({ bench: false, nav: true, onMore: moreHere }));
     const ok = !!(r.A && r.B);
     setChip("ai-s2-state", ok ? "Équipes reconnues" : "Choisir au moins 2 équipes", ok ? "ok" : "warn");
     renderNext();
@@ -532,6 +533,13 @@
     const dur = () => video.duration || state.project.duration || 0;
     const vnom = state.project.videoName || null;
     root.appendChild(exEl("h4", null, "Mes exemples (gardés dans ce projet)"));
+    if (more && pickRole === more.key) {
+      const cons = exEl("div", "ex-consigne");
+      cons.appendChild(exEl("b", null, "Cliquez sur la silhouette de : " + (ROLES.find((q) => q[0] === more.key) || [])[1]));
+      cons.appendChild(exEl("span", "hint", " Choisissez le bon moment avec les boutons ci-dessous, puis cliquez sur le joueur dans la vidéo. Je reviens ensuite à " + App.fmt(more.t) + "."));
+      cons.appendChild(exBtn("Annuler", "Abandonner et revenir à l'instant de départ", () => cancelMore(true), "ghost"));
+      root.appendChild(cons);
+    }
     root.appendChild(exEl("p", "hint", "Donnez plusieurs exemples à des moments différents : l'IA les utilise tous ensemble. Ils restent dans ce projet et ne servent jamais à un autre match."));
     if (o.nav) {
       const nav = exEl("div", "ex-nav"), lab = exEl("span", "muted ex-time", App.fmt(video.currentTime || 0));
@@ -795,7 +803,25 @@
   }
 
   /* ---------- choix des tenues ---------- */
+  /* « ＋ Autre exemple » dans la liste des équipes : mêmes consignes et même navigation que dans l'assistant, retour à l'instant de départ après validation. */
+  function moreHere(key) {
+    if (!App.isVideoReady()) { App.toast("La vidéo n'est pas encore prête : attendez qu'elle s'affiche, puis recommencez.", true); return; }
+    if (!api) { App.toast("Fonction disponible dans l'application uniquement.", true); return; }
+    more = { key, t: video.currentTime || 0 };
+    startPick(key);
+    renderKits();
+    const c = $("ai-kits"); if (c && c.scrollIntoView) c.scrollIntoView({ block: "nearest" });
+    App.toast("Cliquez sur la silhouette de : " + (ROLES.find((q) => q[0] === key) || [])[1] + ". Utilisez −10 s / −1 s / +1 s / +10 s ou « Aller à » pour choisir le moment.");
+  }
+  function cancelMore(back) {
+    const m = more; more = null; pickRole = null;
+    if (back && m) App.seek(m.t);
+    updateOverlayMode(); renderKits();
+  }
+  function finishMore() { const m = more; more = null; if (m) App.seek(m.t); }
+
   async function startPick(role) {
+    if (more && more.key !== role) more = null;
     if (!App.isVideoReady()) { App.toast("Chargez d'abord une vidéo.", true); return; }
     if (!api) { App.toast("Fonction disponible dans l'application uniquement.", true); return; }
     video.pause();
@@ -805,6 +831,7 @@
 
   async function handlePick(ix, iy) {
     const role = pickRole;
+    const rearm = () => { if (more && more.key === role) { pickRole = role; updateOverlayMode(); renderKits(); } };   // « Autre exemple » : on reste en attente d'un clic
     pickRole = null; updateOverlayMode();
     App.toast("Détection en cours…");
     try {
@@ -821,14 +848,15 @@
         let md = 80 * res.scale + 1;
         persons.forEach((d) => { const dd = Math.hypot((d.x1 + d.x2) / 2 - cx, (d.y1 + d.y2) / 2 - cy); if (dd < md) { md = dd; best = d; } });
       }
-      if (!best) { App.toast("Aucun joueur détecté à cet endroit. Cliquez sur le joueur lui-même.", true); return; }
+      if (!best) { App.toast("Aucun joueur détecté à cet endroit. Cliquez sur le joueur lui-même.", true); rearm(); return; }
       const feat = K.sample(res.img, [best.x1, best.y1, best.x2, best.y2]);
-      if (!feat) { App.toast("Joueur trop petit pour lire la tenue : choisissez une image où il est plus grand.", true); return; }
+      if (!feat) { App.toast("Joueur trop petit pour lire la tenue : choisissez une image où il est plus grand.", true); rearm(); return; }
       const a = ai();
       (a.kits[role] = a.kits[role] || []).push(marque(feat, "auto"));
       renderKits(); App.changed();
       App.toast("Tenue enregistrée.");
-    } catch (e) { App.toast("Détection impossible : " + e.message, true); }
+      if (more && more.key === role) { finishMore(); renderKits(); }
+    } catch (e) { App.toast("Détection impossible : " + e.message, true); rearm(); }
   }
 
   /* ---------- pipette ---------- */
@@ -1587,7 +1615,7 @@
     });
     document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeMenu(); });
     document.addEventListener("mousedown", (e) => { if (menuEl && !menuEl.contains(e.target)) closeMenu(); });
-    document.addEventListener("keydown", (e) => { if (e.key === "Escape" && benchMark) { benchMark = null; updateOverlayMode(); return; } if (e.key === "Escape" && (placing || pickRole || pip)) { placing = null; pickRole = null; if (pip) cancelPipette(); else updateOverlayMode(); } });
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape" && benchMark) { benchMark = null; updateOverlayMode(); return; } if (e.key === "Escape" && (placing || pickRole || pip)) { if (more) { cancelMore(true); return; } placing = null; pickRole = null; if (pip) cancelPipette(); else updateOverlayMode(); } });
     ["loadedmetadata", "seeked", "pause", "timeupdate", "emptied"].forEach((ev) => video.addEventListener(ev, () => {
       if (ev === "emptied") { setZoom({ k: 1, tx: 0, ty: 0 }); contours.clear(); if (shadow) { shadow.removeAttribute("src"); shadow.load(); shadow = null; shadowUrl = ""; } }
       if (preview && ev === "seeked" && lastTest && Math.abs(video.currentTime - preview.t) > 0.2) { preview = null; lastTest = null; $("ai-test-msg").textContent = ""; }

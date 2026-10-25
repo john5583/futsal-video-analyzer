@@ -327,3 +327,4 @@ fieldset.plan-q label.plan-opt{display:flex;flex-direction:row;gap:8px;align-ite
 .cov-ok{color:#86efac}.cov-no{color:#fcd34d}.cov-rej{color:#fca5a5}
 .wiz-exd{margin:8px 0}
 .wiz-exd>summary{cursor:pointer;color:var(--muted);font-size:12px}
+.ex-consigne{background:#1f2a44;border:1px solid #f2b705;border-radius:6px;padding:6px 8px;margin:6px 0;display:flex;flex-wrap:wrap;gap:6px;align-items:center}
