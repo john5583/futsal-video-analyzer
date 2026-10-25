@@ -56,3 +56,7 @@ jobs:
         run: xvfb-run -a node tests/e2e/camera-reprise.js
         env:
           CI: "true"
+      - name: Autre exemple depuis la liste des equipes (consigne, navigation, message, annulation)
+        run: xvfb-run -a node tests/e2e/autre-exemple-equipes.js
+        env:
+          CI: "true"
