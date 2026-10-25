@@ -17,7 +17,7 @@
   let more = null;           // « ＋ Autre exemple » depuis la liste des équipes : { key, t } (t = instant où revenir après validation)
   let qGroup = null;         // proposition d'appliquer la même réponse aux pistes de la même personne : { team, q, group }
   let qHighlight = null;     // personne désignée par une question : { t, b } (cadre orange sur la vidéo)
-  const CT = window.FutsalContour, SIL = window.FutsalSilhouette, ACC = window.FutsalAccroche;
+  const CT = window.FutsalContour, SIL = window.FutsalSilhouette, ACC = window.FutsalAccroche, BCH = window.FutsalBancs;
   let selPt = null;          // repère sélectionné dans la liste (flèches du clavier : décalage fin)
   const contours = new Map();          // contours des personnes par image : temps (ms) -> { state: "pending" | "ready" | "fail", items: [{ id, mask }], k, p }
   let contChain = Promise.resolve(), shadow = null, shadowUrl = "";
@@ -1064,6 +1064,80 @@
   function benchSetting() { return $("ai-bench").value; }
 
   /* ---------- zones des bancs ---------- */
+  /* ---------- bancs reconnus par le programme, fiches des remplaçants, changements ---------- */
+  const bcEl = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
+  const fmtM = (v) => String(v).replace(".", ",");
+  function bancsFrom(a, decisions) {
+    if (!BCH || !frames.length) return null;
+    return BCH.analyser(frames, { L: L(), W: W(), decisions: decisions || a.bancsDecisions || [], anciennes: (a.bancs && a.bancs.fiches) || [] });
+  }
+  function decide(b, oui) {
+    const a = ai(); a.bancsDecisions = (a.bancsDecisions || []).filter((d) => !(d.cote === b.cote && Math.abs(d.x - (b.x0 + b.x1) / 2) <= 3)).concat([{ cote: b.cote, x: Math.round(((b.x0 + b.x1) / 2) * 10) / 10, oui }]);
+    a.bancs = bancsFrom(a) || a.bancs; renderBancs(); App.changed();
+  }
+  function renderBancs() {
+    const box = $("ai-bancs"); if (!box) return;
+    const a = ai(), r = a && a.bancs;
+    box.innerHTML = "";
+    if (!r) { box.appendChild(bcEl("p", "muted", "Les bancs de remplaçants seront reconnus pendant l'analyse (personnes assises hors du terrain, présentes longtemps au même endroit).")); return; }
+    box.appendChild(bcEl("h5", null, "Bancs reconnus par le programme"));
+    r.notes.forEach((n) => box.appendChild(bcEl("p", "muted", n)));
+    r.bancs.forEach((b) => {
+      const it = bcEl("div", "bc-item" + (b.sur || b.confirme ? "" : " q"));
+      it.appendChild(bcEl("span", null, "Banc " + b.id.slice(1) + " — ligne de touche " + (b.cote === "y0" ? "1" : "2") + ", de " + fmtM(b.x0) + " à " + fmtM(b.x1) + " m le long du terrain, à " + fmtM(b.d0) + "–" + fmtM(b.d1) + " m de la ligne ; " + b.presence + " créneaux de 5 s avec des personnes assises, vu à " + b.instants.length + " moment(s)"));
+      if (b.confirme) it.appendChild(bcEl("b", null, "✔ confirmé par vous"));
+      else if (b.sur) it.appendChild(bcEl("b", null, "✔ reconnu"));
+      else { it.appendChild(bcEl("b", null, "Est-ce un banc ? " + b.raison)); const y = bcEl("button", null, "Oui, c'est un banc"); y.addEventListener("click", () => decide(b, true)); it.appendChild(y); }
+      const n = bcEl("button", null, "Ce n'est pas un banc"); n.addEventListener("click", () => decide(b, false)); it.appendChild(n);
+      if (b.sur || b.confirme) {
+        const u = bcEl("button", null, "Ne plus compter ces personnes comme joueurs");
+        u.title = "Ajoute cette zone aux zones de banc : à la prochaine analyse, les personnes assises dedans ne sont plus comptées comme des joueurs.";
+        u.addEventListener("click", () => {
+          const sy = b.cote === "y0" ? [-b.d1 - 0.5, -Math.max(0, b.d0 - 0.5)] : [W() + Math.max(0, b.d0 - 0.5), W() + b.d1 + 0.5];
+          const nz = { x1: b.x0, y1: sy[0], x2: b.x1, y2: sy[1] };
+          a.benchZones = ((a.benchZones || []).concat([EX ? EX.marquerBanc(nz, { t: video.currentTime || 0, v: state.project.videoName || null }) : nz])).slice(EX ? -EX.LIMITES.BANC_MAX : -3);
+          renderBenchZones(); drawOverlay(); App.changed(); App.toast("Zone de banc ajoutée : elle servira à la prochaine analyse.");
+        });
+        it.appendChild(u);
+      }
+      box.appendChild(it);
+    });
+    if (r.fiches.length) {
+      box.appendChild(bcEl("h5", null, "Personnes vues au banc (fiches d'apparence : tenue, jamais d'identité devinée)"));
+      r.fiches.forEach((fi) => {
+        const it = bcEl("div", "bc-item" + (fi.proches.length ? " q" : ""));
+        it.appendChild(bcEl("b", null, fi.libelle));
+        const inp = bcEl("input"); inp.type = "text"; inp.placeholder = "Nommer"; inp.value = fi.nom || "";
+        inp.addEventListener("change", () => { fi.nom = inp.value.trim() || null; fi.libelle = fi.nom || "remplaçant " + String.fromCharCode(65 + ((Number(fi.id.slice(1)) - 1) % 26)); renderBancs(); App.changed(); });
+        it.appendChild(inp);
+        it.appendChild(bcEl("span", "muted", "vue " + fi.n + " fois, de " + App.fmt(fi.t0) + " à " + App.fmt(fi.t1) + (fi.proches.length ? " — ressemble à " + fi.proches.map((id) => (r.fiches.find((q) => q.id === id) || {}).libelle).join(", ") + " : je demanderai en cas de doute" : "")));
+        box.appendChild(it);
+      });
+    }
+    box.appendChild(bcEl("h5", null, "Changements repérés (entrées au banc)"));
+    // seuls les passages assez sûrs sont listés (entrant reconnu ou choisi par vous, ou sortie vue) ; les autres, trop incertains, sont comptés mais pas affichés
+    const sur = (c) => c.entrant.statut === "reconnu" || !!c.entrant.choix || c.sortant.statut === "observée";
+    const montres = r.changements.filter(sur);
+    if (!r.changements.length) box.appendChild(bcEl("p", "muted", "Aucune entrée de remplaçant repérée près d'un banc reconnu."));
+    else if (r.changements.length > montres.length) box.appendChild(bcEl("p", "muted", (r.changements.length - montres.length) + " autre(s) passage(s) près du banc trop incertain(s) (personne illisible ou ressemblant à plusieurs fiches) : non listés, rien n'est deviné."));
+    montres.forEach((c) => {
+      const e = c.entrant, s = c.sortant, qui = e.fiche ? (r.fiches.find((q) => q.id === (e.choix || e.fiche)) || {}).libelle : null;
+      const it = bcEl("div", "bc-item" + (e.statut === "reconnu" || e.choix ? "" : " q"));
+      const go = bcEl("button", null, "⏵ " + App.fmt(c.t)); go.addEventListener("click", () => App.seek(Math.max(0, c.t - 1)));
+      it.appendChild(go);
+      const nom = e.choix ? (r.fiches.find((q) => q.id === e.choix) || {}).libelle + " (choisi par vous)" : qui ? qui + " (reconnu)" : e.statut === "ambigu" ? "deux personnes se ressemblent" : e.statut === "inconnu" ? "personne inconnue du banc" : "apparence illisible";
+      it.appendChild(bcEl("span", null, "Entre : " + nom + " (équipe " + (c.equipe || "?") + ") — Sort : " + (s.statut === "observée" ? "joueur " + s.piste + " (vu quitter le terrain)" : s.statut === "ambigu" ? "plusieurs joueurs possibles" : "sortie non vue (peut-être hors du champ de la caméra)")));
+      if ((e.statut === "ambigu" || e.statut === "inconnu") && !e.choix) {
+        const sel = bcEl("select"); sel.appendChild(new Option("Qui est-ce ?", ""));
+        r.fiches.forEach((fi) => sel.appendChild(new Option(fi.libelle, fi.id)));
+        sel.addEventListener("change", () => { if (sel.value) { e.choix = sel.value; renderBancs(); App.changed(); } });
+        it.appendChild(sel);
+      }
+      box.appendChild(it);
+    });
+    box.appendChild(bcEl("p", "muted", "Limites : un banc hors du champ de la caméra n'est pas vu ; deux personnes en tenues proches sont rangées ensemble ou signalées ; la caméra à la main déplace le banc dans l'image (je vérifie qu'il reste au même endroit du terrain)."));
+  }
+
   function renderBenchZones() {
     const z = (state.project.ai && state.project.ai.benchZones) || [];
     const c = EX ? EX.banc(z, { camera: state.project.ai && state.project.ai.camera }) : null;
@@ -1558,7 +1632,7 @@
       const camera = $("ai-camera").value;
       const continuous = !!(opts && opts.continuous) || (v2 && $("ai-v2-cont").checked);        // analyse continue : chaque image de la vidéo (voir pipeline.js)
       const result = await (continuous ? P.analyseVideoContinuous : P.analyseVideo)({
-        url: App.getVideoUrl(), t0: range[0], t1: range[1], fps, tiles, camera, tol: tol(), L: L(), W: W(), calibrations: a.calibrations, suivi: $("ai-reuse").checked && suiviValide(a) ? suiviFr : null, refs: r, floorMarks: floorMarks(), benchZones: a.benchZones || [], benchFollow: memory().benchFollow !== false, dirAt, signal: abort.signal, api, ballMargin: (opts && opts.extra && opts.extra.ballMargin) || (v2 ? 6 : undefined), fullRes: !!(opts && opts.extra && opts.extra.fullRes) || v2,
+        url: App.getVideoUrl(), t0: range[0], t1: range[1], fps, tiles, camera, tol: tol(), L: L(), W: W(), calibrations: a.calibrations, suivi: $("ai-reuse").checked && suiviValide(a) ? suiviFr : null, bancsDecisions: a.bancsDecisions || [], fiches: (a.bancs && a.bancs.fiches) || [], refs: r, floorMarks: floorMarks(), benchZones: a.benchZones || [], benchFollow: memory().benchFollow !== false, dirAt, signal: abort.signal, api, ballMargin: (opts && opts.extra && opts.extra.ballMargin) || (v2 ? 6 : undefined), fullRes: !!(opts && opts.extra && opts.extra.fullRes) || v2,
         onProgress: (p) => {
           $("ai-bar").style.width = Math.round((p.done / p.total) * 100) + "%";
           msg.textContent = "Image " + p.done + " / " + p.total + " — reste environ " + fmtEta(p.eta) + (p.lost ? " (caméra perdue sur cette image)" : "");
@@ -1572,6 +1646,7 @@
       a.doubts = result.doubts || [];
       qGroup = null; qThumbs.clear();                    // les numéros de pistes d'une nouvelle analyse n'ont rien à voir avec les anciens
       D.applyAnswers(frames, memory().answers);
+      a.bancs = result.bancs || null; renderBancs();
       a.camera = camera; a.lost = result.lost; a.notes = result.notes; a.derive = result.derive || []; a.recalage = result.recalage || [];
       a.trace = result.trace ? P.compactFrames(result.trace) : null; a.continuous = result.continuous || null;        // trajectoires continues (~10 images/s) et preuve de la lecture (images dupliquées / sautées)
       a.frames = P.compactFrames(frames);
@@ -1652,7 +1727,8 @@
     $("ai-marks").checked = !(d.settings && d.settings.floorMarks === false);
     $("ai-reuse").checked = !!(d.settings && d.settings.reuseSuivi);
     $("ai-bench").value = (d.settings && ["left", "right"].includes(d.settings.bench)) ? d.settings.bench : "auto";
-    benchMark = null; renderBenchZones();
+    if (a && !a.bancs && frames.length && BCH && frames.some((q) => q.bn)) { try { a.bancs = bancsFrom(a); } catch (_e) { /* projet sans lectures de bancs */ } }
+    benchMark = null; renderBenchZones(); renderBancs();
     qGroup = null; qHighlight = null; qThumbs.clear(); contours.clear(); bs = null; bsBox(false);
     $("ai-t0").value = App.fmt((d.settings && d.settings.t0) || 0);
     $("ai-t1").value = App.fmt((d.settings && d.settings.t1) || state.project.duration || 0);
@@ -1846,7 +1922,7 @@
     cancelPlacing: () => { placing = null; updateOverlayMode(); },
     getPoints: () => pts.slice(), clearPoints: () => { pts = []; placing = null; renderPoints(); updateOverlayMode(); },
     removePoint: (id) => { pts = pts.filter((q) => q.id !== id); renderPoints(); refreshLive(); },
-    clearAnalysis: () => { frames = []; const a = ai(); a.frames = null; a.stats = null; a.suggestedEvents = []; a.uncertain = []; a.context = null; a.couverture = null; a.suggested = 0; renderStats(); renderSuggestions(); refreshLive(); },
+    clearAnalysis: () => { frames = []; const a = ai(); a.frames = null; a.bancs = null; renderBancs(); a.stats = null; a.suggestedEvents = []; a.uncertain = []; a.context = null; a.couverture = null; a.suggested = 0; renderStats(); renderSuggestions(); refreshLive(); },
     setRange: (t0, t1) => { $("ai-t0").value = App.fmt(t0); $("ai-t1").value = App.fmt(t1); updateEstimate(); },
     setCamera: (v) => { $("ai-camera").value = v; $("ai-camera").dispatchEvent(new Event("change")); },
     setDirection: (v) => { $("ai-dir").value = String(v); $("ai-dir").dispatchEvent(new Event("change")); },
