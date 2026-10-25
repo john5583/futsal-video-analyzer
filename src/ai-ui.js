@@ -22,6 +22,7 @@
   let contChain = Promise.resolve(), shadow = null, shadowUrl = "";
   let benchMark = null;      // marquage d'une zone de banc en cours : { t, H, first: [x, y] | null }
   let frames = [];           // trajectoires (format d'analyse)
+  let fineTrace = [];        // analyse continue : position du terrain à ~10 images/s (le tracé suit la vidéo sans saut)
   let abort = null;
   let running = false;
   let live = null;           // image affichée pendant l'analyse
@@ -228,6 +229,14 @@
     ctx.font = "700 13px 'Segoe UI',Arial,sans-serif"; const lb = qHighlight.label || "Ballon proposé", tw = ctx.measureText(lb).width + 10;
     ctx.fillStyle = "#f97316"; ctx.fillRect(v[0] - tw / 2, v[1] - 46, tw, 20); ctx.fillStyle = "#fff"; ctx.fillText(lb, v[0] - tw / 2 + 5, v[1] - 31);
   }
+  /* Raison pour laquelle le terrain n'est pas tracé à l'instant t (jamais « non tracé » sans le dire). */
+  function noTraceReason(a, t) {
+    const l = a ? O.lostAt(a.lost, t) : null, s = (a && a.settings) || {};
+    if (l) return "caméra perdue de " + App.fmt(l.de) + " à " + App.fmt(l.a) + " (suivi interrompu)";
+    if (!frames.length) return "la caméra a bougé depuis le calibrage (lancez l'analyse pour suivre la caméra)";
+    if (typeof s.t0 === "number" && typeof s.t1 === "number" && (t < s.t0 - 0.5 || t > s.t1 + 0.5)) return "hors de la plage analysée (" + App.fmt(s.t0) + " à " + App.fmt(s.t1) + ")";
+    return "aucune image analysée près de cet instant, la caméra a bougé depuis le calibrage";
+  }
   function drawOverlay() {
     const c = $("overlay");
     if (c.hidden) return;
@@ -257,7 +266,7 @@
     // aperçu du terrain calibré
     // (tracé seulement si la projection est fiable à cet instant ; sinon un message l'explique, pas de lignes absurdes)
     if (a && $("ov-court").checked) {
-      const ch = P.courtH(frames, a.calibrations, a.camera || $("ai-camera").value, t, video.videoWidth, video.videoHeight);
+      const ch = P.courtH(fineTrace.length > frames.length ? fineTrace : frames, a.calibrations, a.camera || $("ai-camera").value, t, video.videoWidth, video.videoHeight);
       if (ch && ch.H) {
         const Hi = HG.invert(ch.H), o = toView(0, 0), e = toView(r.vw, r.vh), far = 4;
         ctx.save(); ctx.beginPath(); ctx.rect(o[0], o[1], e[0] - o[0], e[1] - o[1]); ctx.clip();
@@ -282,7 +291,7 @@
       } else if (ch) {
         ctx.fillStyle = "rgba(11,18,32,.85)"; ctx.fillRect(8, 8, Math.min(520, boxSize().w - 16), 26);
         ctx.fillStyle = "#fff"; ctx.font = "600 13px 'Segoe UI',Arial,sans-serif";
-        ctx.fillText("Terrain non tracé ici : la caméra a bougé depuis le calibrage.", 16, 26);
+        ctx.fillText("Terrain non tracé ici : " + noTraceReason(a, t) + ".", 16, 26);
       }
     }
     // joueurs détectés
@@ -1482,7 +1491,8 @@
       a.doubts = result.doubts || [];
       qGroup = null; qThumbs.clear();                    // les numéros de pistes d'une nouvelle analyse n'ont rien à voir avec les anciens
       D.applyAnswers(frames, memory().answers);
-      a.camera = camera; a.lost = result.lost; a.notes = result.notes; a.recalage = result.recalage || [];
+      a.camera = camera; a.lost = result.lost; a.notes = result.notes; a.derive = result.derive || []; a.recalage = result.recalage || [];
+      fineTrace = result.trace || [];
       a.trace = result.trace ? P.compactFrames(result.trace) : null; a.continuous = result.continuous || null;        // trajectoires continues (~10 images/s) et preuve de la lecture (images dupliquées / sautées)
       a.frames = P.compactFrames(frames);
       a.benchSeen = result.bench || null;
@@ -1552,6 +1562,7 @@
   function syncFromProject() {
     const a = state.project.ai;
     frames = a && a.frames ? P.expandFrames(a.frames) : [];
+    fineTrace = a && a.trace ? P.expandFrames(a.trace) : [];
     live = null; pts = []; placing = null; pickRole = null;
     const d = a || { L: 40, W: 20, dir: 1, flip: true, settings: { fps: 3, tiles: 1, t0: 0, t1: 0 } };
     $("ai-L").value = d.L; $("ai-W").value = d.W; $("ai-dir").value = String(d.dir || 1); $("ai-flip").checked = d.flip !== false;
@@ -1745,7 +1756,7 @@
     cancelPlacing: () => { placing = null; updateOverlayMode(); },
     getPoints: () => pts.slice(), clearPoints: () => { pts = []; placing = null; renderPoints(); updateOverlayMode(); },
     removePoint: (id) => { pts = pts.filter((q) => q.id !== id); renderPoints(); refreshLive(); },
-    clearAnalysis: () => { frames = []; const a = ai(); a.frames = null; a.stats = null; a.suggestedEvents = []; a.uncertain = []; a.context = null; a.couverture = null; a.suggested = 0; renderStats(); renderSuggestions(); refreshLive(); },
+    clearAnalysis: () => { frames = []; fineTrace = []; const a = ai(); a.frames = null; a.stats = null; a.suggestedEvents = []; a.uncertain = []; a.context = null; a.couverture = null; a.suggested = 0; renderStats(); renderSuggestions(); refreshLive(); },
     setRange: (t0, t1) => { $("ai-t0").value = App.fmt(t0); $("ai-t1").value = App.fmt(t1); updateEstimate(); },
     setCamera: (v) => { $("ai-camera").value = v; $("ai-camera").dispatchEvent(new Event("change")); },
     setDirection: (v) => { $("ai-dir").value = String(v); $("ai-dir").dispatchEvent(new Event("change")); },

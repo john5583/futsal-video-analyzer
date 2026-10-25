@@ -150,15 +150,51 @@
      1. la projection mesurée sur l'image analysée la plus proche (à 0,3 s), qui suit la caméra ;
      2. sinon le calibrage, mais seulement si la caméra est fixe ou si le calibrage date de moins de 0,5 s (une caméra à la main
         a bougé depuis : tracer le terrain avec un vieux calibrage donnerait des lignes dans tous les sens). */
+  const goodH = (f) => !!(f && Array.isArray(f.h) && f.h.length === 9 && f.h.every(Number.isFinite) && Math.abs(f.h[8]) > 1e-12);
+  const COURT_GAP_M = 4;        // m : écart maximal, sur le terrain, entre deux images voisines pour tracer entre les deux (sinon : saut de caméra, pas d'interpolation)
+  const INTERP_MAX_S = 0.8;     // s : écart maximal entre deux images voisines pour interpoler
+  /* Projection interpolée entre l'image analysée juste avant t et celle juste après (le tracé suit la vidéo en lecture sans saut).
+     Rend null si l'une manque, si elles sont trop éloignées dans le temps, ou si la caméra a sauté entre les deux. */
+  function courtHBetween(frames, t, vw, vh) {
+    let lo = 0, hi = frames.length - 1;
+    while (lo < hi) { const m = (lo + hi) >> 1; if (frames[m].t < t) lo = m + 1; else hi = m; }
+    const b = frames[lo], a = lo > 0 ? frames[lo - 1] : null;
+    if (!a || !b || a.t > t || b.t < t || !goodH(a) || !goodH(b) || b.t - a.t > INTERP_MAX_S || b.t - a.t < 1e-6) return null;
+    const Ha = a.h.map((v) => v / a.h[8]), Hb = b.h.map((v) => v / b.h[8]), al = (t - a.t) / (b.t - a.t);
+    let gap = 0;
+    [[0, 0], [1, 0], [1, 1], [0, 1], [0.5, 0.5]].forEach(([x, y]) => { const pa = HG.apply(Ha, x, y), pb = HG.apply(Hb, x, y); gap = Math.max(gap, Math.hypot(pa[0] - pb[0], pa[1] - pb[1])); });
+    if (!(gap <= COURT_GAP_M)) return null;
+    return HG.mul3(Ha.map((v, i) => v + (Hb[i] - v) * al), [1 / vw, 0, 0, 0, 1 / vh, 0, 0, 0, 1]);
+  }
   function courtH(frames, calibs, camera, t, vw, vh) {
+    if (frames && frames.length > 1 && vw > 0 && vh > 0) {
+      try { const H = courtHBetween(frames, t, vw, vh); if (H) return { H, source: "image-interpolee" }; } catch (_e) { /* retour à l'image la plus proche */ }
+    }
     const f = frames && frames.length ? frameNear(frames, t, 0.3) : null;
-    if (f && Array.isArray(f.h) && f.h.length === 9 && vw > 0 && vh > 0) {
+    if (goodH(f) && vw > 0 && vh > 0) {
       try { return { H: HG.mul3(f.h, [1 / vw, 0, 0, 0, 1 / vh, 0, 0, 0, 1]), source: "image" }; } catch (_e) { /* projection inutilisable */ }
     }
     const cal = calibrationAt(calibs, t);
     if (!cal) return null;
     if (camera !== "fixed" && Math.abs(cal.t - t) > 0.5) return { H: null, source: "calibrage-ancien" };
     return { H: cal.H, source: "calibrage" };
+  }
+
+  /* Dérive du suivi de la caméra mesurée quand un nouveau calibrage est atteint : écart (m, sur le terrain) entre la projection que le suivi
+     avait calculée à partir du calibrage précédent (Hpred) et celle du nouveau calibrage (Hcal), sur une grille de points de l'image qui tombent
+     sur le terrain (à 2 m près). Rend { med, max, n } ou null s'il y a trop peu de points. Les deux projections vont des pixels vidéo au terrain. */
+  function driftAt(Hpred, Hcal, vw, vh, L, W) {
+    const e = [];
+    try {
+      for (let gx = 0.1; gx < 0.95; gx += 0.1) for (let gy = 0.2; gy < 0.95; gy += 0.1) {
+        const c = HG.apply(Hcal, gx * vw, gy * vh), q = HG.apply(Hpred, gx * vw, gy * vh);
+        if (![c[0], c[1], q[0], q[1]].every(Number.isFinite) || c[0] < -2 || c[0] > L + 2 || c[1] < -2 || c[1] > W + 2) continue;
+        e.push(Math.hypot(c[0] - q[0], c[1] - q[1]));
+      }
+    } catch (_e) { return null; }
+    if (e.length < 8) return null;
+    e.sort((a, b) => a - b);
+    return { med: Math.round(e[e.length >> 1] * 100) / 100, max: Math.round(e[e.length - 1] * 100) / 100, n: e.length };
   }
 
   /* Détections d'une image -> joueurs sur le terrain + ballon.
@@ -612,6 +648,7 @@
     // tenues de référence trop proches (voir K.ambiguity) : reconnaissance, suivi et rôles adaptés ; sinon comportement inchangé
     const amb = opts.refs ? K.ambiguity(opts.refs) : { close: false, roles: false };
     const tracker = new T.Tracker(amb.close ? { soft: 2, appearance: true, method: "optimal" } : undefined);
+    const derive = [];                   // dérive du suivi mesurée à chaque nouveau calibrage atteint : [{ t, de, med, max }]
     const frames = [], lost = [], recalage = [];   // recalage : [{ de, a, reprise }] ; reprise = instant où la caméra redevient stable (null si jamais)
     let lostStart = null, lastBall = null, curLost = null;
     const doubts = [];                   // pistes dont l'équipe est douteuse (questions au coach)
@@ -696,6 +733,15 @@
         const boxes = dets.filter((d) => d.cls === Y.CLASS_PERSON).map((d) => [d.x1 * (gw / cw), d.y1 * (gh / ch), d.x2 * (gw / cw), d.y2 * (gh / ch)]);
         trk.boxes = boxes;
         if (calib !== trk.anchor || !trk.prev) {
+          // un nouveau calibrage est atteint : on mesure d'abord de combien le suivi issu du calibrage précédent s'écartait de lui (jamais corrigé en douce)
+          if (trk.anchor && trk.prev && calib.t > trk.t) {
+            const old = trk.anchor;
+            if (await advanceMotion(trk, calib.t)) {
+              const dr = driftAt(HG.mul3(old.H, trk.M), calib.H, vw, vh, opts.L, opts.W);
+              if (dr) derive.push({ t: calib.t, de: old.t, med: dr.med, max: dr.max });
+            }
+            await seekTo(video, t);
+          }
           gctx.drawImage(video, 0, 0, gw, gh);
           const cur = Cam.prepare(gctx.getImageData(0, 0, gw, gh).data, gw, gh, boxes, 4);
           trk.anchor = calib; trk.M = IDENTITY; trk.prev = cur; trk.t = t; trk.keys = [{ prev: cur, M: IDENTITY, t }]; trk.failCount = 0;
@@ -724,9 +770,10 @@
     video.removeAttribute("src"); video.load();
     if (lost.length) notes.push("Suivi de la caméra perdu sur " + lost.length + " passage(s) : ces images sont ignorées. Ajoutez un calibrage dans ces passages (flou, caméra trop rapide ou sol sans détails).");
     if (camStats.orb + camStats.reloc) notes.push("Caméra rattrapée automatiquement " + (camStats.orb + camStats.reloc) + " fois (flou, zoom ou balayage rapide) en appariant les points du terrain.");
+    derive.forEach((d) => notes.push("Au calibrage de " + fmtMin(d.t) + ", le suivi issu du calibrage de " + fmtMin(d.de) + " s'écartait de " + d.med.toFixed(1).replace(".", ",") + " m (médiane sur le terrain visible, " + d.max.toFixed(1).replace(".", ",") + " m au plus)" + (d.med >= 1 ? " : le tracé a pu glisser avant cet instant ; ajouter des calibrages plus rapprochés le limite." : " : le suivi tient bien.")));
     const finalFrames = finalizeFrames(frames, { L: opts.L, W: opts.W, dirAt: opts.dirAt, roles: amb.close || amb.roles, doubts });
     if (bench.drift && bench.drift.d >= BENCH_ASK) doubts.push({ kind: "bench", t: bench.drift.t, d: bench.drift.d, zones: bench.drift.zones });
-    return { frames: finalFrames, lost, notes, bench, doubts, recalage };
+    return { frames: finalFrames, lost, notes, bench, doubts, recalage, derive };
   }
 
   /* ---- Analyse continue ----
@@ -754,6 +801,7 @@
     return m;
   }
   const avgStep = (a, b) => a.map((v, i) => (v / a[8] + b[i] / b[8]) / 2);
+  const fmtMin = (t) => Math.floor(t / 60) + ":" + String(Math.floor(t % 60)).padStart(2, "0");
   const lerpM = (a, b, t) => a.map((v, i) => v + (b[i] - v) * t);
 
   async function analyseVideoContinuous(opts) {
@@ -1024,5 +1072,5 @@
     return { dets, scale, img: ctx.getImageData(0, 0, cw, ch), width: cw, height: ch };
   }
 
-  return { isFloorMark, courtH, trackDrift, inBenchZone, shiftedZones, followBenches, tileRects, courtRegion, zoomRects, tileToFrame, mergeTiles, isFloorMark, dropFloorMarks, calibrationAt, processDetections, finalizeFrames, compactFrames, expandFrames, frameNear, sampleTimes, startTime, estimateDuration, learnFactor, FACTOR_MIN, FACTOR_MAX, analyseVideo, analyseVideoContinuous, stepGap, avgStep, lerpM, detectAt, detectCanvas, captureFrames, TEAM_CODE };
+  return { isFloorMark, courtH, driftAt, trackDrift, inBenchZone, shiftedZones, followBenches, tileRects, courtRegion, zoomRects, tileToFrame, mergeTiles, isFloorMark, dropFloorMarks, calibrationAt, processDetections, finalizeFrames, compactFrames, expandFrames, frameNear, sampleTimes, startTime, estimateDuration, learnFactor, FACTOR_MIN, FACTOR_MAX, analyseVideo, analyseVideoContinuous, stepGap, avgStep, lerpM, detectAt, detectCanvas, captureFrames, TEAM_CODE };
 });
