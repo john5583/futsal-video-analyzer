@@ -70,6 +70,7 @@ function gap(Ha, Hb) {
     await sleep(150);
   }
   must(seen.some((s) => /Suivi de la caméra/.test(s.txt)), "un message « Suivi de la caméra… » s'affiche");
+  must(seen.some((s) => /le terrain se trace déjà jusqu'à/.test(s.txt)), "pendant le suivi, le message dit jusqu'où le terrain se trace déjà");
   const fin = await win.evaluate(() => { const a = window.FSAI.ai(); return a.camSuivi ? { lost: a.camSuivi.lost, n: a.camSuivi.frames.length, t0: a.camSuivi.t0, t1: a.camSuivi.t1, txt: document.getElementById("ai-suivi").textContent, ana: !!(a.frames && a.frames.length) } : null; });
   must(fin && fin.n > 5, "le suivi est terminé et gardé dans le projet (" + (fin && fin.n) + " positions)");
   must(fin && !fin.ana, "sans lancer l'analyse complète");

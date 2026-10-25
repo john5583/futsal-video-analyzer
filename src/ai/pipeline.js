@@ -628,7 +628,7 @@
      Sans joueurs ni ballon : seulement le mouvement de la caméra depuis chaque calibrage (suivi de points, puis appariement de points en dernier
      recours), pour savoir où est le terrain à chaque instant sans attendre l'analyse complète. Même méthode que l'analyse (les joueurs ne sont pas
      masqués : la recherche robuste les écarte). Jamais deviné : quand la position n'est pas retrouvée, la caméra est « perdue » à cet endroit.
-     opts : { url, calibrations (au moins 1), t0 (facultatif), t1 (facultatif), signal, onProgress({done,total,eta}) }
+     opts : { url, calibrations (au moins 1), t0 (facultatif), t1 (facultatif), signal, onProgress({done,total,eta,frames,lost,t}) (frames : positions déjà suivies, pour tracer le terrain au fur et à mesure) }
      Renvoie { frames: [{ t, h }] (h = projection normalisée, comme les images de l'analyse), lost: [[a, b]], t0, t1, seconds, orb, vw, vh }. */
   const SUIVI_PAS = 0.1;          // s : pas du suivi (comme l'analyse)
   const SUIVI_STOCK = 0.3;        // s : une position gardée toutes les 0,3 s (la position entre deux est interpolée)
@@ -697,7 +697,7 @@
         }
         if (opts.onProgress && (i % 10 === 0 || i === times.length - 1)) {
           const el = (Date.now() - started) / 1000;
-          opts.onProgress({ done: i + 1, total: times.length, eta: (el / (i + 1)) * (times.length - i - 1) });
+          opts.onProgress({ done: i + 1, total: times.length, eta: (el / (i + 1)) * (times.length - i - 1), frames, lost, t });
         }
       }
       if (lostStart != null) lost.push([lostStart, times[times.length - 1]]);
