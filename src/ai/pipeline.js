@@ -770,6 +770,8 @@
     video.removeAttribute("src"); video.load();
     if (lost.length) notes.push("Suivi de la caméra perdu sur " + lost.length + " passage(s) : ces images sont ignorées. Ajoutez un calibrage dans ces passages (flou, caméra trop rapide ou sol sans détails).");
     if (camStats.orb + camStats.reloc) notes.push("Caméra rattrapée automatiquement " + (camStats.orb + camStats.reloc) + " fois (flou, zoom ou balayage rapide) en appariant les points du terrain.");
+    const conseil = conseilCalibrage(mobile, calibs.length, times[0], times[times.length - 1]);
+    if (conseil) notes.push(conseil);
     derive.forEach((d) => notes.push("Au calibrage de " + fmtMin(d.t) + ", le suivi issu du calibrage de " + fmtMin(d.de) + " s'écartait de " + d.med.toFixed(1).replace(".", ",") + " m (médiane sur le terrain visible, " + d.max.toFixed(1).replace(".", ",") + " m au plus)" + (d.med >= 1 ? " : le tracé a pu glisser avant cet instant ; ajouter des calibrages plus rapprochés le limite." : " : le suivi tient bien.")));
     const finalFrames = finalizeFrames(frames, { L: opts.L, W: opts.W, dirAt: opts.dirAt, roles: amb.close || amb.roles, doubts });
     if (bench.drift && bench.drift.d >= BENCH_ASK) doubts.push({ kind: "bench", t: bench.drift.t, d: bench.drift.d, zones: bench.drift.zones });
@@ -801,6 +803,11 @@
     return m;
   }
   const avgStep = (a, b) => a.map((v, i) => (v / a[8] + b[i] / b[8]) / 2);
+  /* Un seul calibrage sur une longue vidéo à la main : la dérive n'est pas mesurable ; on propose d'en ajouter un au milieu. */
+  function conseilCalibrage(mobile, nCalibs, t0, t1) {
+    if (!mobile || nCalibs !== 1 || !(t1 - t0 > 300)) return null;
+    return "Un seul calibrage pour " + Math.round((t1 - t0) / 60) + " min de vidéo : la dérive du suivi de la caméra ne peut pas être mesurée. Ajoutez un calibrage vers " + fmtMin((t0 + t1) / 2) + " : le programme mesurera alors de combien le tracé avait glissé.";
+  }
   const fmtMin = (t) => Math.floor(t / 60) + ":" + String(Math.floor(t % 60)).padStart(2, "0");
   const lerpM = (a, b, t) => a.map((v, i) => v + (b[i] - v) * t);
 
@@ -1072,5 +1079,5 @@
     return { dets, scale, img: ctx.getImageData(0, 0, cw, ch), width: cw, height: ch };
   }
 
-  return { isFloorMark, courtH, driftAt, trackDrift, inBenchZone, shiftedZones, followBenches, tileRects, courtRegion, zoomRects, tileToFrame, mergeTiles, isFloorMark, dropFloorMarks, calibrationAt, processDetections, finalizeFrames, compactFrames, expandFrames, frameNear, sampleTimes, startTime, estimateDuration, learnFactor, FACTOR_MIN, FACTOR_MAX, analyseVideo, analyseVideoContinuous, stepGap, avgStep, lerpM, detectAt, detectCanvas, captureFrames, TEAM_CODE };
+  return { isFloorMark, courtH, driftAt, conseilCalibrage, trackDrift, inBenchZone, shiftedZones, followBenches, tileRects, courtRegion, zoomRects, tileToFrame, mergeTiles, isFloorMark, dropFloorMarks, calibrationAt, processDetections, finalizeFrames, compactFrames, expandFrames, frameNear, sampleTimes, startTime, estimateDuration, learnFactor, FACTOR_MIN, FACTOR_MAX, analyseVideo, analyseVideoContinuous, stepGap, avgStep, lerpM, detectAt, detectCanvas, captureFrames, TEAM_CODE };
 });

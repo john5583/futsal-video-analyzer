@@ -123,4 +123,12 @@ test("dérive mesurée au second calibrage : suivi exact = écart quasi nul ; se
   assert.ok(Math.abs(ko.derive[0].med - 2) < 0.4, "second calibrage décalé de 2 m : écart mesuré " + ko.derive[0].med + " m");
   assert.ok(ko.notes.some((n) => /s'écartait de 1,\d m/.test(n) && /le tracé a pu glisser/.test(n)), ko.notes.join(" | "));
   assert.deepEqual(ko.lost, []);
+  assert.ok(!ok.notes.some((n) => /Un seul calibrage/.test(n)), "deux calibrages : pas de conseil");
+});
+
+test("un seul calibrage sur une longue vidéo : la dérive n'est pas mesurable, on propose un instant ; pas de conseil sinon", () => {
+  assert.match(P.conseilCalibrage(true, 1, 17, 817), /Un seul calibrage pour 13 min.*vers 6:57/);
+  assert.equal(P.conseilCalibrage(true, 2, 17, 817), null);
+  assert.equal(P.conseilCalibrage(true, 1, 0, 200), null);
+  assert.equal(P.conseilCalibrage(false, 1, 0, 900), null);
 });
