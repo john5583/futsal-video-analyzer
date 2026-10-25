@@ -233,7 +233,7 @@
   function noTraceReason(a, t) {
     const l = a ? (O.lostAt(a.lost, t) || O.lostAt(a.camSuivi && a.camSuivi.lost, t)) : null, s = (a && a.settings) || {};
     if (l) return "caméra perdue de " + App.fmt(l.de) + " à " + App.fmt(l.a) + " (suivi interrompu)";
-    if (suiviRun) return "suivi de la caméra en cours (" + suiviRun.pct + " %), le terrain apparaîtra ici dès qu'il sera passé";
+    if (suiviRun) return "suivi de la caméra en cours (" + suiviRun.pct + " %, il est arrivé à " + App.fmt(suiviRun.t || 0) + "), le terrain apparaîtra ici dès qu'il sera passé";
     const cs = a && a.camSuivi;
     if (cs && a.calibrations.length && t < a.calibrations[0].t - 0.5) return "avant le premier calibrage (" + App.fmt(a.calibrations[0].t) + ")";
     if (cs && t > cs.t1 + 0.5) return "après la fin du suivi de la caméra (" + App.fmt(cs.t1) + ")";
@@ -589,7 +589,12 @@
     try {
       const r = await P.suiviCamera({
         url: App.getVideoUrl(), calibrations: a.calibrations.map((c) => ({ t: c.t, H: c.H })), signal: ctrl.signal,
-        onProgress: (p) => { run.pct = Math.round((100 * p.done) / p.total); suiviMsg("Suivi de la caméra : " + run.pct + " % — reste environ " + fmtEta(p.eta), run.pct); }
+        onProgress: (p) => {
+          run.pct = Math.round((100 * p.done) / p.total); run.t = p.t;
+          suiviMsg("Suivi de la caméra : " + run.pct + " % — le terrain se trace déjà jusqu'à " + App.fmt(p.t) + " — reste environ " + fmtEta(p.eta), run.pct);
+          suiviFr = p.frames.map((q) => ({ t: q.t, h: q.h }));          // le terrain se trace au fur et à mesure, sans attendre la fin
+          refreshLive();
+        }
       });
       if (suiviRun !== run) return;
       suiviRun = null;
