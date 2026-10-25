@@ -47,6 +47,7 @@
           <canvas id="overlay" class="overlay" hidden></canvas>
           <canvas id="loupe" class="loupe" width="168" height="168" hidden></canvas>
           <button id="ai-calib-go" class="calib-go" hidden></button>
+          <span id="ai-trace-q" class="trace-q" hidden></span>
           <div id="zoom-ctl" class="zoom-ctl" title="Molette de la souris : zoom ; glisser : déplacer l'image">
             <button id="zm-in" title="Agrandir (ou molette de la souris)">＋</button>
             <button id="zm-out" title="Réduire">－</button>
@@ -133,6 +134,7 @@
             <div id="ai-points" class="ai-list"></div>
             <div id="ai-calibs" class="ai-list"></div>
             <div id="ai-suivi-box" class="ai-suivi" hidden><p id="ai-suivi" class="hint"></p><progress id="ai-suivi-bar" max="100" value="0" hidden></progress></div>
+            <div id="ai-suivi-q" class="ai-suivi-q" hidden></div>
             <p id="ai-calib-msg" class="hint"></p>
           </details>
 
@@ -492,6 +494,7 @@
 <script src="ai-ui.js"></script>
 <script src="ai/goal.js"></script>
 <script src="ai/court-fit.js"></script>
+<script src="ai/lignes.js"></script>
 <script src="wizard.js"></script>
 <script src="anim/realview.js"></script>
 <script src="engine/compliance.js"></script>

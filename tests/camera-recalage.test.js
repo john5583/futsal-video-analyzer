@@ -198,3 +198,30 @@ test("cibleCalibrage : là où la caméra est retrouvée, sinon juste après le 
   assert.deepEqual(P.cibleCalibrage({ de: 600, a: 800 }, 800), { t: 601, reprise: false });
   assert.deepEqual(P.cibleCalibrage({ de: 799.8, a: 800 }, 800), { t: 800, reprise: false });
 });
+
+test("la clé du suivi tient compte de la couleur des lignes : changer de couleur refait le suivi", () => {
+  const a = { t: 10, H: [1, 0, 0, 0, 1, 0, 0, 0, 1] };
+  assert.notEqual(P.cleSuivi([a], 800), P.cleSuivi([a], 800, "black"));
+  assert.notEqual(P.cleSuivi([a], 800, "black"), P.cleSuivi([a], 800, "white"));
+  assert.equal(P.cleSuivi([a], 800, "black"), P.cleSuivi([a], 800, "black"));
+});
+
+test("qualité du suivi : 2 sur une image confirmée par les lignes, 1 entre deux confirmations proches, 0 (« recalage incertain ») sinon", () => {
+  const fr = []; for (let t = 0; t <= 100; t += 0.5) fr.push({ t });
+  P.qualiteSuivi(fr, [10, 14, 60]);
+  const q = (t) => fr.find((f) => f.t === t).q;
+  assert.equal(q(10), 2); assert.equal(q(14), 2);
+  assert.equal(q(12), 1, "entre deux confirmations à 4 s");
+  assert.equal(q(30), 0, "entre 14 s et 60 s (46 s sans confirmation) : incertain");
+  assert.equal(q(16), 1, "à moins de 5 s après une confirmation");
+  assert.equal(q(90), 0, "30 s après la dernière confirmation");
+  assert.equal(q(2), 0, "avant la première confirmation");
+});
+
+test("passages douteux : un passage d'au moins 60 s sans lignes retrouvées est signalé, sauf s'il a été confirmé par l'utilisateur", () => {
+  const fr = []; for (let t = 0; t <= 300; t += 0.3) fr.push({ t: Math.round(t * 10) / 10, q: t >= 100 && t < 190 ? 0 : t >= 220 && t < 240 ? 0 : 2 });
+  const p = P.passagesDouteux(fr, [], 60);
+  assert.equal(p.length, 1, "le passage de 20 s est trop court pour une question");
+  assert.ok(Math.abs(p[0].de - 100) < 0.4 && Math.abs(p[0].a - 189.9) < 0.4, JSON.stringify(p));
+  assert.equal(P.passagesDouteux(fr, [[95, 195]], 60).length, 0, "confirmé par l'utilisateur : plus de question");
+});

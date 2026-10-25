@@ -253,7 +253,7 @@
   }
   function drawOverlay() {
     const c = $("overlay");
-    if (c.hidden) { calibGo(0, true); return; }
+    if (c.hidden) { calibGo(0, true); const qb0 = $("ai-trace-q"); if (qb0) qb0.hidden = true; return; }
     c.classList.toggle("fixable", frames.length > 0 && !(placing || pickRole || pip || pointer || benchMark));      // un clic sur un cadre permet de corriger la personne
     const dpr = sizeOverlay();
     const ctx = c.getContext("2d");
@@ -282,6 +282,8 @@
     if (a && $("ov-court").checked) {
       const ch = P.courtH(frames, a.calibrations, a.camera || $("ai-camera").value, t, video.videoWidth, video.videoHeight, suiviFr);
       calibGo(t, !!(ch && ch.H));
+      const qb = $("ai-trace-q"), qa = ch && ch.H ? qualiteAt(a, t) : null;
+      if (qb) { qb.hidden = qa !== 0; if (qa === 0) qb.textContent = "Recalage incertain : le tracé vient du suivi seul ici (lignes non retrouvées)"; }
       if (ch && ch.H) {
         const Hi = HG.invert(ch.H), o = toView(0, 0), e = toView(r.vw, r.vh), far = 4;
         ctx.save(); ctx.beginPath(); ctx.rect(o[0], o[1], e[0] - o[0], e[1] - o[1]); ctx.clip();
@@ -559,17 +561,21 @@
   }
   function chargeSuivi() {
     const s = ai() && ai().camSuivi;
-    suiviFr = s && Array.isArray(s.frames) ? s.frames.filter((c) => Array.isArray(c) && Array.isArray(c[1]) && c[1].length === 9).map((c) => ({ t: c[0], h: c[1] })) : [];
+    suiviFr = s && Array.isArray(s.frames) ? s.frames.filter((c) => Array.isArray(c) && Array.isArray(c[1]) && c[1].length === 9).map((c) => ({ t: c[0], h: c[1], q: c[2] })) : [];
   }
   /* Phrase de bilan du suivi (part de la vidéo où la caméra est suivie, passages perdus). */
   function suiviBilan(s) {
     const lost = s.lost || [], span = Math.max(0.1, s.t1 - s.t0), ls = lost.reduce((x, r) => x + (r[1] - r[0]), 0), pct = Math.round(1000 * (1 - ls / span)) / 10;
     let m = "Suivi de la caméra terminé : caméra suivie sur " + String(pct).replace(".", ",") + " % de la vidéo (" + App.fmt(s.t0) + " à " + App.fmt(s.t1) + "), en " + fmtDur(s.seconds || 0) + ".";
+    if (s.lignes) {
+      const fr = (s.frames || []), n = fr.length, ok = fr.filter((c) => c[2] === 2 || c[2] === 1).length, couleur = LIGNES_NOM[s.lignes.couleur] || "";
+      m += " Tracé vérifié sur les lignes" + (couleur ? " " + couleur : "") + " : " + String(n ? Math.round((1000 * ok) / n) / 10 : 0).replace(".", ",") + " % des positions (" + s.lignes.acceptes + " images où les lignes sont retrouvées) ; ailleurs « recalage incertain » : le tracé vient du suivi seul.";
+    } else if (!s.sansLignes) m += " Tracé non vérifié sur les lignes (couleur des lignes non indiquée).";
     if (lost.length) m += " Perdue : " + lost.slice(0, 4).map((r) => App.fmt(r[0]) + "–" + App.fmt(r[1])).join(", ") + (lost.length > 4 ? "…" : "") + " (ajoutez un calibrage là).";
     return m;
   }
   /* Le suivi gardé n'est réutilisable que pour les calibrages actuels et la caméra mobile. */
-  const suiviValide = (a) => !!(a && (a.camera || $("ai-camera").value) === "mobile" && a.camSuivi && suiviFr.length > 1 && a.camSuivi.cle === P.cleSuivi(a.calibrations, video.duration));
+  const suiviValide = (a) => !!(a && (a.camera || $("ai-camera").value) === "mobile" && a.camSuivi && suiviFr.length > 1 && a.camSuivi.cle === P.cleSuivi(a.calibrations, video.duration, a.lineColor));
   function planSuivi(delay) {
     clearTimeout(suiviTimer);
     suiviTimer = setTimeout(lanceSuivi, delay == null ? 1500 : delay);
@@ -581,14 +587,15 @@
     const cam = a.camera || $("ai-camera").value;
     if (cam !== "mobile" || !a.calibrations.length || !App.isVideoReady() || !(video.duration > 0)) { if (cam !== "mobile" || !a.calibrations.length) { suiviFr = []; suiviMsg(""); } return; }
     if (running) { planSuivi(5000); return; }              // l'analyse complète fait déjà son propre suivi
-    const cle = P.cleSuivi(a.calibrations, video.duration);
-    if (a.camSuivi && a.camSuivi.cle === cle) { chargeSuivi(); suiviMsg(suiviBilan(a.camSuivi)); refreshLive(); return; }
+    const cle = P.cleSuivi(a.calibrations, video.duration, a.lineColor);
+    if (a.camSuivi && a.camSuivi.cle === cle) { chargeSuivi(); suiviMsg(suiviBilan(a.camSuivi)); renderSuiviQ(); refreshLive(); return; }
     suiviFr = []; a.camSuivi = null; refreshLive();
     const ctrl = new AbortController(), run = { ctrl, pct: 0 }; suiviRun = run;
     suiviMsg("Suivi de la caméra en cours (en arrière-plan, vous pouvez continuer)…", 0);
     try {
       const r = await P.suiviCamera({
         url: App.getVideoUrl(), calibrations: a.calibrations.map((c) => ({ t: c.t, H: c.H })), signal: ctrl.signal,
+        lineColor: a.lineColor || null, L: L(), W: W(), prio: prioLignes(a),
         onProgress: (p) => {
           run.pct = Math.round((100 * p.done) / p.total); run.t = p.t;
           suiviMsg("Suivi de la caméra : " + run.pct + " % — le terrain se trace déjà jusqu'à " + App.fmt(p.t) + " — reste environ " + fmtEta(p.eta), run.pct);
@@ -598,11 +605,56 @@
       });
       if (suiviRun !== run) return;
       suiviRun = null;
-      a.camSuivi = { cle, t0: r.t0, t1: r.t1, seconds: r.seconds, lost: r.lost.map((x) => [Math.round(x[0] * 100) / 100, Math.round(x[1] * 100) / 100]), frames: r.frames.map((q) => [q.t, q.h]) };
-      chargeSuivi(); suiviMsg(suiviBilan(a.camSuivi)); App.changed(); refreshLive();
+      a.camSuivi = { cle, t0: r.t0, t1: r.t1, seconds: r.seconds, lost: r.lost.map((x) => [Math.round(x[0] * 100) / 100, Math.round(x[1] * 100) / 100]), frames: r.frames.map((q) => (q.q == null ? [q.t, q.h] : [q.t, q.h, q.q])) };
+      if (r.lignes) a.camSuivi.lignes = { couleur: r.lignes.couleur, essais: r.lignes.essais, acceptes: r.lignes.acceptes };
+      else if (!a.lineColor) a.camSuivi.sansLignes = false; else a.camSuivi.sansLignes = true;
+      chargeSuivi(); suiviMsg(suiviBilan(a.camSuivi)); renderSuiviQ(); App.changed(); refreshLive();
     } catch (e) {
       if (suiviRun === run) { suiviRun = null; suiviMsg(ctrl.signal.aborted ? "" : "Suivi de la caméra interrompu : il sera repris au prochain chargement de la vidéo."); }
     }
+  }
+
+  const LIGNES_NOM = { black: "noires", white: "blanches", yellow: "jaunes", red: "rouges" };
+  /* Éléments choisis au calibrage (groupes du modèle prioritaires pour le recalage) ; par défaut le cercle central. */
+  function prioLignes(a) {
+    const c = a && a.calibrations && a.calibrations[0], g = window.FutsalLignes && c && c.choisis ? window.FutsalLignes.groupesDepuisRepères(c.choisis) : [];
+    return g.indexOf("cercle") >= 0 ? g : g.concat(["cercle"]);
+  }
+  const confirme = (a, t) => !!(a && a.camSuivi && (a.camSuivi.confirmes || []).some((c) => t >= c[0] - 1e-6 && t <= c[1] + 1e-6));
+  /* Qualité du tracé à l'instant t d'après le suivi : 2 / 1 = vérifié sur les lignes, 0 = « recalage incertain », null = pas de suivi recalé. */
+  function qualiteAt(a, t) {
+    if (!a || !a.camSuivi || !a.camSuivi.lignes || !suiviFr.length) return null;
+    let lo = 0, hi = suiviFr.length - 1;
+    while (lo < hi) { const m = (lo + hi) >> 1; if (suiviFr[m].t < t) lo = m + 1; else hi = m; }
+    const f = suiviFr[lo], g = lo > 0 ? suiviFr[lo - 1] : null, b = g && Math.abs(g.t - t) < Math.abs(f.t - t) ? g : f;
+    if (!b || Math.abs(b.t - t) > 1 || b.q == null) return null;
+    return b.q === 0 && confirme(a, t) ? 1 : b.q;
+  }
+  /* Questions du suivi, jamais bloquantes : couleur des lignes (si elle n'a pas été donnée), et UN passage où les lignes ne sont pas retrouvées. */
+  function renderSuiviQ() {
+    const box = $("ai-suivi-q"); if (!box || !window.FutsalCourtFit) return;
+    box.innerHTML = ""; box.hidden = true;
+    const a = ai(); if (!a || !a.calibrations.length || (a.camera || $("ai-camera").value) !== "mobile") return;
+    const mk = (tag, txt, cls) => { const e = document.createElement(tag); if (txt != null) e.textContent = txt; if (cls) e.className = cls; return e; };
+    if (!a.lineColor) {
+      box.hidden = false;
+      box.appendChild(mk("p", "Quelle est la couleur des lignes de votre terrain de futsal ? Je m'en sers pour vérifier le tracé sur les vraies lignes (sans elle, le tracé vient du suivi seul et peut dériver)."));
+      Object.keys(window.FutsalCourtFit.COLORS).forEach((key) => {
+        const b = mk("button", window.FutsalCourtFit.COLORS[key].name); b.dataset.couleur = key;
+        b.addEventListener("click", () => { a.lineColor = key; App.changed(); renderSuiviQ(); planSuivi(300); });
+        box.appendChild(b);
+      });
+      return;
+    }
+    if (!a.camSuivi || !a.camSuivi.lignes || suiviRun) return;
+    const p = P.passagesDouteux(suiviFr, a.camSuivi.confirmes, 60)[0];
+    if (!p) return;
+    box.hidden = false;
+    const nm = LIGNES_NOM[a.lineColor] || "";
+    box.appendChild(mk("p", "Je ne retrouve pas les lignes " + nm + " de " + App.fmt(p.de) + " à " + App.fmt(p.a) + " : le tracé y vient seulement du suivi de la caméra. Est-il juste ?"));
+    const go = mk("button", "Voir ce passage"); go.addEventListener("click", () => { $("ov-court").checked = true; App.seek((p.de + p.a) / 2); }); box.appendChild(go);
+    const ok = mk("button", "Oui, le tracé est juste"); ok.addEventListener("click", () => { a.camSuivi.confirmes = (a.camSuivi.confirmes || []).concat([[p.de, p.a]]); App.changed(); renderSuiviQ(); drawOverlay(); }); box.appendChild(ok);
+    const no = mk("button", "Non, il est décalé : j'ajoute un calibrage"); no.addEventListener("click", () => { $("ov-court").checked = true; App.seek((p.de + p.a) / 2); const d1 = $("ai-d1"); if (d1) d1.open = true; App.toast("Placez les repères sur cette image : le suivi repartira de là."); }); box.appendChild(no);
   }
 
   function renderCalibs() {
@@ -1732,7 +1784,7 @@
     qGroup = null; qHighlight = null; qThumbs.clear(); contours.clear(); bs = null; bsBox(false);
     $("ai-t0").value = App.fmt((d.settings && d.settings.t0) || 0);
     $("ai-t1").value = App.fmt((d.settings && d.settings.t1) || state.project.duration || 0);
-    chargeSuivi(); suiviMsg(a && a.camSuivi && a.camSuivi.cle ? suiviBilan(a.camSuivi) : "");
+    chargeSuivi(); suiviMsg(a && a.camSuivi && a.camSuivi.cle ? suiviBilan(a.camSuivi) : ""); renderSuiviQ();
     fillLandmarks(); renderPoints(); renderCalibs(); renderKits(); renderStats(); renderSuggestions(); updateEstimate();
     $("ai-run-msg").textContent = ""; $("ai-calib-msg").textContent = "";
     planSuivi(2500);
@@ -1925,6 +1977,7 @@
     clearAnalysis: () => { frames = []; const a = ai(); a.frames = null; a.bancs = null; renderBancs(); a.stats = null; a.suggestedEvents = []; a.uncertain = []; a.context = null; a.couverture = null; a.suggested = 0; renderStats(); renderSuggestions(); refreshLive(); },
     setRange: (t0, t1) => { $("ai-t0").value = App.fmt(t0); $("ai-t1").value = App.fmt(t1); updateEstimate(); },
     setCamera: (v) => { $("ai-camera").value = v; $("ai-camera").dispatchEvent(new Event("change")); },
+    setLineColor: (key) => { const a = ai(); if (a && window.FutsalCourtFit && window.FutsalCourtFit.COLORS[key]) { a.lineColor = key; renderSuiviQ(); App.changed(); } },
     setDirection: (v) => { $("ai-dir").value = String(v); $("ai-dir").dispatchEvent(new Event("change")); },
     setPrecision: (fps, tiles) => { $("ai-fps").value = String(fps); $("ai-tiles").value = String(tiles); $("ai-fps").dispatchEvent(new Event("change")); },
     hasAnalysis: () => frames.length > 0,
@@ -1932,6 +1985,7 @@
     setCalibration: (cal, t) => {
       const a = ai();
       a.calibrations = [{ t: Math.round(t * 10) / 10, points: cal.points, H: cal.H, err: cal.err }];
+      if (Array.isArray(cal.choisis) && cal.choisis.length) a.calibrations[0].choisis = cal.choisis.slice();
       pts = []; placing = null;
       $("ov-court").checked = true;
       renderPoints(); renderCalibs(); updateOverlayMode(); App.changed();

@@ -497,7 +497,9 @@
       const vs = AI.videoSize(), a = AI.ai();
       let cal = CF.calibrationFromPose(T.pose, T.work.w, T.work.h, vs.w, vs.h, a.L, a.W, T.err, T.sep);
       if (side === "att") cal = CF.rotateCalibration(cal, a.L, a.W, vs.w, vs.h);
+      cal.choisis = T.clicks.map((c) => c.key);
       AI.setCalibration(cal, T.frame.t);
+      if (T.colorKey) AI.setLineColor(T.colorKey);
       AI.setCamera("mobile"); AI.setDirection(1);
     } catch (e) { T.msg = "Repérage impossible : " + e.message; render(); return; }
     AI.setPointer(null);

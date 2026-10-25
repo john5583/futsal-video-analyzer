@@ -32,6 +32,7 @@ function render(pose, w, h, L, W, opts) {
       if (q) disk(q.u, q.v, Math.max(1.1, o.lineHalf * f / q.z), [15, 15, 15]);
     });
   }
+  if (o.circle) for (let a = 0; a < 360; a += 0.4) { const r = a * Math.PI / 180, q = CF.project(B, f, w, h, L / 2 + 3 * Math.cos(r), W / 2 + 3 * Math.sin(r), 0); if (q) disk(q.u, q.v, Math.max(1.1, o.lineHalf * f / q.z), [15, 15, 15]); }
   const xg = o.goalAtEnd ? L : 0, cy = W / 2;
   [cy - 1.5, cy + 1.5].forEach((y) => {
     for (let z = 0; z <= 2; z += 0.01) {

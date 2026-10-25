@@ -650,15 +650,56 @@
   const SUIVI_STOCK = 0.3;        // s : une position gardée toutes les 0,3 s (la position entre deux est interpolée)
   const SUIVI_REPRISE = 0.3;      // s : en passage perdu, on retente de retrouver la position toutes les 0,3 s
   /* Empreinte des calibrages + durée de la vidéo : le suivi gardé dans le projet n'est réutilisé que si elle est identique. */
-  function cleSuivi(calibs, duree) {
-    const s = (calibs || []).slice().sort((a, b) => a.t - b.t).map((c) => c.t.toFixed(2) + ":" + (c.H || []).map((v) => Number(v).toPrecision(6)).join(",")).join("|") + "@" + Math.round(duree || 0);
+  function cleSuivi(calibs, duree, couleur) {
+    const s = (calibs || []).slice().sort((a, b) => a.t - b.t).map((c) => c.t.toFixed(2) + ":" + (c.H || []).map((v) => Number(v).toPrecision(6)).join(",")).join("|") + "@" + Math.round(duree || 0) + (couleur ? "#" + couleur : "");
     let h = 2166136261;
     for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
-    return "s1-" + h.toString(16);
+    return (couleur ? "s2-" : "s1-") + h.toString(16);
   }
+  /* Module de recalage sur les lignes (chargé à la demande : même fichier en navigateur et dans les tests). */
+  function lignesMod() {
+    try { if (typeof module === "object" && module.exports && typeof require === "function") return require("./lignes"); } catch (_e) { /* navigateur */ }
+    return typeof self !== "undefined" && self.FutsalLignes ? self.FutsalLignes : null;
+  }
+  const LIGNES_PAS = 0.9;          // s : un essai de recalage sur les lignes à peu près toutes les 0,9 s
+  const LIGNES_PROCHE = 5;         // s : une position à moins de 5 s d'une image confirmée sur les lignes est dite confirmée
+  const LIGNES_ECART_MAX = 20;     // s : entre deux images confirmées plus espacées que ça, les positions du milieu ne sont plus dites confirmées
+  const POSE_ERR_MAX = 8;          // px (image de travail) : écart maximal pour dire qu'un calibrage est une vraie caméra (sinon suivi classique, sans lignes)
+
+  /* Qualité de chaque position d'un suivi recalé : 2 = lignes retrouvées sur cette image, 1 = propagée entre deux images confirmées proches, 0 = suivi seul (« recalage incertain »).
+     acc : temps des images confirmées (croissants). Modifie frames[i].q. */
+  function qualiteSuivi(frames, acc) {
+    let j = 0;
+    frames.forEach((f) => {
+      while (j < acc.length && acc[j] < f.t - 0.006) j++;
+      const nxt = j < acc.length ? acc[j] : null, prv = j > 0 ? acc[j - 1] : null;
+      if (nxt != null && Math.abs(nxt - f.t) <= 0.006) f.q = 2;
+      else if (prv != null && nxt != null && nxt - prv <= LIGNES_ECART_MAX) f.q = 1;
+      else if ((prv != null && f.t - prv <= LIGNES_PROCHE) || (nxt != null && nxt - f.t <= LIGNES_PROCHE)) f.q = 1;
+      else f.q = 0;
+    });
+    return frames;
+  }
+
+  /* Passages où le tracé vient du suivi seul (aucune image confirmée sur les lignes alentour) sur au moins dureeMin secondes, hors passages perdus et hors passages
+     que l'utilisateur a confirmés (confirmes : [[de, a]]). Rend [{ de, a }]. */
+  function passagesDouteux(frames, confirmes, dureeMin) {
+    const out = [], conf = confirmes || [];
+    let cur = null;
+    (frames || []).forEach((f) => {
+      const sure = f.q !== 0 || conf.some((c) => f.t >= c[0] - 1e-6 && f.t <= c[1] + 1e-6);
+      if (sure) { if (cur) { out.push(cur); cur = null; } return; }
+      if (cur && f.t - cur.a <= 1) cur.a = f.t; else { if (cur) out.push(cur); cur = { de: f.t, a: f.t }; }
+    });
+    if (cur) out.push(cur);
+    return out.filter((p) => p.a - p.de >= (dureeMin == null ? 60 : dureeMin));
+  }
+
   async function suiviCamera(opts) {
     const calibs = (opts.calibrations || []).slice().sort((a, b) => a.t - b.t);
     if (!calibs.length) throw new Error("Aucun calibrage du terrain");
+    const LGm = opts.lineColor ? lignesMod() : null;
+    const modeleTerrain = LGm ? LGm.modele(opts.L || 40, opts.W || 20, { pointilles: false, prio: opts.prio || ["cercle"] }) : null;
     const video = document.createElement("video");
     video.muted = true; video.preload = "auto"; video.crossOrigin = "anonymous";
     video.src = opts.url;
@@ -670,16 +711,58 @@
       const gctx = gcanvas.getContext("2d", { willReadFrequently: true });
       const stats = { orb: 0, reloc: 0 };
       const motionS = (a, b) => { const r = Cam.estimateMotion(a, b, a.mask, b.mask, { maxCorners: corners }); if (r.ok || !Orb) return r; const o = orbStep(a, b, stats); return o.ok ? o : r; };
-      const grab = () => { gctx.drawImage(video, 0, 0, gw, gh); return Cam.prepare(gctx.getImageData(0, 0, gw, gh).data, gw, gh, [], 4); };
+      let rgba = null;
+      const grab = () => { gctx.drawImage(video, 0, 0, gw, gh); rgba = gctx.getImageData(0, 0, gw, gh).data; return Cam.prepare(rgba, gw, gh, [], 4); };
       const tStart = Math.max(calibs[0].t, opts.t0 || 0), tEnd = Math.min(opts.t1 != null ? opts.t1 : Infinity, video.duration - 0.05);
       // instants suivis : une grille de 0,1 s, plus l'instant exact de chaque calibrage
       const grid = new Set(), times = [];
       for (let t = tStart; t <= tEnd + 1e-6; t += pas) grid.add(Math.round(t * 1000) / 1000);
       calibs.forEach((c) => { if (c.t >= tStart && c.t <= tEnd) grid.add(Math.round(c.t * 1000) / 1000); });
       grid.forEach((t) => times.push(t)); times.sort((a, b) => a - b);
-      const frames = [], lost = [];
-      const trk = { anchor: null, M: IDENTITY, prev: null, keys: [], t: 0, lastTry: -9 };
-      const addKey = () => { const last = trk.keys[trk.keys.length - 1]; if (!last || trk.t - last.t >= 1) { trk.keys.push({ prev: trk.prev, M: trk.M, t: trk.t }); if (trk.keys.length > 14) trk.keys.splice(1, 1); } };
+      const frames = [], lost = [], acc = [];
+      // pose : caméra réelle (cap, inclinaison, champ, roulis) suivie à la place de l'homographie quand le calibrage est une vraie caméra ; null = suivi classique
+      const trk = { anchor: null, M: IDENTITY, prev: null, keys: [], t: 0, lastTry: -9, pose: null, ref: null, pend: [], lastAcc: null, lastLine: -9 };
+      const lignes = { couleur: opts.lineColor || null, mode: "classique", essais: 0, acceptes: 0, rejets: {} };
+      const addKey = () => { const last = trk.keys[trk.keys.length - 1]; if (!last || trk.t - last.t >= 1) { trk.keys.push({ prev: trk.prev, M: trk.M, pose: trk.pose, t: trk.t }); if (trk.keys.length > 14) trk.keys.splice(1, 1); } };
+      const projHw = () => (trk.pose ? LGm.hDepuisPose(trk.pose, gw, gh, opts.L || 40, opts.W || 20) : null);
+      const hStock = (pose) => { const Hw = pose && LGm.hDepuisPose(pose, gw, gh, opts.L || 40, opts.W || 20); return Hw ? normalizedProjection(HG.mul3(Hw, [gs, 0, 0, 0, gs, 0, 0, 0, 1]), vw, vh) : null; };
+      /* Relocalisation en mode pose : par les images clés (suivi de points), puis par appariement de points si deux estimations s'accordent. */
+      const relocatePose = (cur) => {
+        for (let i = trk.keys.length - 1; i >= 0; i--) {
+          const k = trk.keys[i]; if (!k.pose) continue;
+          const r = Cam.estimateMotion(k.prev, cur, k.prev.mask, cur.mask, { maxCorners: 320 });
+          if (r.ok) { const q = LGm.poseApres(k.pose, r.H, gw, gh); if (q) return q.pose; }
+        }
+        if (!Orb) return null;
+        const cands = [];
+        for (let i = trk.keys.length - 1; i >= 0; i--) {
+          const k = trk.keys[i]; if (!k.pose) continue;
+          const r = Orb.estimateBetween(k.prev, cur, ORB_WIDE);
+          if (!r.ok) continue;
+          const q = LGm.poseApres(k.pose, r.H, gw, gh); if (!q) continue;
+          for (const c of cands) if (LGm.ecartSol(c, q.pose, gw, gh) <= 1.5) { stats.reloc++; return q.pose; }
+          cands.push(q.pose);
+        }
+        return null;
+      };
+      /* Essai de recalage sur les lignes à la position qui vient d'être gardée (frames[idx]). Jamais bloquant : toute erreur = on garde le suivi. */
+      const essaiLignes = (idx, t) => {
+        try {
+          lignes.essais++;
+          const c = LGm.carte({ data: rgba, width: gw, height: gh }, opts.lineColor);
+          const q = LGm.affinerPose(c, trk.pose, modeleTerrain, { ouvert: false, ref: trk.ref });
+          if (!q.ok) { lignes.rejets[q.raison] = (lignes.rejets[q.raison] || 0) + 1; return; }
+          const t0 = trk.lastAcc != null ? trk.lastAcc : trk.pend.length ? trk.pend[0].t - 0.3 : t, corr = q.changed ? trk.pose.map((v, j) => q.pose[j] - v) : null;
+          if (corr) {       // la dérive accumulée depuis la dernière image confirmée est répartie sur les positions intermédiaires (linéairement dans le temps)
+            const sp = (tt) => (t - t0 > 1e-6 ? Math.min(1, Math.max(0, (tt - t0) / (t - t0))) : 1);
+            trk.pend.forEach((p) => { const al = sp(p.t); p.pose = p.pose.map((v, j) => v + corr[j] * al); const h = hStock(p.pose); if (h) frames[p.i].h = h; });
+            trk.keys.forEach((k) => { if (k.pose) { const al = sp(k.t); k.pose = k.pose.map((v, j) => v + corr[j] * al); } });
+            trk.pose = q.pose.slice();
+            const h = hStock(trk.pose); if (h) frames[idx].h = h;
+          }
+          lignes.acceptes++; acc.push(t); trk.lastAcc = t; trk.pend = [];
+        } catch (_e) { /* le suivi continue sans recalage */ }
+      };
       let lostStart = null, nextStore = -1, ok = false;
       const started = Date.now();
       for (let i = 0; i < times.length; i++) {
@@ -688,28 +771,54 @@
         await seekTo(video, t);
         const cur = grab();
         if (calib !== trk.anchor) {                       // un calibrage est atteint : le suivi repart de lui
-          trk.anchor = calib; trk.M = IDENTITY; trk.prev = cur; trk.t = t; trk.keys = [{ prev: cur, M: IDENTITY, t }]; ok = true;
+          trk.anchor = calib; trk.M = IDENTITY; trk.prev = cur; trk.t = t; ok = true;
+          trk.pose = null; trk.pend = []; trk.lastAcc = null;
+          if (LGm) {                                       // le calibrage est-il une vraie caméra ? alors on suit la caméra elle-même
+            try {
+              const pf = LGm.poseDepuisH(HG.mul3(calib.H, [1 / gs, 0, 0, 0, 1 / gs, 0, 0, 0, 1]), gw, gh, opts.L || 40, opts.W || 20, null);
+              if (pf && pf.err <= POSE_ERR_MAX) { trk.pose = pf.pose; trk.ref = pf.pose.slice(); lignes.mode = "pose"; }
+            } catch (_e) { trk.pose = null; }
+          }
+          trk.keys = [{ prev: cur, M: IDENTITY, pose: trk.pose, t }];
         } else if (ok) {
           let r = motionS(trk.prev, cur);
+          const avance = (rr) => {
+            if (trk.pose) { const q = LGm.poseApres(trk.pose, rr.H, gw, gh); if (!q) return false; trk.pose = q.pose; }
+            else trk.M = HG.mul3(trk.M, HG.invert(Cam.toNative(rr.H, gs)));
+            return true;
+          };
           if (!r.ok && t - trk.t > 0.04) {           // échec : on retente en deux demi-pas (comme l'analyse)
             const tm = trk.t + (t - trk.t) / 2;
             await seekTo(video, tm);
             const mid = grab(), r1 = motionS(trk.prev, mid);
-            if (r1.ok) { trk.M = HG.mul3(trk.M, HG.invert(Cam.toNative(r1.H, gs))); trk.prev = mid; trk.t = tm; addKey(); r = motionS(trk.prev, cur); }
+            if (r1.ok && avance(r1)) { trk.prev = mid; trk.t = tm; addKey(); r = motionS(trk.prev, cur); }
+            await seekTo(video, t); rgba = null; grab();
           }
-          if (r.ok) { trk.M = HG.mul3(trk.M, HG.invert(Cam.toNative(r.H, gs))); trk.prev = cur; trk.t = t; addKey(); }
+          if (r.ok && avance(r)) { trk.prev = cur; trk.t = t; addKey(); }
           else ok = false;
         }
         if (!ok && t - trk.lastTry >= SUIVI_REPRISE - 1e-6) {       // position perdue : retrouvée par les images clés déjà suivies, jamais devinée
           trk.lastTry = t;
-          const M = relocateKeys(trk.keys, cur, gs, vw, vh, stats);
-          if (M) { trk.M = M; trk.prev = cur; trk.t = t; addKey(); ok = true; }
+          if (trk.pose || (LGm && trk.ref)) {
+            const p = relocatePose(cur);
+            if (p) { trk.pose = p; trk.prev = cur; trk.t = t; addKey(); ok = true; trk.pend = []; }
+          } else {
+            const M = relocateKeys(trk.keys, cur, gs, vw, vh, stats);
+            if (M) { trk.M = M; trk.prev = cur; trk.t = t; addKey(); ok = true; }
+          }
         }
-        if (!ok) { if (lostStart == null) lostStart = t; }
+        if (!ok) { if (lostStart == null) lostStart = t; trk.pend = []; }
         else if (lostStart != null) { lost.push([lostStart, t]); lostStart = null; }
         if (ok && t >= nextStore - 1e-6) {
-          const h = normalizedProjection(HG.mul3(trk.anchor.H, trk.M), vw, vh);
-          if (h) { frames.push({ t: Math.round(t * 100) / 100, h }); nextStore = t + SUIVI_STOCK; }
+          const h = trk.pose ? hStock(trk.pose) : normalizedProjection(HG.mul3(trk.anchor.H, trk.M), vw, vh);
+          if (h) {
+            frames.push({ t: Math.round(t * 100) / 100, h });
+            nextStore = t + SUIVI_STOCK;
+            if (trk.pose) {
+              trk.pend.push({ t, i: frames.length - 1, pose: trk.pose.slice() });
+              if (t - trk.lastLine >= LIGNES_PAS - 1e-6) { trk.lastLine = t; essaiLignes(frames.length - 1, t); }
+            }
+          }
         }
         if (opts.onProgress && (i % 10 === 0 || i === times.length - 1)) {
           const el = (Date.now() - started) / 1000;
@@ -717,7 +826,8 @@
         }
       }
       if (lostStart != null) lost.push([lostStart, times[times.length - 1]]);
-      return { frames, lost, t0: tStart, t1: times.length ? times[times.length - 1] : tStart, seconds: Math.round((Date.now() - started) / 100) / 10, orb: stats.orb + stats.reloc, vw, vh };
+      if (lignes.mode === "pose") qualiteSuivi(frames, acc);
+      return { frames, lost, t0: tStart, t1: times.length ? times[times.length - 1] : tStart, seconds: Math.round((Date.now() - started) / 100) / 10, orb: stats.orb + stats.reloc, vw, vh, lignes: lignes.mode === "pose" ? lignes : null };
     } finally { video.removeAttribute("src"); video.load(); }
   }
 
@@ -1209,5 +1319,5 @@
     return { dets, scale, img: ctx.getImageData(0, 0, cw, ch), width: cw, height: ch };
   }
 
-  return { isFloorMark, courtH, cibleCalibrage, suiviCamera, cleSuivi, driftAt, conseilCalibrage, trackDrift, inBenchZone, shiftedZones, followBenches, tileRects, courtRegion, zoomRects, tileToFrame, mergeTiles, isFloorMark, dropFloorMarks, calibrationAt, processDetections, finalizeFrames, compactFrames, expandFrames, frameNear, sampleTimes, startTime, estimateDuration, learnFactor, FACTOR_MIN, FACTOR_MAX, analyseVideo, analyseVideoContinuous, stepGap, avgStep, lerpM, detectAt, detectCanvas, captureFrames, TEAM_CODE };
+  return { isFloorMark, courtH, cibleCalibrage, suiviCamera, qualiteSuivi, passagesDouteux, cleSuivi, driftAt, conseilCalibrage, trackDrift, inBenchZone, shiftedZones, followBenches, tileRects, courtRegion, zoomRects, tileToFrame, mergeTiles, isFloorMark, dropFloorMarks, calibrationAt, processDetections, finalizeFrames, compactFrames, expandFrames, frameNear, sampleTimes, startTime, estimateDuration, learnFactor, FACTOR_MIN, FACTOR_MAX, analyseVideo, analyseVideoContinuous, stepGap, avgStep, lerpM, detectAt, detectCanvas, captureFrames, TEAM_CODE };
 });
