@@ -106,15 +106,48 @@ test("classer avec une référence par instant : la plus proche gagne ; sans alt
 test("prochain instant : s'appuie sur l'analyse si elle a vu la catégorie, sinon un instant éloigné, jamais un instant déjà donné", () => {
   const kits = { REF: [X.marquer(feat(JAUNE), { t: 30, v: "m.mp4" })] };
   const frames = [
-    { t: 28, players: [{ team: "REF", b: [0, 0, 50, 200] }] },
-    { t: 200, players: [{ team: "REF", b: [0, 0, 50, 100] }] },
-    { t: 120, players: [{ team: "A", b: [0, 0, 50, 300] }] }
+    { t: 28, players: [{ team: "REF", b: [100, 100, 150, 300] }] },
+    { t: 200, players: [{ team: "REF", b: [100, 100, 150, 200] }] },
+    { t: 120, players: [{ team: "A", b: [100, 100, 150, 400] }] }
   ];
   const p = X.prochainInstant({ kits, cat: "REF", frames, duree: 300, v: "m.mp4" });
   assert.equal(p.t, 200); assert.equal(p.probable, true);
   const q = X.prochainInstant({ kits, cat: "REF", frames: [], duree: 300, v: "m.mp4" });
   assert.equal(q.probable, false); assert.ok(Math.abs(q.t - 30) >= 20);
   assert.equal(X.prochainInstant({ kits, cat: "REF", frames: [], duree: 0 }), null);
+});
+
+test("instant éloigné : différent à chaque clic, jamais deux fois de suite le même, jamais en caméra perdue, joueur assez grand et entier", () => {
+  const kits = { REF: [X.marquer(feat(JAUNE), { t: 30, v: "m.mp4" })] };
+  const fr = [];
+  for (let t = 60; t <= 400; t += 10) fr.push({ t, h: [1, 0, 0, 0, 1, 0, 0, 0, 1], players: [{ team: "REF", b: [300, 300, 340, 300 + 80 + (t % 7)] }] });
+  fr.push({ t: 150, h: [1, 0, 0, 0, 1, 0, 0, 0, 1], players: [{ team: "REF", b: [0, 100, 50, 500] }] });      // coupé par le bord : écarté
+  fr.push({ t: 250.5, h: null, players: [{ team: "REF", b: [300, 300, 340, 600] }] });                           // terrain non suivi : écarté
+  fr.push({ t: 33, h: [1, 0, 0, 0, 1, 0, 0, 0, 1], players: [{ team: "REF", b: [300, 300, 340, 380] }] });       // trop près de l'exemple : écarté
+  fr.push({ t: 170, h: [1, 0, 0, 0, 1, 0, 0, 0, 1], players: [{ team: "REF", b: [300, 300, 320, 320] }] });      // trop petit : écarté
+  const lost = [[200, 260]];
+  let dernier = null; const vus = [];
+  for (let n = 0; n < 8; n++) {
+    const p = X.prochainInstant({ kits, cat: "REF", frames: fr, duree: 400, v: "m.mp4", lost, rotation: n, dernier });
+    assert.equal(p.probable, true);
+    assert.notEqual(p.t, dernier);
+    assert.ok(Math.abs(p.t - 30) >= 20); assert.ok(!(p.t >= 199.5 && p.t <= 260.5)); assert.ok(![150, 170, 250.5, 33].includes(p.t));
+    assert.match(p.raison, /caméra suivie/);
+    vus.push(p.t); dernier = p.t;
+  }
+  assert.ok(new Set(vus).size >= 3, "plusieurs instants différents : " + vus.join(", "));
+});
+
+test("instant éloigné sans analyse : instants répartis qui tournent, hors passages à caméra perdue, loin des exemples", () => {
+  const kits = { REF: [X.marquer(feat(JAUNE), { t: 100, v: "m.mp4" })] };
+  let dernier = null; const vus = new Set();
+  for (let n = 0; n < 6; n++) {
+    const p = X.prochainInstant({ kits, cat: "REF", frames: [], duree: 600, v: "m.mp4", lost: [[300, 420]], rotation: n, dernier });
+    assert.equal(p.probable, false); assert.notEqual(p.t, dernier);
+    assert.ok(Math.abs(p.t - 100) >= 20); assert.ok(!(p.t >= 299.5 && p.t <= 420.5));
+    vus.add(p.t); dernier = p.t;
+  }
+  assert.ok(vus.size >= 4);
 });
 
 test("banc : marques cohérentes, dérive signalée, second banc distinct, demande si caméra mobile et une seule marque", () => {

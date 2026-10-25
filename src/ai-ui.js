@@ -13,6 +13,7 @@
   let pts = [];              // repères en cours de placement : { id, label, ix, iy }
   let placing = null;        // identifiant du repère à placer
   let pickRole = null;       // rôle de tenue à choisir
+  const exRot = {};          // « Aller à un instant… » : nombre de clics par catégorie et dernier instant proposé (pour proposer un instant différent à chaque clic)
   let more = null;           // « ＋ Autre exemple » depuis la liste des équipes : { key, t } (t = instant où revenir après validation)
   let qGroup = null;         // proposition d'appliquer la même réponse aux pistes de la même personne : { team, q, group }
   let qHighlight = null;     // personne désignée par une question : { t, b } (cadre orange sur la vidéo)
@@ -560,8 +561,13 @@
       head.appendChild(exEl("span", "ex-chip " + (e.etat === "assez" ? "assez" : e.etat === "insuffisant" ? "plus" : "fac"), e.etat === "assez" ? "assez d'exemples" : e.etat === "insuffisant" ? "il en faut plus" : "facultatif"));
       const btns = exEl("span", "ex-btns");
       btns.appendChild(exBtn("＋ Autre exemple", "Donner un exemple à un autre moment de la vidéo", () => { if (o.onMore) o.onMore(key); else startPick(key); }));
-      const p = e.etat === "insuffisant" || (e.etat === "facultatif" && e.n > 0) ? EX.prochainInstant({ kits: a.kits, cat: key, frames, duree: dur(), v: vnom }) : null;
-      if (p) btns.appendChild(exBtn("Aller à un instant " + (p.probable ? "probable" : "éloigné"), p.raison, () => { App.seek(p.t); msg.textContent = label + " : " + App.fmt(p.t) + " — " + p.raison + "."; }));
+      const demandeInstant = () => { const r = exRot[key] || (exRot[key] = { n: 0, dernier: null }); return EX.prochainInstant({ kits: a.kits, cat: key, frames, duree: dur(), v: vnom, lost: a.lost || [], rotation: r.n, dernier: r.dernier }); };
+      const p = e.etat === "insuffisant" || (e.etat === "facultatif" && e.n > 0) ? demandeInstant() : null;
+      if (p) btns.appendChild(exBtn("Aller à un instant " + (p.probable ? "probable" : "éloigné"), p.raison, () => {
+        const r = exRot[key] || (exRot[key] = { n: 0, dernier: null }), q = demandeInstant() || p;
+        r.n++; r.dernier = q.t;
+        App.seek(q.t); msg.textContent = label + " : " + App.fmt(q.t) + " — " + q.raison + ". (Un autre clic propose un autre instant.)";
+      }));
       head.appendChild(btns);
       box.appendChild(head);
       box.appendChild(exEl("p", "hint", e.texte + "."));

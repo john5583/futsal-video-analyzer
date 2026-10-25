@@ -103,6 +103,19 @@ function makeFrames() {
   await win.keyboard.press("Escape");
   must(await waitFor(win, () => !document.querySelector("#ai-kits .ex-consigne") && Math.abs(document.querySelector("video").currentTime - 2) < 0.15, 5000), "Échap : consigne retirée, retour à 2 s");
 
+  // 5. « Aller à un instant … » : deux clics = deux instants différents, jamais le même d'affilée, avec la raison affichée
+  const instant = async () => {
+    await win.evaluate(() => { const c = [...document.querySelectorAll("#ai-kits .ex-cat")].find((x) => x.querySelector(".ex-head b").textContent === "Mon équipe"); const b = [...c.querySelectorAll("button")].find((x) => /Aller à un instant/.test(x.textContent)); b.click(); });
+    await sleep(900);
+    return win.evaluate(() => ({ t: document.querySelector("video").currentTime, msg: document.querySelector("#ai-kits .ex-msg").textContent }));
+  };
+  must(await win.evaluate(() => [...document.querySelectorAll("#ai-kits .ex-cat")].some((x) => x.querySelector(".ex-head b").textContent === "Mon équipe" && [...x.querySelectorAll("button")].some((b) => /Aller à un instant/.test(b.textContent)))), "bouton « Aller à un instant … » présent pour « Mon équipe »");
+  const vus = [];
+  for (let i = 0; i < 4; i++) vus.push(await instant());
+  must(vus.every((v, i) => i === 0 || Math.abs(v.t - vus[i - 1].t) > 0.3), "jamais deux fois le même instant d'affilée (" + vus.map((v) => v.t.toFixed(1)).join(", ") + ")");
+  must(new Set(vus.map((v) => Math.round(v.t))).size >= 2, "les clics successifs proposent des instants différents");
+  must(vus.every((v) => /Mon équipe : [0-9]+:[0-9][0-9] — /.test(v.msg)), "l'instant choisi et la raison sont affichés (" + vus.map((v) => v.msg.slice(0, 40)).join(" / ") + ")");
+
   must(errors.length === 0, "aucune erreur dans la console ni boîte de dialogue" + (errors.length ? " : " + errors.join(" | ") : ""));
   await app.close();
   if (!process.env.FSAL_E2E_VIDEO) fs.rmSync(dir, { recursive: true, force: true });
