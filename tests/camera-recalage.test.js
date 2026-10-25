@@ -6,7 +6,7 @@ const assert = require("node:assert/strict");
 const P = require("../src/ai/pipeline");
 const HG = require("../src/ai/homography");
 
-const W = 480, H = 270;
+const W = 480, H = 270, H_ = H;
 const noise = (x, y) => { const v = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453; return v - Math.floor(v); };
 
 /* Contenu de l'image à l'instant t : scène A (panoramique lent), puis flou plat sur [blurFrom, blurTo[, puis scène B toute différente. */
@@ -131,4 +131,70 @@ test("un seul calibrage sur une longue vidéo : la dérive n'est pas mesurable, 
   assert.equal(P.conseilCalibrage(true, 2, 17, 817), null);
   assert.equal(P.conseilCalibrage(true, 1, 0, 200), null);
   assert.equal(P.conseilCalibrage(false, 1, 0, 900), null);
+});
+
+/* Suivi de la caméra seul (sans joueurs ni ballon) : même chaîne que l'analyse, réutilisable par elle. */
+test("suivi de la caméra seul : caméra stable = suivie partout, position exacte (scène qui défile de 20 px/s)", async () => {
+  fakeBrowser({ blurFrom: 1e9, blurTo: 1e9, sceneB: false });
+  const c1 = calib();
+  const s = await P.suiviCamera({ url: "x", calibrations: [c1], t0: 0, t1: 4 });
+  assert.deepEqual(s.lost, []);
+  assert.ok(s.frames.length >= 12, s.frames.length + " positions");
+  const f = s.frames.find((q) => Math.abs(q.t - 3) < 0.05);
+  assert.ok(f, "une position à 3 s");
+  const Hs = HG.mul3(f.h, [1 / W, 0, 0, 0, 1 / H_, 0, 0, 0, 1]), coins = [[0, 0], [W, 0], [W, H_], [0, H_]];
+  const verite = HG.solve(coins, coins.map((p) => HG.apply(c1.H, p[0] + 60, p[1])));      // la scène défile de 20 px/s : à 3 s, 60 px
+  const d = P.driftAt(Hs, verite, W, H_, 40, 20);
+  assert.ok(d && d.med < 0.3, "écart à la vérité " + (d && d.med) + " m");
+});
+
+test("suivi de la caméra seul : flou puis balayage vers une autre partie du terrain = perdu à partir de la coupure, jamais deviné ensuite", async () => {
+  fakeBrowser({ blurFrom: 2.0, blurTo: 2.4, sceneB: true });
+  const s = await P.suiviCamera({ url: "x", calibrations: [calib()], t0: 0, t1: 5 });
+  assert.equal(s.lost.length, 1);
+  assert.ok(s.lost[0][0] >= 1.9 && s.lost[0][0] <= 2.7, "perdu à partir de " + s.lost[0][0]);
+  assert.ok(s.lost[0][1] >= 4.9, "jamais retrouvé");
+  assert.ok(s.frames.every((q) => q.t < s.lost[0][0] + 0.01), "aucune position après la coupure");
+});
+
+test("l'analyse réutilise le suivi de la caméra : mêmes positions, aucune image analysée dans le passage perdu du suivi", async () => {
+  fakeBrowser({ blurFrom: 2.0, blurTo: 2.4, sceneB: true });
+  const sv = await P.suiviCamera({ url: "x", calibrations: [calib()], t0: 0, t1: 5 });
+  let n = 0;
+  const r = await P.analyseVideo({ url: "x", t0: 0, t1: 5, fps: 3, tiles: 1, camera: "mobile", tol: 42, L: 40, W: 20, calibrations: [calib()], suivi: sv.frames, api: { aiDetect: async () => { n++; return { dets: [] }; } } });
+  assert.ok(r.notes.some((q) => /reprise du suivi de la caméra/.test(q)), r.notes.join(" | "));
+  assert.equal(r.lost.length, 1);
+  assert.ok(r.lost[0][0] >= sv.lost[0][0] - 0.4 && r.lost[0][0] <= sv.lost[0][0] + 0.4, "même passage perdu : " + JSON.stringify(r.lost) + " / " + JSON.stringify(sv.lost));
+  assert.ok(n < 9, "aucune détection dans le passage perdu (" + n + ")");
+  const avant = r.lost[0][0];
+  assert.ok(r.recalage.length === 1 && r.recalage[0].de === avant);
+});
+
+test("empreinte du suivi : change quand un calibrage change ou quand la durée change, stable sinon", () => {
+  const a = calib(), b = Object.assign({}, calib(), { t: 3 });
+  const k = P.cleSuivi([a], 800);
+  assert.equal(k, P.cleSuivi([calib()], 800));
+  assert.notEqual(k, P.cleSuivi([a, b], 800));
+  assert.notEqual(k, P.cleSuivi([a], 801));
+  assert.notEqual(k, P.cleSuivi([Object.assign({}, a, { H: a.H.map((v, i) => (i === 2 ? v + 1 : v)) })], 800));
+});
+
+test("courtH : l'analyse d'abord, puis le suivi de la caméra, puis le calibrage ; le suivi sert partout où il est fiable", () => {
+  const norm = (dx) => [1, 0, dx, 0, 1, 0, 0, 0, 1];
+  const ana = [{ t: 1, h: norm(0.1), players: [] }, { t: 1.3, h: norm(0.11), players: [] }];
+  const suivi = [0, 0.3, 0.6, 0.9, 1.2, 1.5, 1.8, 2.1].map((t) => ({ t, h: norm(0.1 + t * 0.01) }));
+  const cal = [{ t: 0, H: [1, 0, 0, 0, 1, 0, 0, 0, 1] }];
+  assert.equal(P.courtH(ana, cal, "mobile", 1.1, 100, 100, suivi).source, "image-interpolee");
+  const a = P.courtH([], cal, "mobile", 1.8, 100, 100, suivi);
+  assert.equal(a.source, "image-interpolee-suivi");
+  assert.ok(Math.abs(a.H[2] - (0.1 + 1.8 * 0.01)) < 1e-9, "interpolé : " + a.H[2]);
+  assert.equal(P.courtH(ana, cal, "mobile", 1.8, 100, 100, suivi).source, "image-interpolee-suivi", "hors des images de l'analyse");
+  assert.equal(P.courtH([], cal, "mobile", 5, 100, 100, suivi).H, null, "ni suivi ni calibrage récent : non tracé");
+  assert.equal(P.courtH([], cal, "mobile", 5, 100, 100, []).source, "calibrage-ancien");
+});
+
+test("cibleCalibrage : là où la caméra est retrouvée, sinon juste après le décrochage", () => {
+  assert.deepEqual(P.cibleCalibrage({ de: 10, a: 14 }, 800), { t: 14.3, reprise: true });
+  assert.deepEqual(P.cibleCalibrage({ de: 600, a: 800 }, 800), { t: 601, reprise: false });
+  assert.deepEqual(P.cibleCalibrage({ de: 799.8, a: 800 }, 800), { t: 800, reprise: false });
 });

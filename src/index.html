@@ -46,6 +46,7 @@
           <video id="video" crossorigin="anonymous" preload="metadata" hidden></video>
           <canvas id="overlay" class="overlay" hidden></canvas>
           <canvas id="loupe" class="loupe" width="168" height="168" hidden></canvas>
+          <button id="ai-calib-go" class="calib-go" hidden></button>
           <div id="zoom-ctl" class="zoom-ctl" title="Molette de la souris : zoom ; glisser : déplacer l'image">
             <button id="zm-in" title="Agrandir (ou molette de la souris)">＋</button>
             <button id="zm-out" title="Réduire">－</button>
@@ -131,6 +132,7 @@
             </div>
             <div id="ai-points" class="ai-list"></div>
             <div id="ai-calibs" class="ai-list"></div>
+            <div id="ai-suivi-box" class="ai-suivi" hidden><p id="ai-suivi" class="hint"></p><progress id="ai-suivi-bar" max="100" value="0" hidden></progress></div>
             <p id="ai-calib-msg" class="hint"></p>
           </details>
 
@@ -170,6 +172,7 @@
                 <select id="ai-device"><option value="auto">Automatique (carte graphique si plus rapide)</option><option value="cpu">Processeur uniquement</option></select>
               </label>
               <label class="row"><input id="ai-marks" type="checkbox" checked> Ignorer le marquage jaune du sol (à décocher uniquement si votre ballon est jaune)</label>
+              <label class="row" title="Mesuré sur 20261019_212111 (13 min) : analyse en 578 s au lieu de 1400 s, caméra perdue 0 % dans les deux cas, mais fiabilité mesurée 45 % au lieu de 55 %. Décoché : l'analyse suit la caméra elle-même, en masquant les joueurs (méthode validée)."><input id="ai-reuse" type="checkbox"> Réutiliser le suivi de la caméra déjà fait (analyse plus rapide, moins fiable d'après la mesure)</label>
               <label title="En regardant le but que votre équipe attaque en première mi-temps. Sert à ne pas compter comme une erreur un joueur qui entre ou sort par la zone de remplacement.">Bancs des remplaçants
                 <select id="ai-bench"><option value="auto">À déduire</option><option value="left">À gauche</option><option value="right">À droite</option></select>
               </label>

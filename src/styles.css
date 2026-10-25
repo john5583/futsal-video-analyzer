@@ -276,6 +276,8 @@ fieldset.plan-q label.plan-opt{display:flex;flex-direction:row;gap:8px;align-ite
 .plan-qual ul{margin:4px 0 0 18px;padding:0}
 
 /* zoom de la vidéo : boutons en haut à droite, cachés tant qu'aucune vidéo n'est affichée */
+.calib-go{position:absolute;left:8px;top:40px;z-index:6;padding:5px 10px;font-size:12px;font-weight:600;border-radius:6px;border:0;background:#00b8d4;color:#04222a;cursor:pointer}
+.ai-suivi progress{width:100%;height:8px}
 .loupe{position:absolute;pointer-events:none;border:2px solid #00e6ff;border-radius:50%;z-index:6;box-shadow:0 2px 10px rgba(0,0,0,.6);background:#000}
 .ai-item.sus{outline:1px solid #e5484d}
 .ai-item .pt-err{font-size:11px;color:#9aa5a0;margin-right:6px}.ai-item.sus .pt-err{color:#ff8a8a}

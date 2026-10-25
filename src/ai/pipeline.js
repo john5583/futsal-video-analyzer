@@ -166,18 +166,29 @@
     if (!(gap <= COURT_GAP_M)) return null;
     return HG.mul3(Ha.map((v, i) => v + (Hb[i] - v) * al), [1 / vw, 0, 0, 0, 1 / vh, 0, 0, 0, 1]);
   }
-  function courtH(frames, calibs, camera, t, vw, vh) {
-    if (frames && frames.length > 1 && vw > 0 && vh > 0) {
-      try { const H = courtHBetween(frames, t, vw, vh); if (H) return { H, source: "image-interpolee" }; } catch (_e) { /* retour à l'image la plus proche */ }
-    }
-    const f = frames && frames.length ? frameNear(frames, t, 0.3) : null;
-    if (goodH(f) && vw > 0 && vh > 0) {
-      try { return { H: HG.mul3(f.h, [1 / vw, 0, 0, 0, 1 / vh, 0, 0, 0, 1]), source: "image" }; } catch (_e) { /* projection inutilisable */ }
+  /* suivi : images du suivi de la caméra seul (voir suiviCamera), utilisées quand l'analyse n'a pas d'image à cet instant. */
+  function courtH(frames, calibs, camera, t, vw, vh, suivi) {
+    const lists = [[frames, ""], [suivi, "-suivi"]];
+    for (const [fr, tag] of lists) {
+      if (fr && fr.length > 1 && vw > 0 && vh > 0) {
+        try { const H = courtHBetween(fr, t, vw, vh); if (H) return { H, source: "image-interpolee" + tag }; } catch (_e) { /* retour à l'image la plus proche */ }
+      }
+      const f = fr && fr.length ? frameNear(fr, t, 0.3) : null;
+      if (goodH(f) && vw > 0 && vh > 0) {
+        try { return { H: HG.mul3(f.h, [1 / vw, 0, 0, 0, 1 / vh, 0, 0, 0, 1]), source: "image" + tag }; } catch (_e) { /* projection inutilisable */ }
+      }
     }
     const cal = calibrationAt(calibs, t);
     if (!cal) return null;
     if (camera !== "fixed" && Math.abs(cal.t - t) > 0.5) return { H: null, source: "calibrage-ancien" };
     return { H: cal.H, source: "calibrage" };
+  }
+
+  /* Image où proposer d'ajouter un calibrage pour un passage perdu l = { de, a } : là où la caméra est retrouvée (a) si elle l'est avant la fin (fin),
+     sinon juste après le décrochage (de + 1 s), où il faut chercher une image où le terrain est visible. */
+  function cibleCalibrage(l, fin) {
+    const reprise = l.a < fin - 0.5, t = reprise ? Math.min(l.a + 0.3, fin) : Math.min(l.de + 1, l.a);
+    return { t: Math.round(t * 10) / 10, reprise };
   }
 
   /* Dérive du suivi de la caméra mesurée quand un nouveau calibrage est atteint : écart (m, sur le terrain) entre la projection que le suivi
@@ -613,6 +624,87 @@
     return null;
   }
 
+  /* ---- Suivi de la caméra seul ----
+     Sans joueurs ni ballon : seulement le mouvement de la caméra depuis chaque calibrage (suivi de points, puis appariement de points en dernier
+     recours), pour savoir où est le terrain à chaque instant sans attendre l'analyse complète. Même méthode que l'analyse (les joueurs ne sont pas
+     masqués : la recherche robuste les écarte). Jamais deviné : quand la position n'est pas retrouvée, la caméra est « perdue » à cet endroit.
+     opts : { url, calibrations (au moins 1), t0 (facultatif), t1 (facultatif), signal, onProgress({done,total,eta}) }
+     Renvoie { frames: [{ t, h }] (h = projection normalisée, comme les images de l'analyse), lost: [[a, b]], t0, t1, seconds, orb, vw, vh }. */
+  const SUIVI_PAS = 0.1;          // s : pas du suivi (comme l'analyse)
+  const SUIVI_STOCK = 0.3;        // s : une position gardée toutes les 0,3 s (la position entre deux est interpolée)
+  const SUIVI_REPRISE = 0.3;      // s : en passage perdu, on retente de retrouver la position toutes les 0,3 s
+  /* Empreinte des calibrages + durée de la vidéo : le suivi gardé dans le projet n'est réutilisé que si elle est identique. */
+  function cleSuivi(calibs, duree) {
+    const s = (calibs || []).slice().sort((a, b) => a.t - b.t).map((c) => c.t.toFixed(2) + ":" + (c.H || []).map((v) => Number(v).toPrecision(6)).join(",")).join("|") + "@" + Math.round(duree || 0);
+    let h = 2166136261;
+    for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
+    return "s1-" + h.toString(16);
+  }
+  async function suiviCamera(opts) {
+    const calibs = (opts.calibrations || []).slice().sort((a, b) => a.t - b.t);
+    if (!calibs.length) throw new Error("Aucun calibrage du terrain");
+    const video = document.createElement("video");
+    video.muted = true; video.preload = "auto"; video.crossOrigin = "anonymous";
+    video.src = opts.url;
+    try {
+      await new Promise((res, rej) => { video.onloadedmetadata = res; video.onerror = () => rej(new Error("Vidéo illisible")); });
+      const vw = video.videoWidth, vh = video.videoHeight;
+      const gw = Math.min(opts.gw || 480, vw), gh = Math.max(2, Math.round((vh * gw) / vw)), gs = gw / vw, pas = opts.pas || SUIVI_PAS, corners = opts.corners || 320;
+      const gcanvas = document.createElement("canvas"); gcanvas.width = gw; gcanvas.height = gh;
+      const gctx = gcanvas.getContext("2d", { willReadFrequently: true });
+      const stats = { orb: 0, reloc: 0 };
+      const motionS = (a, b) => { const r = Cam.estimateMotion(a, b, a.mask, b.mask, { maxCorners: corners }); if (r.ok || !Orb) return r; const o = orbStep(a, b, stats); return o.ok ? o : r; };
+      const grab = () => { gctx.drawImage(video, 0, 0, gw, gh); return Cam.prepare(gctx.getImageData(0, 0, gw, gh).data, gw, gh, [], 4); };
+      const tStart = Math.max(calibs[0].t, opts.t0 || 0), tEnd = Math.min(opts.t1 != null ? opts.t1 : Infinity, video.duration - 0.05);
+      // instants suivis : une grille de 0,1 s, plus l'instant exact de chaque calibrage
+      const grid = new Set(), times = [];
+      for (let t = tStart; t <= tEnd + 1e-6; t += pas) grid.add(Math.round(t * 1000) / 1000);
+      calibs.forEach((c) => { if (c.t >= tStart && c.t <= tEnd) grid.add(Math.round(c.t * 1000) / 1000); });
+      grid.forEach((t) => times.push(t)); times.sort((a, b) => a - b);
+      const frames = [], lost = [];
+      const trk = { anchor: null, M: IDENTITY, prev: null, keys: [], t: 0, lastTry: -9 };
+      const addKey = () => { const last = trk.keys[trk.keys.length - 1]; if (!last || trk.t - last.t >= 1) { trk.keys.push({ prev: trk.prev, M: trk.M, t: trk.t }); if (trk.keys.length > 14) trk.keys.splice(1, 1); } };
+      let lostStart = null, nextStore = -1, ok = false;
+      const started = Date.now();
+      for (let i = 0; i < times.length; i++) {
+        if (opts.signal && opts.signal.aborted) throw new Error("Suivi interrompu");
+        const t = times[i], calib = calibrationAt(calibs, t);
+        await seekTo(video, t);
+        const cur = grab();
+        if (calib !== trk.anchor) {                       // un calibrage est atteint : le suivi repart de lui
+          trk.anchor = calib; trk.M = IDENTITY; trk.prev = cur; trk.t = t; trk.keys = [{ prev: cur, M: IDENTITY, t }]; ok = true;
+        } else if (ok) {
+          let r = motionS(trk.prev, cur);
+          if (!r.ok && t - trk.t > 0.04) {           // échec : on retente en deux demi-pas (comme l'analyse)
+            const tm = trk.t + (t - trk.t) / 2;
+            await seekTo(video, tm);
+            const mid = grab(), r1 = motionS(trk.prev, mid);
+            if (r1.ok) { trk.M = HG.mul3(trk.M, HG.invert(Cam.toNative(r1.H, gs))); trk.prev = mid; trk.t = tm; addKey(); r = motionS(trk.prev, cur); }
+          }
+          if (r.ok) { trk.M = HG.mul3(trk.M, HG.invert(Cam.toNative(r.H, gs))); trk.prev = cur; trk.t = t; addKey(); }
+          else ok = false;
+        }
+        if (!ok && t - trk.lastTry >= SUIVI_REPRISE - 1e-6) {       // position perdue : retrouvée par les images clés déjà suivies, jamais devinée
+          trk.lastTry = t;
+          const M = relocateKeys(trk.keys, cur, gs, vw, vh, stats);
+          if (M) { trk.M = M; trk.prev = cur; trk.t = t; addKey(); ok = true; }
+        }
+        if (!ok) { if (lostStart == null) lostStart = t; }
+        else if (lostStart != null) { lost.push([lostStart, t]); lostStart = null; }
+        if (ok && t >= nextStore - 1e-6) {
+          const h = normalizedProjection(HG.mul3(trk.anchor.H, trk.M), vw, vh);
+          if (h) { frames.push({ t: Math.round(t * 100) / 100, h }); nextStore = t + SUIVI_STOCK; }
+        }
+        if (opts.onProgress && (i % 10 === 0 || i === times.length - 1)) {
+          const el = (Date.now() - started) / 1000;
+          opts.onProgress({ done: i + 1, total: times.length, eta: (el / (i + 1)) * (times.length - i - 1) });
+        }
+      }
+      if (lostStart != null) lost.push([lostStart, times[times.length - 1]]);
+      return { frames, lost, t0: tStart, t1: times.length ? times[times.length - 1] : tStart, seconds: Math.round((Date.now() - started) / 100) / 10, orb: stats.orb + stats.reloc, vw, vh };
+    } finally { video.removeAttribute("src"); video.load(); }
+  }
+
   /* Analyse complète d'une plage de la vidéo.
      opts : { url, t0, t1, fps, tiles, camera ("fixed" | "mobile"), tol, L, W, calibrations, refs, floorMarks (false = garder les ballons jaunes),
               dirAt (sens de jeu de l'équipe A, pour savoir quel gardien défend quel but), signal, onProgress, api }
@@ -633,12 +725,14 @@
     canvas.width = cw; canvas.height = ch;
     const ctx = canvas.getContext("2d", { willReadFrequently: true });
     const mobile = opts.camera === "mobile";
+    const sv = mobile && Array.isArray(opts.suivi) && opts.suivi.length > 1 ? opts.suivi : null;     // suivi de la caméra seul déjà fait : réutilisé, la caméra n'est pas suivie une 2e fois
     const notes = [];
     const calibs = (opts.calibrations || []).slice().sort((a, b) => a.t - b.t);
     if (!calibs.length) throw new Error("Aucun calibrage du terrain");
     const start = startTime(opts.t0, calibs, mobile);
     const t0 = start.t0;
     if (start.note) notes.push(start.note);
+    if (sv) notes.push("Position de la caméra reprise du suivi de la caméra déjà fait (pas de second suivi).");
     const times = sampleTimes(t0, Math.min(opts.t1, video.duration - 0.05), opts.fps);
     // images réduites pour le suivi de la caméra
     const gw = Math.min(480, cw), gh = Math.max(2, Math.round((ch * gw) / cw)), gs = gw / vw;
@@ -707,14 +801,23 @@
       const t = times[i];
       const calib = calibrationAt(calibs, t);
       // Caméra mobile : le mouvement est suivi par petits pas (≤ 0,1 s), même si les images analysées sont plus espacées
-      let trackOk = true;
-      if (mobile && trk.anchor && trk.anchor === calib && trk.prev) trackOk = await advanceMotion(trk, t);
+      let trackOk = true, svH = null;
+      if (sv) {
+        const ch = courtH(sv, calibs, "mobile", t, vw, vh);
+        svH = ch && ch.H ? ch.H : null;
+        if (!svH) {                       // le suivi de la caméra ne connaît pas la position ici : image ignorée, sans lecture ni détection
+          if (lostStart == null) { lostStart = t; curLost = { de: t, reprise: null }; }
+          if (opts.onProgress) opts.onProgress({ done: i + 1, total: times.length, eta: ((Date.now() - started) / 1000 / (i + 1)) * (times.length - i - 1), frame: null, lost: true });
+          continue;
+        }
+      }
+      if (mobile && !sv && trk.anchor && trk.anchor === calib && trk.prev) trackOk = await advanceMotion(trk, t);
       else await seekTo(video, t);
       ctx.drawImage(video, 0, 0, cw, ch);
       const img = ctx.getImageData(0, 0, cw, ch);
       let dets;
       if (zoom) {
-        const Hprev = mobile && trk.anchor === calib ? HG.mul3(trk.anchor.H, trk.M) : calib.H;
+        const Hprev = svH || (mobile && trk.anchor === calib ? HG.mul3(trk.anchor.H, trk.M) : calib.H);
         const crop = courtRegion(Hprev, opts.L, opts.W, scale, cw, ch);
         dets = dropFloorMarks(await detectCanvas(canvas, 1, opts.api, { minPerson: 0.35, minBall: BALL_CAND }, crop ? zoomRects(crop) : tileRects(cw, ch, 2)), img, opts.floorMarks);
         // ballon non vu : recherche en gros plan autour de sa dernière position connue
@@ -728,8 +831,8 @@
         const bd = dets.filter((d) => d.cls === Y.CLASS_BALL && d.score >= BALL_STRONG).sort((a, b) => b.score - a.score)[0];
         if (bd) lastBall = { x: (bd.x1 + bd.x2) / 2, y: (bd.y1 + bd.y2) / 2, t };
       } else dets = dropFloorMarks(await detectCanvas(canvas, opts.tiles, opts.api, { minPerson: 0.35, minBall: BALL_CAND }), img, opts.floorMarks);
-      let H = calib.H, reliable = true;
-      if (mobile) {
+      let H = svH || calib.H, reliable = true;
+      if (mobile && !sv) {
         const boxes = dets.filter((d) => d.cls === Y.CLASS_PERSON).map((d) => [d.x1 * (gw / cw), d.y1 * (gh / ch), d.x2 * (gw / cw), d.y2 * (gh / ch)]);
         trk.boxes = boxes;
         if (calib !== trk.anchor || !trk.prev) {
@@ -759,7 +862,7 @@
         if (opts.onProgress) opts.onProgress({ done: i + 1, total: times.length, eta: ((Date.now() - started) / 1000 / (i + 1)) * (times.length - i - 1), frame: null, lost: true });
         continue;
       }
-      if (lostStart != null) { lost.push([lostStart, t]); recalage.push({ de: curLost.de, a: t, reprise: curLost.reprise }); lostStart = null; curLost = null; }
+      if (lostStart != null) { lost.push([lostStart, t]); recalage.push({ de: curLost.de, a: t, reprise: sv ? Math.round(t * 100) / 100 : curLost.reprise }); lostStart = null; curLost = null; }
       frames.push(processDetections(dets, { frameW: cw, frameH: ch, scale, img, H, L: opts.L, W: opts.W, refs: opts.refs, reject: opts.tol, tracker, t, close: amb.close, appearance: amb.close, bench, benchZones: opts.benchZones, benchDrift, ballMargin: opts.ballMargin }));
       if (opts.onProgress) {
         const elapsed = (Date.now() - started) / 1000;
@@ -832,6 +935,9 @@
     const start = startTime(opts.t0, calibs, mobile);
     const t0 = start.t0;
     if (start.note) notes.push(start.note);
+    const sv = mobile && Array.isArray(opts.suivi) && opts.suivi.length > 1 ? opts.suivi : null;     // suivi de la caméra seul déjà fait : réutilisé
+    if (sv) notes.push("Position de la caméra reprise du suivi de la caméra déjà fait (pas de second suivi).");
+    const svH = (t) => { const ch = courtH(sv, calibs, "mobile", t, vw, vh); return ch && ch.H ? ch.H : null; };
     const vfps = opts.videoFps > 0 ? opts.videoFps : 30, dtF = 1 / vfps;
     const tEnd = Math.min(opts.t1, video.duration - 0.05);
     const nFrames = tEnd > t0 ? Math.floor((tEnd - t0) / dtF + 1e-6) + 1 : 0;
@@ -880,6 +986,7 @@
       const calib = calibrationAt(calibs, fr.t);
       const base = { anchor: calib };
       if (!mobile) return { reliable: true, anchor: calib, fixed: true };
+      if (sv) return { reliable: !!svH(fr.t), anchor: calib, suivi: true };
       if (calib !== trk.anchor || !trk.prev) {
         trk.anchor = calib; trk.M = IDENTITY; trk.prev = prep(fr); trk.keys = [{ prev: trk.prev, M: IDENTITY, t: fr.t }]; trk.lastStep = null; trk.bridge = null;
         trk.anchorPrev = null; trk.kPrev = fr.k; trk.Mprev = IDENTITY; trk.prevOk = true; trk.broken = false;
@@ -948,6 +1055,7 @@
         let reliable = cam.reliable && !!fr.detP, H = null;
         if (reliable) {
           if (cam.fixed) H = cam.anchor.H;
+          else if (cam.suivi) { H = svH(fr.t); reliable = !!H; }
           else {
             const useNew = calibrationAt(calibs, fr.t) === cam.anchor;
             const M = useNew ? (cam.anchorPrev === cam.anchor && fr.k > cam.kPrev ? lerpM(cam.Mprev, cam.M, Math.min(1, (fr.k - cam.kPrev) / Math.max(1, batch[batch.length - 1].k - cam.kPrev))) : cam.M) : cam.Mprev;
@@ -958,7 +1066,7 @@
           if (lostStart == null) { lostStart = fr.t; curLost = { de: fr.t, reprise: null }; probe = { prev: null, from: 0, run: 0, t: 0 }; }
           continue;
         }
-        if (lostStart != null) { lost.push([lostStart, fr.t]); recalage.push({ de: curLost.de, a: fr.t, reprise: curLost.reprise }); lostStart = null; curLost = null; }
+        if (lostStart != null) { lost.push([lostStart, fr.t]); recalage.push({ de: curLost.de, a: fr.t, reprise: sv ? Math.round(fr.t * 100) / 100 : curLost.reprise }); lostStart = null; curLost = null; }
         const dets = dropFloorMarks(await fr.detP, fr.img, opts.floorMarks);
         lastBoxes = dets.filter((d) => d.cls === Y.CLASS_PERSON).map((d) => [d.x1 * (gw / cw), d.y1 * (gh / ch), d.x2 * (gw / cw), d.y2 * (gh / ch)]);
         const legacy = fr.k % (CAM_EVERY * LEGACY_EVERY) === 0;
@@ -1079,5 +1187,5 @@
     return { dets, scale, img: ctx.getImageData(0, 0, cw, ch), width: cw, height: ch };
   }
 
-  return { isFloorMark, courtH, driftAt, conseilCalibrage, trackDrift, inBenchZone, shiftedZones, followBenches, tileRects, courtRegion, zoomRects, tileToFrame, mergeTiles, isFloorMark, dropFloorMarks, calibrationAt, processDetections, finalizeFrames, compactFrames, expandFrames, frameNear, sampleTimes, startTime, estimateDuration, learnFactor, FACTOR_MIN, FACTOR_MAX, analyseVideo, analyseVideoContinuous, stepGap, avgStep, lerpM, detectAt, detectCanvas, captureFrames, TEAM_CODE };
+  return { isFloorMark, courtH, cibleCalibrage, suiviCamera, cleSuivi, driftAt, conseilCalibrage, trackDrift, inBenchZone, shiftedZones, followBenches, tileRects, courtRegion, zoomRects, tileToFrame, mergeTiles, isFloorMark, dropFloorMarks, calibrationAt, processDetections, finalizeFrames, compactFrames, expandFrames, frameNear, sampleTimes, startTime, estimateDuration, learnFactor, FACTOR_MIN, FACTOR_MAX, analyseVideo, analyseVideoContinuous, stepGap, avgStep, lerpM, detectAt, detectCanvas, captureFrames, TEAM_CODE };
 });

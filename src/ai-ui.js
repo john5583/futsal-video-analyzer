@@ -231,15 +231,29 @@
   }
   /* Raison pour laquelle le terrain n'est pas tracé à l'instant t (jamais « non tracé » sans le dire). */
   function noTraceReason(a, t) {
-    const l = a ? O.lostAt(a.lost, t) : null, s = (a && a.settings) || {};
+    const l = a ? (O.lostAt(a.lost, t) || O.lostAt(a.camSuivi && a.camSuivi.lost, t)) : null, s = (a && a.settings) || {};
     if (l) return "caméra perdue de " + App.fmt(l.de) + " à " + App.fmt(l.a) + " (suivi interrompu)";
-    if (!frames.length) return "la caméra a bougé depuis le calibrage (lancez l'analyse pour suivre la caméra)";
+    if (suiviRun) return "suivi de la caméra en cours (" + suiviRun.pct + " %), le terrain apparaîtra ici dès qu'il sera passé";
+    const cs = a && a.camSuivi;
+    if (cs && a.calibrations.length && t < a.calibrations[0].t - 0.5) return "avant le premier calibrage (" + App.fmt(a.calibrations[0].t) + ")";
+    if (cs && t > cs.t1 + 0.5) return "après la fin du suivi de la caméra (" + App.fmt(cs.t1) + ")";
+    if (!frames.length && !suiviFr.length) return "la caméra a bougé depuis le calibrage (le suivi de la caméra n'a pas encore été fait)";
     if (typeof s.t0 === "number" && typeof s.t1 === "number" && (t < s.t0 - 0.5 || t > s.t1 + 0.5)) return "hors de la plage analysée (" + App.fmt(s.t0) + " à " + App.fmt(s.t1) + ")";
     return "aucune image analysée près de cet instant, la caméra a bougé depuis le calibrage";
   }
+  /* Bouton posé sur la vidéo quand le terrain n'est pas tracé : mène à l'image où ajouter un calibrage. */
+  function calibGo(t, ok) {
+    const b = $("ai-calib-go"); if (!b) return;
+    const a = ai(), l = ok ? null : (a && (O.lostAt(a.lost, t) || O.lostAt(a.camSuivi && a.camSuivi.lost, t)));
+    if (ok || !a || !a.calibrations.length || suiviRun) { b.hidden = true; return; }
+    const c = l ? P.cibleCalibrage(l, (a.camSuivi && a.camSuivi.t1) || (a.settings && a.settings.t1) || video.duration || l.a) : null;
+    b.dataset.t = String(c ? c.t : Math.round(t * 10) / 10);
+    b.textContent = c ? "Ajouter un calibrage à " + App.fmt(c.t) + (c.reprise ? " (là où la caméra est retrouvée)" : " (juste après le décrochage)") : "Ajouter un calibrage ici";
+    b.hidden = false;
+  }
   function drawOverlay() {
     const c = $("overlay");
-    if (c.hidden) return;
+    if (c.hidden) { calibGo(0, true); return; }
     c.classList.toggle("fixable", frames.length > 0 && !(placing || pickRole || pip || pointer || benchMark));      // un clic sur un cadre permet de corriger la personne
     const dpr = sizeOverlay();
     const ctx = c.getContext("2d");
@@ -266,15 +280,16 @@
     // aperçu du terrain calibré
     // (tracé seulement si la projection est fiable à cet instant ; sinon un message l'explique, pas de lignes absurdes)
     if (a && $("ov-court").checked) {
-      const ch = P.courtH(frames, a.calibrations, a.camera || $("ai-camera").value, t, video.videoWidth, video.videoHeight);
+      const ch = P.courtH(frames, a.calibrations, a.camera || $("ai-camera").value, t, video.videoWidth, video.videoHeight, suiviFr);
+      calibGo(t, !!(ch && ch.H));
       if (ch && ch.H) {
         const Hi = HG.invert(ch.H), o = toView(0, 0), e = toView(r.vw, r.vh), far = 4;
         ctx.save(); ctx.beginPath(); ctx.rect(o[0], o[1], e[0] - o[0], e[1] - o[1]); ctx.clip();
         ctx.strokeStyle = "rgba(0,230,255,.9)"; ctx.lineWidth = 2;
-        // seulement près de l'action (là où l'estimation de la caméra est fiable) ; sans au moins deux joueurs détectés, rien n'est tracé
+        // près de l'action quand elle est connue (là où l'estimation de la caméra est fiable) ; sans image d'analyse à cet instant (suivi de la caméra seul), tout le terrain visible
         const fa = frames.length ? P.frameNear(frames, t, 0.3) : null, win = fa ? O.actionWindow(fa.players, L(), W(), 5) : null;
         courtPolylines().forEach((full) => {
-          (win ? O.clipLine(full, win, 0.5) : []).forEach((pl) => {
+          (win ? O.clipLine(full, win, 0.5) : (fa ? [] : [full])).forEach((pl) => {
             let pen = false;
             ctx.beginPath();
             pl.forEach((p) => {
@@ -530,6 +545,61 @@
     lp.hidden = false;
   }
 
+  /* ---------- suivi de la caméra seul (arrière-plan, sans joueurs ni ballon) ----------
+     Lancé automatiquement après un calibrage, refait quand un calibrage est ajouté ou supprimé. Le terrain est tracé partout où ce suivi est fiable,
+     sans attendre l'analyse complète ; l'analyse complète le réutilise. */
+  let suiviFr = [];                    // images du suivi gardé dans le projet : [{ t, h }]
+  let suiviRun = null;                 // suivi en cours : { ctrl, pct }
+  let suiviTimer = null;
+  const fmtDur = (s) => s >= 90 ? Math.round(s / 60) + " min" : Math.round(s) + " s";
+  function suiviMsg(txt, pct) {
+    const box = $("ai-suivi-box"); if (!box) return;
+    box.hidden = !txt; $("ai-suivi").textContent = txt || "";
+    const b = $("ai-suivi-bar"); b.hidden = pct == null; if (pct != null) b.value = pct;
+  }
+  function chargeSuivi() {
+    const s = ai() && ai().camSuivi;
+    suiviFr = s && Array.isArray(s.frames) ? s.frames.filter((c) => Array.isArray(c) && Array.isArray(c[1]) && c[1].length === 9).map((c) => ({ t: c[0], h: c[1] })) : [];
+  }
+  /* Phrase de bilan du suivi (part de la vidéo où la caméra est suivie, passages perdus). */
+  function suiviBilan(s) {
+    const lost = s.lost || [], span = Math.max(0.1, s.t1 - s.t0), ls = lost.reduce((x, r) => x + (r[1] - r[0]), 0), pct = Math.round(1000 * (1 - ls / span)) / 10;
+    let m = "Suivi de la caméra terminé : caméra suivie sur " + String(pct).replace(".", ",") + " % de la vidéo (" + App.fmt(s.t0) + " à " + App.fmt(s.t1) + "), en " + fmtDur(s.seconds || 0) + ".";
+    if (lost.length) m += " Perdue : " + lost.slice(0, 4).map((r) => App.fmt(r[0]) + "–" + App.fmt(r[1])).join(", ") + (lost.length > 4 ? "…" : "") + " (ajoutez un calibrage là).";
+    return m;
+  }
+  /* Le suivi gardé n'est réutilisable que pour les calibrages actuels et la caméra mobile. */
+  const suiviValide = (a) => !!(a && (a.camera || $("ai-camera").value) === "mobile" && a.camSuivi && suiviFr.length > 1 && a.camSuivi.cle === P.cleSuivi(a.calibrations, video.duration));
+  function planSuivi(delay) {
+    clearTimeout(suiviTimer);
+    suiviTimer = setTimeout(lanceSuivi, delay == null ? 1500 : delay);
+  }
+  async function lanceSuivi() {
+    const a = ai();
+    if (!a || !P.suiviCamera) return;
+    if (suiviRun) { suiviRun.ctrl.abort(); suiviRun = null; }
+    const cam = a.camera || $("ai-camera").value;
+    if (cam !== "mobile" || !a.calibrations.length || !App.isVideoReady() || !(video.duration > 0)) { if (cam !== "mobile" || !a.calibrations.length) { suiviFr = []; suiviMsg(""); } return; }
+    if (running) { planSuivi(5000); return; }              // l'analyse complète fait déjà son propre suivi
+    const cle = P.cleSuivi(a.calibrations, video.duration);
+    if (a.camSuivi && a.camSuivi.cle === cle) { chargeSuivi(); suiviMsg(suiviBilan(a.camSuivi)); refreshLive(); return; }
+    suiviFr = []; a.camSuivi = null; refreshLive();
+    const ctrl = new AbortController(), run = { ctrl, pct: 0 }; suiviRun = run;
+    suiviMsg("Suivi de la caméra en cours (en arrière-plan, vous pouvez continuer)…", 0);
+    try {
+      const r = await P.suiviCamera({
+        url: App.getVideoUrl(), calibrations: a.calibrations.map((c) => ({ t: c.t, H: c.H })), signal: ctrl.signal,
+        onProgress: (p) => { run.pct = Math.round((100 * p.done) / p.total); suiviMsg("Suivi de la caméra : " + run.pct + " % — reste environ " + fmtEta(p.eta), run.pct); }
+      });
+      if (suiviRun !== run) return;
+      suiviRun = null;
+      a.camSuivi = { cle, t0: r.t0, t1: r.t1, seconds: r.seconds, lost: r.lost.map((x) => [Math.round(x[0] * 100) / 100, Math.round(x[1] * 100) / 100]), frames: r.frames.map((q) => [q.t, q.h]) };
+      chargeSuivi(); suiviMsg(suiviBilan(a.camSuivi)); App.changed(); refreshLive();
+    } catch (e) {
+      if (suiviRun === run) { suiviRun = null; suiviMsg(ctrl.signal.aborted ? "" : "Suivi de la caméra interrompu : il sera repris au prochain chargement de la vidéo."); }
+    }
+  }
+
   function renderCalibs() {
     const a = ai(), l = $("ai-calibs");
     l.innerHTML = "";
@@ -537,7 +607,7 @@
       const d = document.createElement("div"); d.className = "ai-item";
       d.innerHTML = "<span class=\"grow\">Calibrage à " + App.fmt(c.t) + " — erreur " + c.err.toFixed(2) + " m (" + c.points.length + " repères)</span><button data-a=\"go\" title=\"Aller à ce moment\">⏵</button><button data-a=\"del\" title=\"Supprimer\">×</button>";
       d.querySelector("[data-a=go]").addEventListener("click", () => App.seek(c.t));
-      d.querySelector("[data-a=del]").addEventListener("click", () => { a.calibrations.splice(i, 1); renderCalibs(); App.changed(); refreshLive(); });
+      d.querySelector("[data-a=del]").addEventListener("click", () => { a.calibrations.splice(i, 1); renderCalibs(); App.changed(); refreshLive(); planSuivi(); });
       l.appendChild(d);
     });
     setChip("ai-s1-state", a.calibrations.length ? a.calibrations.length + " calibrage(s)" : "À faire", a.calibrations.length ? "ok" : "warn");
@@ -863,7 +933,7 @@
     pts = []; placing = null;
     msg.textContent = "Calibrage enregistré (erreur moyenne " + err.toFixed(2) + " m). Cochez « Terrain » pour vérifier le tracé sur l'image.";
     $("ov-court").checked = true;
-    renderPoints(); renderCalibs(); updateOverlayMode(); App.changed();
+    renderPoints(); renderCalibs(); updateOverlayMode(); App.changed(); planSuivi();
     return true;
   }
 
@@ -1475,6 +1545,7 @@
     if (frames.length && !(opts && opts.noConfirm) && !confirm("Une analyse existe déjà : la remplacer ?")) return false;
     const v2 = isV2(), fps = v2 ? 3 : Number($("ai-fps").value), tiles = v2 ? 3 : Number($("ai-tiles").value);      // v2 : 3 images/s, zoom automatique
     running = true; abort = new AbortController(); live = null;
+    if (suiviRun) { suiviRun.ctrl.abort(); suiviRun = null; suiviMsg("Suivi de la caméra interrompu : l'analyse complète suit la caméra elle-même."); }       // pas deux lectures de la vidéo en même temps
     const startedAt = Date.now();
     $("ai-run").disabled = true; $("ai-device").disabled = true; $("ai-cancel").hidden = false; $("ai-progress").hidden = false; $("ai-bar").style.width = "0%";
     msg.textContent = "Chargement du modèle de détection…";
@@ -1482,7 +1553,7 @@
       const camera = $("ai-camera").value;
       const continuous = !!(opts && opts.continuous) || (v2 && $("ai-v2-cont").checked);        // analyse continue : chaque image de la vidéo (voir pipeline.js)
       const result = await (continuous ? P.analyseVideoContinuous : P.analyseVideo)({
-        url: App.getVideoUrl(), t0: range[0], t1: range[1], fps, tiles, camera, tol: tol(), L: L(), W: W(), calibrations: a.calibrations, refs: r, floorMarks: floorMarks(), benchZones: a.benchZones || [], benchFollow: memory().benchFollow !== false, dirAt, signal: abort.signal, api, ballMargin: (opts && opts.extra && opts.extra.ballMargin) || (v2 ? 6 : undefined), fullRes: !!(opts && opts.extra && opts.extra.fullRes) || v2,
+        url: App.getVideoUrl(), t0: range[0], t1: range[1], fps, tiles, camera, tol: tol(), L: L(), W: W(), calibrations: a.calibrations, suivi: $("ai-reuse").checked && suiviValide(a) ? suiviFr : null, refs: r, floorMarks: floorMarks(), benchZones: a.benchZones || [], benchFollow: memory().benchFollow !== false, dirAt, signal: abort.signal, api, ballMargin: (opts && opts.extra && opts.extra.ballMargin) || (v2 ? 6 : undefined), fullRes: !!(opts && opts.extra && opts.extra.fullRes) || v2,
         onProgress: (p) => {
           $("ai-bar").style.width = Math.round((p.done / p.total) * 100) + "%";
           msg.textContent = "Image " + p.done + " / " + p.total + " — reste environ " + fmtEta(p.eta) + (p.lost ? " (caméra perdue sur cette image)" : "");
@@ -1506,7 +1577,7 @@
       a.suggested = a.suggestedEvents.length;
       a.uncertain = res.uncertain; a.couverture = res.couverture || null;
       a.context = res.context;
-      a.settings = { fps: continuous ? 3.33 : fps, tiles, t0: range[0], t1: range[1], tol: tol(), floorMarks: floorMarks(), bench: benchSetting(), continuous, v2 };
+      a.settings = { fps: continuous ? 3.33 : fps, tiles, t0: range[0], t1: range[1], tol: tol(), floorMarks: floorMarks(), reuseSuivi: $("ai-reuse").checked, bench: benchSetting(), continuous, v2 };
       const lostTxt = result.lost.length ? " Caméra perdue : " + result.lost.map((l) => App.fmt(l[0]) + "–" + App.fmt(l[1])).join(", ") + "." : "";
       updateQuality(res);
       if (out.length && Q && Q.unusable(a.quality)) {
@@ -1574,13 +1645,16 @@
     pip = null; preview = null; lastTest = null; renderPipette(); $("ai-test-msg").textContent = "";
     $("ai-v2").checked = !!d.v2; $("ai-v2-cont").checked = !!(d.settings && d.settings.continuous && d.v2); $("ai-v2-box").hidden = !d.v2;
     $("ai-marks").checked = !(d.settings && d.settings.floorMarks === false);
+    $("ai-reuse").checked = !!(d.settings && d.settings.reuseSuivi);
     $("ai-bench").value = (d.settings && ["left", "right"].includes(d.settings.bench)) ? d.settings.bench : "auto";
     benchMark = null; renderBenchZones();
     qGroup = null; qHighlight = null; qThumbs.clear(); contours.clear(); bs = null; bsBox(false);
     $("ai-t0").value = App.fmt((d.settings && d.settings.t0) || 0);
     $("ai-t1").value = App.fmt((d.settings && d.settings.t1) || state.project.duration || 0);
+    chargeSuivi(); suiviMsg(a && a.camSuivi && a.camSuivi.cle ? suiviBilan(a.camSuivi) : "");
     fillLandmarks(); renderPoints(); renderCalibs(); renderKits(); renderStats(); renderSuggestions(); updateEstimate();
     $("ai-run-msg").textContent = ""; $("ai-calib-msg").textContent = "";
+    planSuivi(2500);
     updateOverlayMode(); drawMinimap();
   }
 
@@ -1591,10 +1665,10 @@
       if (l >= 25 && l <= 42) a.L = l;
       if (w >= 15 && w <= 25) a.W = w;
       a.dir = Number($("ai-dir").value); a.flip = $("ai-flip").checked; a.camera = $("ai-camera").value;
-      a.settings = Object.assign({}, a.settings, { fps: Number($("ai-fps").value), tiles: Number($("ai-tiles").value), tol: tol(), floorMarks: floorMarks(), bench: benchSetting() });
+      a.settings = Object.assign({}, a.settings, { fps: Number($("ai-fps").value), tiles: Number($("ai-tiles").value), tol: tol(), floorMarks: floorMarks(), reuseSuivi: $("ai-reuse").checked, bench: benchSetting() });
       fillLandmarks(); App.changed();
     };
-    ["ai-L", "ai-W", "ai-dir", "ai-flip", "ai-fps", "ai-tiles", "ai-camera", "ai-marks"].forEach((id) => $(id).addEventListener("change", upd));
+    ["ai-L", "ai-W", "ai-dir", "ai-flip", "ai-fps", "ai-tiles", "ai-camera", "ai-marks", "ai-reuse"].forEach((id) => $(id).addEventListener("change", upd));
     $("ai-bench").addEventListener("change", () => { upd(); reanalyzeSuggestions(); });
     $("ai-bench-mark").addEventListener("click", startBenchMark);
     $("ai-bl-export").addEventListener("click", exportBallLabels);
@@ -1707,7 +1781,15 @@
     App.hooks.onLoad = syncFromProject;
     bindSettings();
     fillLandmarks(); renderCalibs(); renderKits(); renderStats(); renderSuggestions();
+    $("ai-calib-go").addEventListener("click", () => {
+      const t = Number($("ai-calib-go").dataset.t);
+      if (isFinite(t)) App.seek(t);
+      $("ai-d1").open = true; $("ai-d1").scrollIntoView({ block: "nearest" });
+      App.toast("Placez les repères du terrain sur cette image, puis « Valider le calibrage ».");
+    });
+    $("ai-camera").addEventListener("change", () => planSuivi(500));
     video.addEventListener("loadedmetadata", () => {
+      planSuivi(1500);
       const a = state.project.ai;
       if (!a || !a.settings || !a.settings.t1) {
         $("ai-t1").value = App.fmt(video.duration);
