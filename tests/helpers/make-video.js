@@ -1,5 +1,5 @@
 /* Génère une vidéo d'essai : la photo « bus » (des personnes réelles, de la texture) posée sur un sol bleu avec lignes noires et but rayé,
-   vue depuis une caméra connue. Usage : node tests/helpers/make-video.js sortie.mp4 [pose JSON] */
+   vue depuis une caméra connue. Usage : node tests/helpers/make-video.js sortie.mp4 [pose JSON] [options de la scène JSON, ex. {"lineHalf":0.04} : lignes de 8 cm] */
 "use strict";
 const fs = require("fs");
 const path = require("path");
@@ -10,8 +10,8 @@ const { render } = require("./scene");
 const POSE = [24, 13, 5.5, 188, 24, 70];
 const L = 40, W = 20, w = 960, h = 540;
 
-function makeFrame(pose) {
-  const scene = render(pose || POSE, w, h, L, W);
+function makeFrame(pose, opts) {
+  const scene = render(pose || POSE, w, h, L, W, opts);
   const bus = jpeg.decode(fs.readFileSync(path.join(__dirname, "..", "fixtures", "bus.jpg")), { useTArray: true });
   // photo ramenée à la hauteur de l'image, posée au centre (sans toucher aux lignes déjà dessinées hors de la photo)
   const bh = h, bw = Math.round((bus.width * bh) / bus.height), x0 = w - bw;
@@ -28,7 +28,7 @@ if (require.main === module) {
   const out = process.argv[2] || "essai-but.mp4";
   const pose = process.argv[3] ? JSON.parse(process.argv[3]) : POSE;
   const dir = fs.mkdtempSync(path.join(require("os").tmpdir(), "fsal-vid-"));
-  const frame = makeFrame(pose);
+  const frame = makeFrame(pose, process.argv[4] ? JSON.parse(process.argv[4]) : undefined);
   fs.writeFileSync(path.join(dir, "f.jpg"), jpeg.encode({ data: Buffer.from(frame.data), width: w, height: h }, 92).data);
   execFileSync("ffmpeg", ["-y", "-loglevel", "error", "-loop", "1", "-framerate", "10", "-t", "6", "-i", path.join(dir, "f.jpg"), "-c:v", "libx264", "-pix_fmt", "yuv420p", out]);
   fs.writeFileSync(out + ".pose.json", JSON.stringify(pose));

@@ -60,3 +60,7 @@ jobs:
         run: xvfb-run -a node tests/e2e/autre-exemple-equipes.js
         env:
           CI: "true"
+      - name: Calibrage precis (loupe, ecart par repere, repere suspect, Replacer, fleches, zoom)
+        run: xvfb-run -a node tests/e2e/calibrage-precision.js
+        env:
+          CI: "true"
