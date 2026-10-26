@@ -1886,8 +1886,8 @@
     if (!e.textContent) e.textContent = "Préparation du détecteur… (au premier lancement, la carte graphique est testée : jusqu'à une minute)";
     return api.aiStatus().then((s) => {
       if (s.device) $("ai-device").value = s.device;
-      if (!s.modelPresent) { e.className = "ai-status bad"; e.textContent = "Modèle de détection introuvable : l'analyse IA est indisponible. Réinstallez l'application."; engineBlocked = true; $("ai-run").disabled = true; }
-      else if (s.engineError) { e.className = "ai-status bad"; e.textContent = "Le détecteur n'a pas pu démarrer : " + s.engineError + " (sous Windows, installez « Microsoft Visual C++ Redistributable 2015-2022 » puis relancez)."; engineBlocked = true; $("ai-run").disabled = true; }
+      if (!s.modelPresent) { e.className = "ai-status bad"; e.textContent = "Modèle de détection introuvable : l'analyse IA est indisponible. Réinstallez l'application."; engineBlocked = true; $("ai-run").disabled = true; $("ai-run").title = "Le détecteur n'est pas disponible : lisez le message d'état en haut du panneau."; }
+      else if (s.engineError) { e.className = "ai-status bad"; e.textContent = "Le détecteur n'a pas pu démarrer : " + s.engineError + " (sous Windows, installez « Microsoft Visual C++ Redistributable 2015-2022 » puis relancez)."; engineBlocked = true; $("ai-run").disabled = true; $("ai-run").title = "Le détecteur n'est pas disponible : lisez le message d'état en haut du panneau."; }
       else {
         engineKind = s.backend && s.backend.kind === "dml" ? "dml" : "cpu";
         e.className = "ai-status"; e.textContent = engineText(s) + " Fonctionne hors ligne : la vidéo ne quitte pas votre ordinateur.";
