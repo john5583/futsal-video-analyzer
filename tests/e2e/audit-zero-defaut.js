@@ -188,7 +188,7 @@ const AUTORISE_SANS_EFFET = [   // [motif de l'élément, raison] : clics sans e
   [/«1 · Mon équipe»/, "type déjà choisi à l'ouverture"], [/#lab-zoom-reset/, "zoom déjà à 1×"], [/#lab-sub-who/, "liste sans choix tant qu'aucune fiche n'existe"],
   [/«Ballon»/, "mode d'étiquetage déjà actif à l'ouverture"], [/«Analyse IA»/, "onglet déjà actif"], [/«Marquage manuel»/, "onglet déjà actif"],
   [/Voir sur la vidéo/, "même écart déjà affiché par le bouton de l'heure cliqué juste avant"],
-  [/input:radio/, "choix déjà coché"], [/d+ f/, "animation déjà choisie dans la liste"], [/«Maillot»|«Short»|«Chaussettes»|«Manches/, "partie de la pipette déjà sélectionnée"]
+  [/input:radio/, "choix déjà coché"], [/\d+ f/, "animation déjà choisie dans la liste"], [/«Maillot»|«Short»|«Chaussettes»|«Manches/, "partie de la pipette déjà sélectionnée"]
 ];
 const ENTETE = (S, nom, rapport) => S.win.evaluate(LISTE, ["header", SELECTEUR]).then(async (liste) => {
   for (const it of liste) { if (!it.visible || /\[tab=/.test(it.cle)) continue; rapport.push(Object.assign({ scenario: nom, onglet: "(en-tête)", element: it.cle }, await clique(S, it, "header"))); }
