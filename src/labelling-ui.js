@@ -259,7 +259,14 @@
   $("lab-pick2").addEventListener("click", pick);
   $("lab-resume").addEventListener("click", async () => { const last = lsGet("lab.last"); if (last) await loadVideo(await api.resolveVideo(last)); });
   $("lab-close").addEventListener("click", close);
-  $("lab-folder").addEventListener("click", () => { if (dir && api.showItem) api.showItem(dir + "\\etiquettes.json"); });
+  /* Toujours un message dans l'application : « Dossier ouvert » ou, si l'ouverture échoue, le chemin à copier. */
+  $("lab-folder").addEventListener("click", async () => {
+    if (!dir) { toast("Pas encore de dossier : choisis d'abord une vidéo, il est créé dès ta première réponse."); return; }
+    let r = null;
+    try { r = api.showItem ? await api.showItem(dir + "\\etiquettes.json") : null; } catch (_e) { r = null; }
+    if (r && r.ok) { setStatus("Dossier ouvert : " + dir); toast("Dossier ouvert : " + dir); }
+    else { setStatus("Impossible d'ouvrir le dossier : " + dir + " (copie ce chemin dans l'explorateur de fichiers)"); toast("Impossible d'ouvrir le dossier : " + dir + " — copie ce chemin dans l'explorateur de fichiers.", true); }
+  });
   document.querySelectorAll("#lab-screen [data-mode]").forEach((b) => b.addEventListener("click", () => { mode = b.dataset.mode; sel = null; refresh(); draw(); }));
   $("lab-step").innerHTML = STEPS.map((s) => "<option value=\"" + s[0] + "\">" + s[1] + "</option>").join("");
   $("lab-step").addEventListener("change", () => { every[mode] = Number($("lab-step").value); lsSet("lab.every." + mode, String(every[mode])); });

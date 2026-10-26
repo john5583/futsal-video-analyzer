@@ -29,7 +29,7 @@
     const t = $("toast");
     t.textContent = msg;
     t.className = "toast" + (isErr ? " err" : "");
-    t.hidden = false;
+    t.hidden = true; void t.offsetWidth; t.hidden = false;   // le message réapparaît même s'il est identique au précédent (clic répété)
     clearTimeout(toast.h);
     toast.h = setTimeout(() => { t.hidden = true; }, isErr ? 6000 : 2800);
   }
@@ -130,7 +130,7 @@
     video.load();
     video.hidden = true;
     $("video-empty").hidden = false;
-    $("seek").disabled = true;
+    $("seek").disabled = true; $("seek").title = "Choisissez d'abord une vidéo.";
     $("seek").max = 0;
     $("video-error").hidden = true;
     state.videoOk = false;
@@ -161,7 +161,7 @@
   video.addEventListener("loadedmetadata", () => {
     state.videoOk = true;
     $("seek").max = video.duration;
-    $("seek").disabled = false;
+    $("seek").disabled = false; $("seek").title = "Position dans la vidéo";
     state.project.duration = video.duration;
     updateTime();
     renderTimeline();
@@ -173,7 +173,7 @@
     showVideoError(code === 4
       ? "Cette vidéo ne peut pas être lue (format ou codec non pris en charge). Convertissez-la en MP4 (H.264 + AAC) puis rechargez-la."
       : "Erreur de lecture de la vidéo (code " + code + "). Vérifiez que le fichier n'est pas corrompu ou déplacé.");
-    $("seek").disabled = true;
+    $("seek").disabled = true; $("seek").title = "La vidéo n'a pas pu être lue : choisissez-en une autre.";
   });
   video.addEventListener("timeupdate", updateTime);
   video.addEventListener("seeked", updateTime);
@@ -250,7 +250,7 @@
     fill($("e-outcome"), Object.entries(KB.OUTCOMES).map(([k, v]) => [k, v.label]), ev.outcome || "AUCUN");
     $("e-note").value = ev.note || "";
     const isGoal = !!SPECIAL[ev.type];
-    ["e-zone", "e-side", "e-outcome", "e-note"].forEach((i) => { $(i).disabled = isGoal; });
+    ["e-zone", "e-side", "e-outcome", "e-note"].forEach((i) => { $(i).disabled = isGoal; $(i).title = isGoal ? "Un but n'a pas besoin de ces précisions." : ""; });
     $("edit-dialog").showModal();
   }
   function commitEdit() {
@@ -391,7 +391,7 @@
     $("r-msg").textContent = "Export en cours…";
     const html = currentReportHtml();
     const r = kind === "pdf" ? await api.exportPDF(html, reportName()) : await api.exportHTML(html, reportName());
-    if (r.canceled) { $("r-msg").textContent = ""; return; }
+    if (r.canceled) { $("r-msg").textContent = "Export annulé : rien n'a été enregistré."; return; }
     if (r.error) { $("r-msg").textContent = ""; toast(r.error, true); return; }
     $("r-msg").textContent = "Exporté : " + r.path;
   }
@@ -488,6 +488,8 @@
   /* ---------- initialisation ---------- */
   function bind() {
     document.querySelectorAll("#tabs button").forEach((b) => b.addEventListener("click", () => showTab(b.dataset.tab)));
+    /* Sans vidéo, les commandes de lecture et le marquage disent quoi faire au lieu de rester sans réaction */
+    ["c-play", "c-prev", "c-next", "c-frame-b", "c-frame-f", "g-for", "g-against"].forEach((id) => $(id).addEventListener("click", (e) => { if (!state.videoOk) { e.stopImmediatePropagation(); toast("Choisissez d'abord une vidéo : bouton « Choisir une vidéo » au milieu de l'écran."); } }, true));
     $("btn-new").addEventListener("click", newProjectAction);
     $("btn-open").addEventListener("click", openProject);
     $("btn-save").addEventListener("click", () => saveProject(false));

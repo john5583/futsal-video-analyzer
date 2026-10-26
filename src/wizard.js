@@ -140,7 +140,7 @@
       "<label>Caméra<select data-set=\"camera\"><option value=\"mobile\"" + (a.camera !== "fixed" ? " selected" : "") + ">Smartphone à la main (elle bouge)</option><option value=\"fixed\"" + (a.camera === "fixed" ? " selected" : "") + ">Fixe (trépied)</option></select></label></div>" +
       now + "<p class=\"wiz-count\">Repères placés : <b>" + placed + "</b> / 4 minimum</p>" +
       (W.msg ? "<p class=\"wiz-err\">" + esc(W.msg) + "</p>" : "") +
-      "<div class=\"wiz-btns\"><button class=\"primary\" data-act=\"calOk\"" + (placed >= 4 ? "" : " disabled") + ">Valider le terrain ✓</button><button data-act=\"autoMode\">↩ Repérage automatique</button><button class=\"ghost\" data-act=\"cancel\">Annuler l'assistant</button></div>";
+      "<div class=\"wiz-btns\"><button class=\"primary\" data-act=\"calOk\"" + (placed >= 4 ? "" : " disabled title=\"Placez au moins 4 repères sur la vidéo (" + placed + " placé(s) pour l'instant), puis validez.\"") + ">Valider le terrain ✓</button><button data-act=\"autoMode\">↩ Repérage automatique</button><button class=\"ghost\" data-act=\"cancel\">Annuler l'assistant</button></div>";
   }
 
   function chips() {
@@ -190,7 +190,7 @@
       "<p class=\"muted\" id=\"wiz-est\">" + esc($("ai-est").textContent || "") + "</p>" +
       (r.A && r.B ? "" : "<p class=\"wiz-err\">Il manque « Mon équipe » ou « Adversaires ».</p>") +
       (W.running ? "<div class=\"progress\"><i id=\"wiz-bar\" style=\"width:" + Math.round(W.progress * 100) + "%\"></i></div><p id=\"wiz-pmsg\" class=\"muted\">" + esc(W.msg) + "</p><div class=\"wiz-btns\"><button data-act=\"stopRun\">Arrêter</button></div>"
-        : "<div class=\"wiz-btns\"><button class=\"primary big\" data-act=\"run\"" + (dur ? "" : " disabled") + ">▶ Lancer l'analyse</button><button class=\"ghost\" data-act=\"cancel\">Annuler l'assistant</button></div>" + (W.msg ? "<p class=\"wiz-err\">" + esc(W.msg) + "</p>" : ""));
+        : "<div class=\"wiz-btns\"><button class=\"primary big\" data-act=\"run\"" + (dur ? "" : " disabled title=\"La vidéo n'est pas encore chargée : attendez quelques secondes.\"") + ">▶ Lancer l'analyse</button><button class=\"ghost\" data-act=\"cancel\">Annuler l'assistant</button></div>" + (W.msg ? "<p class=\"wiz-err\">" + esc(W.msg) + "</p>" : ""));
   }
 
   function resultsList() {
