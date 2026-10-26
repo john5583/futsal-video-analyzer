@@ -878,7 +878,7 @@
       head.appendChild(exEl("span", "ex-chip " + (info.etat === "ok" ? "assez" : info.etat === "aucune" ? "fac" : "plus"), info.etat === "ok" ? "marqué" : info.etat === "aucune" ? "facultatif" : "il en faut plus"));
       const btns = exEl("span", "ex-btns");
       btns.appendChild(exBtn("Marquer le banc à cet instant", "Cliquez deux coins opposés de la zone du banc, sur l'image affichée", () => {
-        if (!startBenchMark()) msg.textContent = "Le banc se marque sur un instant déjà repéré (terrain) ou analysé. Placez la vidéo sur un tel instant : la marque sera utilisée à la prochaine analyse.";
+        if (!startBenchMark()) { msg.textContent = "Le terrain n'est pas repéré à cet instant."; offreBanc(msg); }
         else { msg.textContent = "Cliquez un coin de la zone du banc, puis le coin opposé (Échap : annuler)."; }
       }));
       head.appendChild(btns); box.appendChild(head);
@@ -1295,18 +1295,53 @@
   /* Projection image (pixels vidéo) -> terrain à l'instant t : celle de l'image analysée la plus proche (la caméra a pu
      bouger depuis le calibrage), sinon le calibrage s'il a été fait à cet instant. */
   function projectionAt(t) {
-    const f = frames.length ? P.frameNear(frames, t, 0.3) : null;
-    if (f && Array.isArray(f.h) && video.videoWidth) return HG.mul3(f.h, [1 / video.videoWidth, 0, 0, 0, 1 / video.videoHeight, 0, 0, 0, 1]);
-    const a = state.project.ai, cal = a ? P.calibrationAt(a.calibrations, t) : null;
-    return cal && Math.abs(cal.t - t) < 0.5 ? cal.H : null;
+    const a = state.project.ai;
+    if (!a || !video.videoWidth) return null;
+    // image analysée, calibrage OU suivi de la caméra (le terrain est connu à tout instant suivi) ; un suivi « recalage incertain » ne compte pas
+    const ch = P.courtH(frames, a.calibrations || [], a.camera || $("ai-camera").value, t, video.videoWidth, video.videoHeight, suiviFr);
+    if (!ch || !ch.H) return null;
+    if (/suivi/.test(ch.source) && qualiteAt(a, t) === 0) return null;
+    return ch.H;
+  }
+  /* Instant le plus proche de t où le terrain est connu (calibrage, image analysée, suivi de la caméra hors « recalage incertain »), ou null. */
+  function instantConnu(t) {
+    const a = state.project.ai; if (!a) return null;
+    if ((a.camera || $("ai-camera").value) === "fixed" && a.calibrations && a.calibrations.length) return t;
+    const c = [];
+    suiviFr.forEach((q) => { if (qualiteAt(a, q.t) !== 0) c.push(q.t); });
+    frames.forEach((q) => { if (Array.isArray(q.h)) c.push(q.t); });
+    (a.calibrations || []).forEach((q) => c.push(q.t));
+    let best = null;
+    c.forEach((x) => { if (best == null || Math.abs(x - t) < Math.abs(best - t)) best = x; });
+    return best;
+  }
+  /* Quand le terrain est inconnu à l'instant affiché : un seul geste utile (aller à l'instant connu le plus proche, puis marquer), jamais un message d'erreur. */
+  function offreBanc(host) {
+    host.textContent = ""; host.hidden = false;
+    const n = instantConnu(video.currentTime || 0), b = document.createElement("button");
+    b.type = "button";
+    if (n == null) {
+      b.textContent = "Repérer d'abord le terrain (étape 1)";
+      b.addEventListener("click", () => { const d1 = $("ai-d1"); if (d1) d1.open = true; host.hidden = true; });
+    } else {
+      b.textContent = "Aller à l'instant le plus proche où le terrain est connu (" + App.fmt(n) + ") et marquer le banc";
+      b.addEventListener("click", () => {
+        host.hidden = true;
+        const go = () => { video.removeEventListener("seeked", go); startBenchMark(); };
+        video.addEventListener("seeked", go); App.seek(n);
+        setTimeout(() => { video.removeEventListener("seeked", go); if (!benchMark) startBenchMark(); }, 3000);
+      });
+    }
+    host.appendChild(b);
   }
   function startBenchMark() {
     if (!App.isVideoReady()) { App.toast("Chargez d'abord une vidéo.", true); return; }
     const H = projectionAt(video.currentTime || 0);
-    if (!H) { App.toast("Placez la vidéo sur un instant déjà analysé ou calibré pour marquer un banc.", true); return false; }
+    if (!H) return false;
     video.pause();
     placing = null; pickRole = null; if (pip) cancelPipette();
-    benchMark = { H, first: null };
+    benchMark = { H, first: null, t: video.currentTime || 0 };
+    const hg = $("ai-bench-go"); if (hg) hg.hidden = true;
     updateOverlayMode();
     return true;
   }
@@ -1606,7 +1641,7 @@
   function answerBallAt(pt) {
     const a = state.project.ai, ans = D.answerBall(memory(), pt), r = D.applyOne(frames, ans);
     if (r.ok) { ans.undo = r.undo; a.frames = P.compactFrames(frames); }
-    else App.toast("Aucune image analysée assez proche : ta réponse est retenue pour la prochaine analyse.", true);
+    else App.toast("Ta réponse est retenue pour la prochaine analyse (cette image n'est pas encore analysée).");
     reanalyzeSuggestions(); refreshLive(); App.changed(true);
   }
 
@@ -1900,7 +1935,7 @@
     };
     ["ai-L", "ai-W", "ai-dir", "ai-flip", "ai-fps", "ai-tiles", "ai-camera", "ai-marks", "ai-reuse"].forEach((id) => $(id).addEventListener("change", upd));
     $("ai-bench").addEventListener("change", () => { upd(); reanalyzeSuggestions(); });
-    $("ai-bench-mark").addEventListener("click", startBenchMark);
+    $("ai-bench-mark").addEventListener("click", () => { const h = $("ai-bench-go"); if (h) h.hidden = true; if (!startBenchMark() && h) offreBanc(h); });
     $("ai-bl-export").addEventListener("click", exportBallLabels);
     bindZoom();
     $("ai-v2").addEventListener("change", () => {

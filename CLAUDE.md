@@ -4,6 +4,8 @@ Programme **Windows hors ligne** (Electron 33) qui analyse des vidéos de futsal
 
 Dépôt : GitHub `john5583/futsal-video-analyzer`, branche principale `main`. Dossier local : `C:\Users\xboxl\Desktop\futsal-video-analyzer`.
 
+**À lire au début de chaque mission : `docs/cahier-des-charges.md`** (les demandes de John, validées par lui). Chaque PR dit quels points elle touche, ce qui est mesuré, et ce qui reste « non évalué ».
+
 ## Règles non négociables (John, francophone)
 1. **Répondre en français, simplement.** Messages, descriptions de commandes et commentaires ajoutés en français.
 2. 100 % fonctionnel, aucun bug, aucun message d'erreur affiché à l'utilisateur.
