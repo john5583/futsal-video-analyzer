@@ -89,3 +89,66 @@ test("éléments choisis au calibrage : le cercle central est prioritaire, les a
   assert.equal(m.pts.find((p) => p.g === "cercle").w, 2);
   assert.equal(m.pts.find((p) => p.g === "mediane").w, 1);
 });
+
+/* ---------- couleur montrée par un clic, salle multi-lignes, confusion, dimensions ---------- */
+const lignesImg = (opts) => {
+  const o = Object.assign({ w: 200, h: 120, floor: [70, 110, 160], glare: 0 }, opts || {}), data = new Uint8ClampedArray(o.w * o.h * 4);
+  for (let y = 0; y < o.h; y++) for (let x = 0; x < o.w; x++) {
+    const i = (y * o.w + x) * 4, g = o.glare * (x / o.w);      // éclairage qui varie : reflet de plus en plus fort vers la droite
+    data[i] = Math.min(255, o.floor[0] + g); data[i + 1] = Math.min(255, o.floor[1] + g); data[i + 2] = Math.min(255, o.floor[2] + g); data[i + 3] = 255;
+  }
+  const bande = (y0, y1, c, glare) => { for (let y = y0; y < y1; y++) for (let x = 0; x < o.w; x++) { const i = (y * o.w + x) * 4, g = glare ? o.glare * (x / o.w) * 0.6 : 0; data[i] = Math.min(255, c[0] + g); data[i + 1] = Math.min(255, c[1] + g); data[i + 2] = Math.min(255, c[2] + g); } };
+  bande(30, 33, [25, 25, 28], true);          // ligne noire
+  bande(60, 63, [120, 30, 30], true);         // ligne rouge foncé d'un autre sport
+  bande(90, 93, [235, 235, 235], true);       // ligne blanche
+  return { data, width: o.w, height: o.h };
+};
+/* part des colonnes où la bande contient un trait détecté */
+const part = (c, y0, y1) => { let n = 0; for (let x = 0; x < c.w; x++) { let any = 0; for (let y = y0; y < y1; y++) any |= c.mask[y * c.w + x]; n += any; } return n / c.w; };
+
+test("clic sur une ligne : la nuance est apprise, seules ces lignes sont cherchées (la rouge foncé et la blanche de la même salle sont ignorées)", () => {
+  const im = lignesImg(), r = LG.profilDepuisClic(im, 100, 31);
+  assert.ok(r.ok, r.raison);
+  assert.ok(r.profil.L < 40 && r.profil.tol >= 8 && r.profil.tol <= 0.6 * Math.hypot(r.profil.L - r.profil.bg[0], r.profil.a - r.profil.bg[1], r.profil.b - r.profil.bg[2]) + 1e-6, JSON.stringify(r.profil));
+  const c = LG.carte(im, "custom", r.profil);
+  assert.ok(part(c, 28, 36) > 0.8, "la ligne montrée est trouvée : " + part(c, 28, 36));
+  assert.ok(part(c, 58, 66) < 0.05, "la ligne rouge foncé n'est pas confondue : " + part(c, 58, 66));
+  assert.ok(part(c, 88, 96) < 0.05, "la ligne blanche non plus : " + part(c, 88, 96));
+  assert.throws(() => LG.carte(im, "custom"), /inconnue/, "pas de profil, pas de couleur devinée");
+});
+
+test("éclairage qui varie : la ligne montrée reste trouvée sous un reflet fort", () => {
+  const im = lignesImg({ glare: 70 }), r = LG.profilDepuisClic(im, 20, 31);
+  assert.ok(r.ok, r.raison);
+  assert.ok(r.profil.tolL > 6, "tolérance de luminosité apprise sur ce projet : " + r.profil.tolL);
+  const c = LG.carte(im, "custom", r.profil);
+  assert.ok(part(c, 28, 36) > 0.7, "ligne noire sous reflet : " + part(c, 28, 36));
+  assert.ok(part(c, 88, 96) < 0.1 && part(c, 58, 66) < 0.1);
+});
+
+test("clic sur le sol (aucune ligne) : on le dit, aucune couleur inventée", () => {
+  const r = LG.profilDepuisClic(lignesImg(), 100, 12);
+  assert.equal(r.ok, false);
+  assert.match(r.raison, /pas de ligne nette/);
+});
+
+test("confusion : une salle propre donne peu de pixels hors lignes attendues, des joueurs / autres marquages sombres en donnent beaucoup", () => {
+  const w = 480, h = 270, pose = [20, -5, 5, 90, 20, 70, 0];
+  const propre = render(pose.slice(0, 6), w, h, L, W, { lineHalf: 0.05, circle: true }), sale = render(pose.slice(0, 6), w, h, L, W, { lineHalf: 0.05, circle: true });
+  for (const y0 of [150, 165, 180, 195, 210, 225]) for (let y = y0; y < y0 + 3; y++) for (let x = 0; x < w; x++) { const i = (y * w + x) * 4; sale.data[i] = sale.data[i + 1] = sale.data[i + 2] = 15; }       // autres marquages sombres de la salle
+  const cp = LG.confusion(LG.carte(propre, "black"), pose, mod, L, W), cs = LG.confusion(LG.carte(sale, "black"), pose, mod, L, W);
+  assert.ok(cp != null && cs != null);
+  assert.ok(cp < 0.2, "salle propre : " + cp);
+  assert.ok(cs > cp + 0.2, "avec des pixels sombres parasites : " + cs + " contre " + cp);
+});
+
+test("dimensions : un terrain de 36 × 18 m est proposé quand le projet dit 40 × 20 ; rien n'est proposé quand les dimensions sont déjà justes", () => {
+  const TL = 36, TW = 18, w = 480, h = 270;
+  const poses = [[18, -5, 5, 90, 20, 70, 0], [14, -4, 5, 75, 22, 70, 0], [22, -4, 5, 105, 22, 70, 0], [18, -6, 6, 90, 25, 75, 0], [17, -5, 5.5, 92, 21, 72, 0], [20, -5, 5, 100, 22, 70, 0]];
+  const items = poses.map((p) => ({ carte: LG.carte(render(p.slice(0, 6), w, h, TL, TW, { lineHalf: 0.05, circle: true }), "black"), pose: p }));
+  const r = LG.proposerDimensions(items, 40, 20);
+  assert.ok(r.propose && r.L === 36 && r.W === 18 && r.accord, JSON.stringify(r));
+  const r2 = LG.proposerDimensions(items, 36, 18);
+  assert.equal(r2.propose, false, JSON.stringify(r2));
+  assert.equal(LG.proposerDimensions(items.slice(0, 2), 40, 20), null, "trop peu d'images : pas de proposition");
+});

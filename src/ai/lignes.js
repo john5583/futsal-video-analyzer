@@ -29,9 +29,9 @@
 
   /* ---------- carte des traits ---------- */
   /* rgba : { data (RGBA), width, height } ; couleur : clé de CF.COLORS. Rend { w, h, mask, D } (D : distance au trait le plus proche, en pixels). */
-  function carte(rgba, couleur) {
-    if (!CF.COLORS[couleur]) throw new Error("Couleur de lignes inconnue");
-    const work = CF.prepare(rgba, rgba.width), rm = CF.ridgeMap(work, couleur);
+  function carte(rgba, couleur, profil) {
+    if (couleur === "custom" ? !(profil && profil.tol > 0) : !CF.COLORS[couleur]) throw new Error("Couleur de lignes inconnue");
+    const work = CF.prepare(rgba, rgba.width), rm = CF.ridgeMap(work, couleur, couleur === "custom" ? profil : null);
     return { w: rm.w, h: rm.h, mask: rm.mask, D: CF.distanceTransform(rm.mask, rm.w, rm.h) };
   }
 
@@ -369,6 +369,76 @@
     }
     return n ? s / n : Infinity;
   }
+  /* ---------- couleur montrée par un clic, confusion, dimensions ---------- */
+  /* Apprend la nuance d'une ligne à partir d'un clic de l'utilisateur dessus. rgba : { data, width, height } (image entière ou morceau), (cx, cy) : clic en pixels de rgba.
+     Rend { ok: true, profil: { L, a, b, bg: [L, a, b], tol, tolL, spread, n } } ou { ok: false, raison }. Jamais de couleur devinée : si aucune ligne nette n'est vue, on le dit. */
+  function profilDepuisClic(rgba, cx, cy) {
+    const lab = (x, y) => { const i = (y * rgba.width + x) * 4; return CF.rgbToLab(rgba.data[i], rgba.data[i + 1], rgba.data[i + 2]); };
+    const inside = (x, y) => x >= 0 && y >= 0 && x < rgba.width && y < rgba.height;
+    const med = (xs) => { const s = xs.slice().sort((a, b) => a - b); return s.length ? s[s.length >> 1] : 0; };
+    const x0 = Math.round(cx), y0 = Math.round(cy), ring = [], near = [];
+    for (let dy = -18; dy <= 18; dy++) for (let dx = -18; dx <= 18; dx++) {
+      const r = Math.hypot(dx, dy), x = x0 + dx, y = y0 + dy;
+      if (!inside(x, y)) continue;
+      if (r >= 11 && r <= 18) ring.push(lab(x, y)); else if (r <= 5) near.push(lab(x, y));
+    }
+    if (ring.length < 40 || near.length < 20) return { ok: false, raison: "trop près du bord de l'image" };
+    const bg = [med(ring.map((p) => p[0])), med(ring.map((p) => p[1])), med(ring.map((p) => p[2]))];
+    const de = (p, q) => Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]);
+    const sorted = near.map((p) => ({ p, d: de(p, bg) })).sort((a, b) => b.d - a.d).slice(0, 12);
+    if (sorted[sorted.length >> 1].d < 12) return { ok: false, raison: "je ne vois pas de ligne nette à cet endroit" };
+    const line = [med(sorted.map((s) => s.p[0])), med(sorted.map((s) => s.p[1])), med(sorted.map((s) => s.p[2]))];
+    const spread = med(sorted.map((s) => de(s.p, line))), gap = de(line, bg);
+    const floorL = med(ring.map((p) => Math.abs(p[0] - bg[0])));       // variation de luminosité du sol alentour : reflets, ombres
+    const gapL = Math.abs(line[0] - bg[0]), tol = Math.max(8, Math.min(0.6 * gap, 2.5 * spread + 6));
+    // reflets : la luminosité peut s écarter jusqu à 40 % de l écart ligne / sol (au moins 6 + 2 fois la variation du sol), sans jamais atteindre la luminosité du sol (tolL + tol < écart)
+    const tolL = Math.max(0, Math.min(Math.max(6 + 2 * floorL, 0.4 * gapL), 0.95 * gapL - tol));
+    const r1 = (v) => Math.round(v * 10) / 10;
+    return { ok: true, profil: { L: r1(line[0]), a: r1(line[1]), b: r1(line[2]), bg: bg.map(r1), tol: r1(tol), tolL: r1(tolL), spread: r1(spread), n: sorted.length } };
+  }
+  /* Confusion mesurée : part des pixels de la couleur choisie, vus sur le terrain, qui ne sont sur AUCUNE ligne attendue du modèle (à plus de 6 px) : joueurs, autres marquages
+     de la salle, reflets. null s'il y a trop peu de pixels. Ces pixels ne servent pas au recalage (seules les lignes attendues comptent), mais la mesure dit à quel point la couleur est « polluée ». */
+  function confusion(carteL, pose, mod, L, W) {
+    const { w, h, mask } = carteL, m = new Uint8Array(w * h), P = projeterPose(mod, pose, w, h);
+    for (let i = 0; i < P.n; i++) { const x = Math.round(P.q[2 * i]), y = Math.round(P.q[2 * i + 1]); if (x >= 0 && y >= 0 && x < w && y < h) m[y * w + x] = 1; }
+    const Dm = CF.distanceTransform(m, w, h), B = CF.cameraBasis(pose), f = CF.focalPx(w, pose[5]), r = (pose[6] || 0) * Math.PI / 180, cs = Math.cos(r), sn = Math.sin(r);
+    let total = 0; for (let i = 0; i < w * h; i++) total += mask[i];
+    const step = Math.max(1, Math.floor(total / 500));
+    let k = 0, n = 0, hors = 0;
+    for (let i = 0; i < w * h; i++) {
+      if (!mask[i]) continue;
+      if ((k++ % step) !== 0) continue;
+      const x = i % w, y = (i / w) | 0, dx = x - w / 2, dy = y - h / 2, g = CF.groundAt(B, f, w, h, w / 2 + cs * dx + sn * dy, h / 2 - sn * dx + cs * dy);
+      if (!g || g[0] < -1.5 || g[0] > L + 1.5 || g[1] < -1.5 || g[1] > W + 1.5) continue;
+      n++; if (Dm[i] > 6) hors++;
+    }
+    return n >= 30 ? hors / n : null;
+  }
+  /* Dimensions du terrain que les lignes de la couleur choisie suggèrent : pour chaque (L, W) d'une grille autour des dimensions courantes, la pose de chaque image est recalée
+     localement et les votes s'additionnent. items : [{ carte, pose }] (images où les lignes sont nettes). Rend { L, W, gain (meilleur / courant - 1), propose } ;
+     propose = le meilleur dépasse le courant d'au moins 4 % : sinon les lignes ne permettent pas de trancher et les dimensions courantes sont gardées. */
+  const DIM_OPTS = { prio: ["cercle"], dL: 6, dW: 4, pas: 2, seuil: 0.15 };
+  /* Vote des images pour un terrain (L, W) : la pose de chaque image est recalée localement. Rend [total, images paires, images impaires] : la proposition n'est faite que si
+     les deux moitiés des images donnent la même réponse (mesuré : sur 4 vidéos de la même salle, une seule moitié donnait des dimensions différentes d'une vidéo à l'autre). */
+  function voteDimensions(items, L, W, prio) {
+    const mod = modele(L, W, { pointilles: false, prio: prio || DIM_OPTS.prio }), v = [0, 0, 0];
+    items.forEach((it, i) => { const r = affinerPose(it.carte, it.pose, mod, { ouvert: false, posRange: [3, 3, 1.2] }), x = r.vote1 || r.vote0 || 0; v[0] += x; v[1 + (i % 2)] += x; });
+    return v;
+  }
+  /* Grille des (L, W) essayés autour des dimensions courantes. */
+  const grilleDimensions = (L0, W0, o) => { const g = []; for (let L = L0 - o.dL; L <= L0 + o.dL + 1e-6; L += o.pas) for (let W = W0 - o.dW; W <= W0 + o.dW + 1e-6; W += o.pas) g.push([L, W]); return g; };
+  function choisirDimensions(tot, L0, W0, nImages, seuil) {
+    const meilleur = (k) => Object.entries(tot).sort((a, b) => b[1][k] - a[1][k])[0][0];
+    const cur = tot[L0 + "x" + W0][0], best = meilleur(0), [bl, bw] = best.split("x").map(Number), gain = cur > 0 ? tot[best][0] / cur - 1 : 0;
+    const accord = meilleur(1) === best && meilleur(2) === best;
+    return { L: bl, W: bw, gain: Math.round(gain * 1000) / 1000, accord, propose: accord && gain >= (seuil == null ? DIM_OPTS.seuil : seuil) && (bl !== L0 || bw !== W0), images: nImages };
+  }
+  function proposerDimensions(items, L0, W0, opts) {
+    const o = Object.assign({}, DIM_OPTS, opts || {}), tot = {};
+    if (!items || items.length < 3) return null;
+    grilleDimensions(L0, W0, o).forEach(([L, W]) => { tot[L + "x" + W] = voteDimensions(items, L, W, o.prio); });
+    return choisirDimensions(tot, L0, W0, items.length, o.seuil);
+  }
   /* Matrice 3x3 (pixels -> pixels) de la correction c. */
   function matG(c, w, h) {
     const cs = Math.cos(c[2]), sn = Math.sin(c[2]), s = Math.exp(c[3]), cx = w / 2, cy = h / 2;
@@ -386,5 +456,5 @@
     return { vote: vote(P, c0, carteL.D, carteL.w, carteL.h, 3, 1), n: d.n, ecart: d.ecart, observ: d.observ, vis: d.vis };
   }
 
-  return { ecartSol, solSous, poseApres, poseDepuisH, hDepuisPose, projeterPose, affinerPose, poseVersImage, PLAGE, PROCHE, LIM, SEUILS, GROUPES, carte, modele, groupesDepuisRepères, projeter, vote, detail, raffiner, affiner, matG, partie, mesure };
+  return { profilDepuisClic, confusion, proposerDimensions, voteDimensions, grilleDimensions, choisirDimensions, DIM_OPTS, ecartSol, solSous, poseApres, poseDepuisH, hDepuisPose, projeterPose, affinerPose, poseVersImage, PLAGE, PROCHE, LIM, SEUILS, GROUPES, carte, modele, groupesDepuisRepères, projeter, vote, detail, raffiner, affiner, matG, partie, mesure };
 });
