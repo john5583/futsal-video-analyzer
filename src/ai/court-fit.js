@@ -57,8 +57,13 @@
   }
 
   /* Carte des traits fins de la couleur choisie : { w, h, R (0..1), mask (1 = trait net) }. */
-  function ridgeMap(work, colorKey) {
-    const { w, h, L, A, B } = work, f = COLORS[colorKey].sim;
+  /* Ressemblance à une nuance apprise par un clic de l'utilisateur : profil { L, a, b (la ligne), tol (écart de couleur toléré), tolL (part tolérée sur la luminosité : reflets, ombres) }. */
+  function profileSim(p) {
+    const half = p.tolL || 0;
+    return (L, a, b) => { const dL = Math.max(0, Math.abs(L - p.L) - half), d = Math.sqrt(dL * dL + (a - p.a) * (a - p.a) + (b - p.b) * (b - p.b)); return clamp01(1 - d / p.tol); };
+  }
+  function ridgeMap(work, colorKey, profile) {
+    const { w, h, L, A, B } = work, f = profile ? profileSim(profile) : COLORS[colorKey].sim;
     const s = new Float32Array(w * h);
     for (let i = 0; i < w * h; i++) s[i] = f(L[i], A[i], B[i]);
     const g = gauss(s, w, h, 1.5 * (w / 960));
@@ -344,5 +349,5 @@
     return { H, points: pointsFromH(H, L, W, vw, vh), err: cal.err };
   }
 
-  return { WORK_W, COLORS, levenberg, solveSmall, prepare, ridgeMap, colorCandidates, snapToRidge, modelPoints, cameraBasis, focalPx, project, groundAt, patternSearch, peopleError, poseFromGoal, distanceTransform, lineScore, calibrationFromPose, rotateCalibration, pointsFromH };
+  return { WORK_W, COLORS, profileSim, rgbToLab: K.rgbToLab, levenberg, solveSmall, prepare, ridgeMap, colorCandidates, snapToRidge, modelPoints, cameraBasis, focalPx, project, groundAt, patternSearch, peopleError, poseFromGoal, distanceTransform, lineScore, calibrationFromPose, rotateCalibration, pointsFromH };
 });

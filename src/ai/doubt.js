@@ -23,6 +23,11 @@
   const LEG_REF_MIN = 0.12;    // les autres joueurs de l'équipe doivent, eux, montrer au moins cette part de peau (short)
   const LEG_NEAR = 0.08;       // « même allure » : jambes sans peau, pour proposer le même gardien
   const CROWD_MIN = 3;         // s : cinq joueurs de champ d'une même équipe en même temps pendant au moins ce temps
+  const SURE_SHARE = 0.9;      // une personne dont au moins 90 % des lectures (sur toute sa trajectoire) donnent la même équipe est « sûre » : on ne lui demande jamais « qui est-ce ? »
+  const STITCH_GAP = 1.5;      // s : deux pistes qui se suivent (l'une finit, l'autre commence) à moins de ce temps…
+  const STITCH_DIST = 2.5;     // m : …et de cette distance sont la même personne (compte des joueurs)
+  const DUP_DIST = 0.6;        // m : deux pistes de la même équipe à moins de cette distance sur la plupart de leurs images communes sont une même personne détectée deux fois
+  const LEG_DIFF = 0.5;        // une personne dont les jambes montrent moins de la moitié de la peau de ses coéquipiers s'habille autrement
   const MAX_PTS = 600;         // points gardés pour une personne jamais identifiée (réinjectée si le coach répond)
   const T_TOL = 0.6;           // s : une réponse s'applique à la personne vue à cet instant (±)
   const D_TOL = 3;             // m : une question répondue est retrouvée à cette distance au plus
@@ -92,13 +97,41 @@
       if (why) make(id, i, cur, why, unknown);
     });
 
-    // cinq joueurs de champ d'une même équipe en même temps : l'un d'eux est peut-être un gardien, un arbitre ou un remplaçant
+    /* Une personne = une ou plusieurs pistes : deux pistes qui se suivent au même endroit (identifiant perdu puis repris) ou qui se superposent (même personne détectée deux fois)
+       ne comptent qu'une fois. Rend id -> numéro de personne. */
+    const personOf = (side) => {
+      const ids = []; info.forEach((i, id) => { if (teams[id] === side && i.pts.length && i.n >= MIN_DETECTIONS) ids.push(id); });       // les bribes de piste (moins de 12 détections) ne comptent pas : trop courtes pour affirmer une personne de plus
+      const parent = new Map(ids.map((id) => [id, id]));
+      const root = (x) => { while (parent.get(x) !== x) { parent.set(x, parent.get(parent.get(x))); x = parent.get(x); } return x; };
+      const union = (x, y) => { const rx = root(x), ry = root(y); if (rx !== ry) parent.set(ry, rx); };
+      ids.forEach((x) => ids.forEach((y) => {
+        if (x === y) return;
+        const a = info.get(x).pts, b = info.get(y).pts, la = a[a.length - 1], fb = b[0], gap = fb.t - la.t;
+        if (gap >= -0.05 && gap <= STITCH_GAP && Math.hypot(fb.x - la.x, fb.y - la.y) <= STITCH_DIST) union(x, y);
+      }));
+      const co = new Map(), near = new Map();
+      frames.forEach((f) => {
+        const ps = f.players.filter((p) => teams[p.id] === side && parent.has(p.id));
+        for (let i = 0; i < ps.length; i++) for (let j = i + 1; j < ps.length; j++) {
+          const k = ps[i].id < ps[j].id ? ps[i].id + "|" + ps[j].id : ps[j].id + "|" + ps[i].id;
+          co.set(k, (co.get(k) || 0) + 1);
+          if (Math.hypot(ps[i].x - ps[j].x, ps[i].y - ps[j].y) <= DUP_DIST) near.set(k, (near.get(k) || 0) + 1);
+        }
+      });
+      co.forEach((n, k) => { if (n >= 3 && (near.get(k) || 0) >= 0.6 * n) { const [x, y] = k.split("|").map(Number); union(x, y); } });
+      const out = new Map(); ids.forEach((id) => out.set(id, root(id)));
+      return out;
+    };
+    const sure = (id) => { const i = info.get(id); if (!i) return false; const s = Object.keys(i.votes).reduce((t, k) => t + i.votes[k], 0), top = Math.max(i.votes.A || 0, i.votes.B || 0); return s >= MIN_VOTES && top / s >= SURE_SHARE; };
+
+    // cinq PERSONNES de champ d'une même équipe en même temps : s'il y a un doute sur l'une d'elles (équipe pas nette sur sa trajectoire, ou tenue différente aux jambes), on demande ;
+    // si toutes sont nettement de l'équipe (remplaçant qui entre, piste coupée en deux), c'est un problème de comptage, jamais une question « qui est-ce ? »
     ["A", "B"].forEach((side) => {
-      const runs = [];
+      const runs = [], pers = personOf(side);
       let run = null;
       frames.forEach((f) => {
-        const ids = [...new Set(f.players.filter((p) => teams[p.id] === side).map((p) => p.id))];
-        if (ids.length < 5) return;
+        const ids = [...new Set(f.players.filter((p) => teams[p.id] === side && info.has(p.id) && info.get(p.id).n >= MIN_DETECTIONS).map((p) => p.id))];
+        if (new Set(ids.map((id) => pers.has(id) ? pers.get(id) : id)).size < 5) return;
         if (run && f.t - run.t1 <= 1.5) { run.t1 = f.t; run.frames.push({ t: f.t, ids }); }
         else { run = { t0: f.t, t1: f.t, frames: [{ t: f.t, ids }] }; runs.push(run); }
       });
@@ -108,9 +141,11 @@
         // les personnes présentes pendant la moitié de l'épisode ; on questionne celle dont les jambes sont le plus différentes (pantalon), sinon la piste la plus courte
         const present = [...seen.entries()].filter(([, c]) => c >= r.frames.length * 0.5).map(([id]) => id).filter((id) => info.has(id) && info.get(id).pts.length);
         if (present.some((id) => doubted.has(id))) return;                 // l'un d'eux est déjà questionné (pantalon, équipe douteuse) : la foule est expliquée
-        const cands = present;
+        const legs = present.map((id) => info.get(id).leg).filter((v) => v != null), legMed = legs.length >= 3 ? median(legs) : null;
+        const share = (id) => { const v = info.get(id).votes, s = Object.keys(v).reduce((t, k) => t + v[k], 0); return s ? Math.max(v.A || 0, v.B || 0) / s : 1; };
+        const cands = present.filter((id) => !sure(id) || (legMed != null && info.get(id).leg != null && info.get(id).leg < LEG_DIFF * legMed));
         if (!cands.length) return;
-        cands.sort((x, y) => { const lx = info.get(x).leg == null ? 1 : info.get(x).leg, ly = info.get(y).leg == null ? 1 : info.get(y).leg; return lx - ly || info.get(x).n - info.get(y).n; });
+        cands.sort((x, y) => { const lx = info.get(x).leg == null ? 1 : info.get(x).leg, ly = info.get(y).leg == null ? 1 : info.get(y).leg; return lx - ly || share(x) - share(y) || info.get(x).n - info.get(y).n; });
         const id = cands[0], i = info.get(id), mid = (r.t0 + r.t1) / 2;
         const pt = i.pts.reduce((bst, p) => (Math.abs(p.t - mid) < Math.abs(bst.t - mid) ? p : bst), i.pts[0]);
         make(id, i, teams[id], "cinq " + (side === "B" ? "joueurs adverses" : "joueurs de ton équipe") + " de champ en même temps pendant " + Math.round(r.t1 - r.t0) + " s (il n'y en a que quatre en futsal) : l'un d'eux est peut-être un gardien, un arbitre ou un remplaçant", false, pt);
