@@ -127,7 +127,7 @@ async function clique(S, item, zone) {
     else await h.click({ timeout: 3000, trial: false });
   } catch (e) {
     await win.evaluate(() => document.querySelectorAll("[data-audit]").forEach((x) => x.removeAttribute("data-audit")));
-    return { statut: "non cliquable", detail: String(e.message).split("\n").filter((l) => /intercepts|not visible|outside|not stable|disabled|detached/i.test(l)).slice(0, 2).join(" / ").trim().slice(0, 220) || String(e.message).split("\n")[0].slice(0, 160) };
+    return { statut: "non cliquable", detail: String(e.message).split("\n").filter((l) => /intercepts|not visible|outside|not stable|disabled|detached|not attached/i.test(l)).slice(0, 2).join(" / ").trim().slice(0, 220) || String(e.message).split("\n")[0].slice(0, 160) };
   }
   await sleep(350);
   await win.evaluate(() => document.querySelectorAll("[data-audit]").forEach((x) => x.removeAttribute("data-audit")));
@@ -168,7 +168,7 @@ async function parcourtOnglet(S, tab, rapport, nomScenario, max, opts) {
     else {
       if (tab) await neutre(S, tab);
       const r = await clique(S, it, zone);
-      if (r.statut === "non cliquable" && /not visible|detached/.test(r.detail || "")) { ligne.statut = "plus affiché après un clic précédent (non compté)"; }
+      if (r.statut === "non cliquable" && /not visible|detached|not attached/.test(r.detail || "")) { ligne.statut = "plus affiché après un clic précédent (non compté)"; }
       else if (r.statut === "mort") {   // deuxième chance : état où l'action a un sens (vidéo avancée, zoom, valeur différente)
         await S.win.evaluate(() => { const v = document.querySelector("video"); if (v && v.readyState >= 1) { v.pause(); v.currentTime = Math.min(3, (v.duration || 3) - 0.5); } const z = document.getElementById("zm-reset"); if (z) z.click(); const zi = document.getElementById("zm-in"); if (zi) zi.click(); document.querySelectorAll("input[type=search], input[type=text]").forEach((e) => { if (e.id !== "p-name" && !e.id.startsWith("p-")) { e.value = ""; } }); });
         await sleep(400);
