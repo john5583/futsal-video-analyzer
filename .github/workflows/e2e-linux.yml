@@ -76,6 +76,10 @@ jobs:
         run: xvfb-run -a node tests/e2e/banc-suivi.js
         env:
           CI: "true"
+      - name: Analyse complete sur le suivi de camera recale (repli la ou recalage incertain, projets existants inchanges)
+        run: xvfb-run -a node tests/e2e/analyse-suivi-recale.js
+        env:
+          CI: "true"
       - name: Bancs reconnus tout seuls (fiches, entree reconnue, questions non bloquantes)
         run: xvfb-run -a node tests/e2e/bancs-auto.js
         env:
