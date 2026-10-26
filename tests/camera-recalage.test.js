@@ -225,3 +225,11 @@ test("passages douteux : un passage d'au moins 60 s sans lignes retrouvées est 
   assert.ok(Math.abs(p[0].de - 100) < 0.4 && Math.abs(p[0].a - 189.9) < 0.4, JSON.stringify(p));
   assert.equal(P.passagesDouteux(fr, [[95, 195]], 60).length, 0, "confirmé par l'utilisateur : plus de question");
 });
+
+test("suivi incertain : svIncertain repère les instants « recalage incertain » (q = 0) ; sans qualité (ancien suivi), jamais incertain", () => {
+  const sv = []; for (let t = 0; t <= 20; t += 0.3) sv.push({ t: Math.round(t * 10) / 10, h: [1, 0, 0, 0, 1, 0, 0, 0, 1], q: t >= 8 && t < 12 ? 0 : 2 });
+  const unc = P.svIncertain(sv);
+  assert.equal(unc(5), false); assert.equal(unc(9), true); assert.equal(unc(11.8), true); assert.equal(unc(12.5), false);
+  assert.equal(unc(40), false, "loin de toute position : pas incertain (la position est simplement inconnue)");
+  assert.equal(P.svIncertain(sv.map((f) => ({ t: f.t, h: f.h })))(9), false, "ancien suivi sans qualité : jamais incertain");
+});
