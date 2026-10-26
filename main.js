@@ -385,7 +385,7 @@ function registerIpc() {
     try { fs.writeFileSync(r.filePath, Buffer.from(buffer)); return { path: r.filePath }; }
     catch (err) { return { error: "Écriture impossible : " + err.message }; }
   });
-  ipcMain.handle("shell:showItem", (_e, p) => { if (typeof p === "string" && fs.existsSync(p)) shell.showItemInFolder(p); return true; });
+  ipcMain.handle("shell:showItem", (_e, p) => { if (typeof p === "string" && fs.existsSync(p)) { shell.showItemInFolder(p); return { ok: true, path: p }; } return { ok: false, path: typeof p === "string" ? p : "" }; });
 
   /* La sauvegarde automatique garde les trajectoires IA (volumineuses) dans un fichier séparé, réécrit seulement quand elles changent. */
   ipcMain.handle("autosave:save", (_e, project, aiFrames) => {
