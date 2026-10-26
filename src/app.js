@@ -391,7 +391,7 @@
     $("r-msg").textContent = "Export en cours…";
     const html = currentReportHtml();
     const r = kind === "pdf" ? await api.exportPDF(html, reportName()) : await api.exportHTML(html, reportName());
-    if (r.canceled) { $("r-msg").textContent = ""; return; }
+    if (r.canceled) { $("r-msg").textContent = "Export annulé : rien n'a été enregistré."; return; }
     if (r.error) { $("r-msg").textContent = ""; toast(r.error, true); return; }
     $("r-msg").textContent = "Exporté : " + r.path;
   }

@@ -326,6 +326,10 @@ function derive(dir, base, nom, filtre, duree) {
     await ouvreVideo(S, [path.resolve(process.env.FSAL_E2E_VIDEO || path.join(dir, "essai.mp4"))]);
     await S.win.evaluate(() => window.FSLabel.open()); await sleep(600);
     must(await S.win.evaluate(() => !document.getElementById("lab-screen").hidden), "étiquetage : l'écran s'ouvre");
+    // « Ouvrir le dossier » : jamais un clic sans effet : message « Dossier ouvert » ou « Impossible d'ouvrir le dossier » avec le chemin
+    await S.win.evaluate(() => { document.getElementById("toast").textContent = ""; document.getElementById("lab-folder").click(); });
+    await sleep(500);
+    must(await S.win.evaluate(() => /Dossier ouvert : |Impossible d'ouvrir le dossier : |Pas encore de dossier/.test(document.getElementById("toast").textContent)), "étiquetage : « Ouvrir le dossier » affiche toujours un message (chemin du dossier)");
     // une première passe charge la vidéo, puis une passe par mode (ballon, joueurs, suivi assisté) : chaque mode cache les outils des autres
     await parcourtOnglet(S, null, rapport, "etiquetage", 8, { zone: "#lab-screen", eviter: /#lab-close|data-mode|«Ballon»|«Joueurs»|«Suivi assisté»/ });
     for (const m of ["ballon", "joueurs", "suivi"]) {
