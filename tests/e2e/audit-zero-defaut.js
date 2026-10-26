@@ -199,9 +199,16 @@ function derive(dir, base, nom, filtre, duree) {
   const envv = process.env["FSAL_AUDIT_" + nom.toUpperCase()];
   if (envv && fs.existsSync(envv)) return envv;
   if (!ffmpegOk()) return null;
+  const cp = require("child_process");
+  /* la vidéo source est fabriquée ici si elle n'existe pas : un groupe ne dépend d'aucun fichier laissé par un autre */
+  if (!fs.existsSync(base)) {
+    const r = cp.spawnSync(process.execPath, [path.join(__dirname, "..", "helpers", "make-video.js"), base], { encoding: "utf8" });
+    if (r.status !== 0 || !fs.existsSync(base)) throw new Error("fabrication de la vidéo source impossible (" + base + ") : " + (r.stderr || r.stdout || r.error || "sans message"));
+  }
   const out = path.join(dir, nom + ".mp4");
   const a = ["-y", "-loglevel", "error", "-i", base]; if (filtre) a.push("-vf", filtre); if (duree) a.push("-t", String(duree));
-  require("child_process").execFileSync("ffmpeg", a.concat(["-c:v", "libx264", "-pix_fmt", "yuv420p", out]), { stdio: "ignore" });
+  const r = cp.spawnSync("ffmpeg", a.concat(["-c:v", "libx264", "-pix_fmt", "yuv420p", out]), { encoding: "utf8" });
+  if (r.status !== 0) throw new Error("ffmpeg a échoué (code " + r.status + ") : " + (r.stderr || r.error || "sans message"));
   return out;
 }
 
