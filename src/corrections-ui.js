@@ -224,7 +224,7 @@
   /* ---------- export ---------- */
   function setExporting(on, text) {
     exporting = on;
-    ["cp-export-one", "cp-export-all"].forEach((id) => { $(id).disabled = on; });
+    ["cp-export-one", "cp-export-all"].forEach((id) => { $(id).disabled = on; $(id).title = on ? "Une vidéo est en cours de création : attendez la fin (barre de progression ci-dessous)." : ""; });
     $("cp-progress").hidden = !on;
     if (text != null) $("cp-msg").textContent = text;
   }
