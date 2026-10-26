@@ -1,6 +1,11 @@
 name: Test de bout en bout (Linux)
 on:
   workflow_dispatch:
+    inputs:
+      groupe:
+        description: "Audit seul : numéro du groupe (1 à 4). Vide = tout le test de bout en bout."
+        required: false
+        default: ""
   push:
     branches: ["main"]
     paths-ignore: ["**.md"]
@@ -15,92 +20,114 @@ jobs:
       - run: node scripts/get-assets.js
       - run: npm i --no-save playwright-core@1.49.0
       - name: Démarrage de l'application et découpe réelle
+        if: ${{ inputs.groupe == '' }}
         run: xvfb-run -a node tests/e2e/segment-ipc.js
         env:
           CI: "true"
       - name: Installer ffmpeg (génération de la vidéo d'essai)
         run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
       - name: Assistant complet (vidéo d'essai avec but, vrai modèle de découpe)
+        if: ${{ inputs.groupe == '' }}
         run: xvfb-run -a node tests/e2e/wizard-goal.js
         env:
           CI: "true"
       - name: Questions du programme, mémoire du projet, Mes réponses (annuler), cadre orange
+        if: ${{ inputs.groupe == '' }}
         run: xvfb-run -a node tests/e2e/questions.js
         env:
           CI: "true"
       - name: Corriger une personne ou le ballon en un clic (menu, annulation, même gardien proposé)
+        if: ${{ inputs.groupe == '' }}
         run: xvfb-run -a node tests/e2e/correct-click.js
         env:
           CI: "true"
       - name: Page Mon plan tactique (questions, comparaison au match, écarts sur la vidéo)
+        if: ${{ inputs.groupe == '' }}
         run: xvfb-run -a node tests/e2e/plan.js
         env:
           CI: "true"
       - name: Correction animée sur la vraie vidéo (dessins, repli caméra perdue, modes)
+        if: ${{ inputs.groupe == '' }}
         run: xvfb-run -a node tests/e2e/correction-video.js
         env:
           CI: "true"
       - name: Ecran Etiquetage (ballon, joueurs, enregistrement immediat, reprise apres redemarrage)
+        if: ${{ inputs.groupe == '' }}
         run: xvfb-run -a node tests/e2e/etiquetage.js
         env:
           CI: "true"
       - name: Analyse v2 (beta), case a cocher, couverture, validation et rejet des regles
+        if: ${{ inputs.groupe == '' }}
         run: xvfb-run -a node tests/e2e/analyse-v2.js
         env:
           CI: "true"
       - name: Exemples d identification par projet (liste, instants, banc, ancien projet)
+        if: ${{ inputs.groupe == '' }}
         run: xvfb-run -a node tests/e2e/exemples.js
         env:
           CI: "true"
       - name: Camera perdue (bouton point de reprise, message, bandeau sur la video)
+        if: ${{ inputs.groupe == '' }}
         run: xvfb-run -a node tests/e2e/camera-reprise.js
         env:
           CI: "true"
       - name: Autre exemple depuis la liste des equipes (consigne, navigation, message, annulation)
+        if: ${{ inputs.groupe == '' }}
         run: xvfb-run -a node tests/e2e/autre-exemple-equipes.js
         env:
           CI: "true"
       - name: Calibrage precis (loupe, ecart par repere, repere suspect, Replacer, fleches, zoom)
+        if: ${{ inputs.groupe == '' }}
         run: xvfb-run -a node tests/e2e/calibrage-precision.js
         env:
           CI: "true"
       - name: Suivi de la camera seul (demarrage auto, precision, camera perdue, bouton de calibrage)
+        if: ${{ inputs.groupe == '' }}
         run: xvfb-run -a node tests/e2e/suivi-camera.js
         env:
           CI: "true"
       - name: Terrain recale sur les vraies lignes (couleur donnee, question de couleur, ecart a la verite)
+        if: ${{ inputs.groupe == '' }}
         run: xvfb-run -a node tests/e2e/lignes-recalage.js
         env:
           CI: "true"
       - name: Marquer le banc a un instant suivi par la camera (pas calibre, pas analyse), instant inconnu, zone transmise a lAnalyse
+        if: ${{ inputs.groupe == '' }}
         run: xvfb-run -a node tests/e2e/banc-suivi.js
         env:
           CI: "true"
       - name: Analyse complete sur le suivi de camera recale (repli la ou recalage incertain, projets existants inchanges)
+        if: ${{ inputs.groupe == '' }}
         run: xvfb-run -a node tests/e2e/analyse-suivi-recale.js
         env:
           CI: "true"
       - name: Jamais Qui est-ce pour une personne a la tenue nette (cas 00:32, cinq joueurs en meme temps)
+        if: ${{ inputs.groupe == '' }}
         run: xvfb-run -a node tests/e2e/qui-est-ce.js
         env:
           CI: "true"
       - name: Bancs reconnus tout seuls (fiches, entree reconnue, questions non bloquantes)
+        if: ${{ inputs.groupe == '' }}
         run: xvfb-run -a node tests/e2e/bancs-auto.js
         env:
           CI: "true"
       - name: Audit zero defaut - groupe 1 (projet complet, marquage manuel, bancs)
+        if: ${{ inputs.groupe == '' || inputs.groupe == '1' }}
         run: FSAL_AUDIT_SCENARIOS=complet,manuel,bancs xvfb-run -a node tests/e2e/audit-zero-defaut.js
         env:
           CI: "true"
       - name: Audit zero defaut - groupe 2 (questions et reponses conservees, assistant de depart, etiquetage)
+        if: ${{ inputs.groupe == '' || inputs.groupe == '2' }}
         run: FSAL_AUDIT_SCENARIOS=questions,assistant,etiquetage xvfb-run -a node tests/e2e/audit-zero-defaut.js
         env:
           CI: "true"
       - name: Audit zero defaut - groupe 3 (demarrage a froid, ancien projet, video verticale)
+        if: ${{ inputs.groupe == '' || inputs.groupe == '3' }}
         run: FSAL_AUDIT_SCENARIOS=froid,ancien,vertical xvfb-run -a node tests/e2e/audit-zero-defaut.js
         env:
           CI: "true"
       - name: Audit zero defaut - groupe 4 (video tres courte, menus, reouverture, annulation)
+        if: ${{ inputs.groupe == '' || inputs.groupe == '4' }}
         run: FSAL_AUDIT_SCENARIOS=court,menus,reouverture,annulation xvfb-run -a node tests/e2e/audit-zero-defaut.js
         env:
           CI: "true"
