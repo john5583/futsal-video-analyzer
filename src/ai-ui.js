@@ -1089,6 +1089,8 @@
     pickRole = null; pip = null; renderPipette();
     placing = $("ai-landmark").value;
     updateOverlayMode();
+    const opt = $("ai-landmark").selectedOptions && $("ai-landmark").selectedOptions[0];
+    $("ai-calib-msg").textContent = "Cliquez sur la vidéo à cet endroit : " + (opt ? opt.textContent : "le repère choisi") + ".";
   }
 
   function validateCalibration() {
