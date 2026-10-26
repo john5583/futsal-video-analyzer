@@ -29,7 +29,7 @@ async function lance(dir, kind, extra) {
   /* dialogues natifs : annulation ; IPC : compteur ; ouverture externe : neutralisée */
   await app.evaluate(({ dialog, ipcMain, shell }) => {
     globalThis.__ipc = 0; globalThis.__dlg = [];
-    const ann = (n) => (...a) => { globalThis.__dlg.push(n); return Promise.resolve(n === "showMessageBox" ? { response: 0, checkboxChecked: false } : { canceled: true, filePaths: [], filePath: undefined }); };
+    const ann = (n) => (...a) => { globalThis.__dlg.push(n); if (n === "showOpenDialog" && globalThis.__open) return Promise.resolve({ canceled: false, filePaths: globalThis.__open }); return Promise.resolve(n === "showMessageBox" ? { response: 0, checkboxChecked: false } : { canceled: true, filePaths: [], filePath: undefined }); };
     dialog.showOpenDialog = ann("showOpenDialog"); dialog.showSaveDialog = ann("showSaveDialog"); dialog.showMessageBox = ann("showMessageBox");
     dialog.showErrorBox = (...a) => { globalThis.__dlg.push("showErrorBox:" + a.join("|")); };
     shell.openExternal = () => { globalThis.__dlg.push("openExternal"); return Promise.resolve(); };
@@ -52,6 +52,8 @@ async function lance(dir, kind, extra) {
 const EMPREINTE = () => {
   const hash = (s) => { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; return h; };
   const parts = [];
+  if (!window.__toastObs && document.getElementById("toast")) { window.__toastN = 0; window.__toastObs = new MutationObserver(() => { window.__toastN++; }); window.__toastObs.observe(document.getElementById("toast"), { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ["hidden", "class"] }); }
+  parts.push("t" + (window.__toastN || 0));   // un message affiché de nouveau compte comme un effet
   parts.push(document.body.innerText.length + ":" + hash(document.body.innerText));
   parts.push(document.querySelectorAll("*").length);
   const st = [];
@@ -144,14 +146,19 @@ async function neutre(S, tab) {
   }, tab);
 }
 
-async function parcourtOnglet(S, tab, rapport, nomScenario, max) {
+async function parcourtOnglet(S, tab, rapport, nomScenario, max, opts) {
+  opts = Object.assign({}, opts || {});
+  if (!opts.eviter && tab === "analyse" && !opts.zone && nomScenario !== "manuel") opts.eviter = /«Marquage manuel»/;   // couvert par le scénario « manuel »
   if (tab) { await S.win.evaluate((tab) => document.querySelector("#tabs button[data-tab=\"" + tab + "\"]").click(), tab); await sleep(500); }
-  const zone = tab ? "#tab-" + tab : null;
+  const zone = opts.zone || (tab ? "#tab-" + tab : null), vues = {};
   const faits = {}, vusInvisibles = {}, famille = {};
-  const norm = (c) => c.replace(/#d+$/, "").replace(/d+/g, "0");   // « événement n° 12 » et « n° 13 » = même famille : 2 clics suffisent
+  const norm = (c) => c.replace(/#\d+$/, "").replace(/\d+/g, "0");   // « événement n° 12 » et « n° 13 » = même famille : 2 clics suffisent
   for (let n = 0; n < (max || 400); n++) {
     const liste = await S.win.evaluate(LISTE, [zone, SELECTEUR]);
-    const it = liste.find((x) => !faits[x.cle] && x.visible && (famille[norm(x.cle)] || 0) < 2);
+    if (opts.attend) await opts.attend(S);
+    const dispo = liste.filter((x) => !faits[x.cle] && x.visible && (famille[norm(x.cle)] || 0) < 2 && !(opts.eviter && opts.eviter.test(x.cle)));   // « eviter » : repoussé à un autre scénario (il cache le panneau en cours)
+    const it = dispo.find((x) => n > 0 && !vues[x.cle]) || dispo[0];   // ce qui vient d'apparaître passe en premier (fenêtre ouverte par le clic précédent)
+    liste.forEach((x) => { if (x.visible) vues[x.cle] = true; });
     liste.forEach((x) => { if (!x.visible && !faits[x.cle]) vusInvisibles[x.cle] = x; });
     if (!it) break;
     faits[it.cle] = true; famille[norm(it.cle)] = (famille[norm(it.cle)] || 0) + 1;
@@ -177,9 +184,11 @@ async function parcourtOnglet(S, tab, rapport, nomScenario, max) {
 }
 
 const AUTORISE_SANS_EFFET = [   // [motif de l'élément, raison] : clics sans effet voulu (déjà dans l'état demandé)
-  [/«Analyse IA»/, "onglet déjà actif"], [/«Marquage manuel»/, "onglet déjà actif"],
+  [/«Relance risquée sous pression/, "première animation déjà affichée à l'ouverture de l'onglet"],
+  [/«1 · Mon équipe»/, "type déjà choisi à l'ouverture"], [/#lab-zoom-reset/, "zoom déjà à 1×"], [/#lab-sub-who/, "liste sans choix tant qu'aucune fiche n'existe"],
+  [/«Ballon»/, "mode d'étiquetage déjà actif à l'ouverture"], [/«Analyse IA»/, "onglet déjà actif"], [/«Marquage manuel»/, "onglet déjà actif"],
   [/Voir sur la vidéo/, "même écart déjà affiché par le bouton de l'heure cliqué juste avant"],
-  [/input:radio/, "choix déjà coché"], [/fois · C/, "animation déjà choisie dans la liste"]
+  [/input:radio/, "choix déjà coché"], [/d+ f/, "animation déjà choisie dans la liste"], [/«Maillot»|«Short»|«Chaussettes»|«Manches/, "partie de la pipette déjà sélectionnée"]
 ];
 const ENTETE = (S, nom, rapport) => S.win.evaluate(LISTE, ["header", SELECTEUR]).then(async (liste) => {
   for (const it of liste) { if (!it.visible || /\[tab=/.test(it.cle)) continue; rapport.push(Object.assign({ scenario: nom, onglet: "(en-tête)", element: it.cle }, await clique(S, it, "header"))); }
@@ -242,6 +251,80 @@ function derive(dir, base, nom, filtre, duree) {
     garde(S, nom); await S.app.close();
   }
 
+  /* 4 bis. zones qui demandent un état particulier : marquage manuel, questions, bancs, assistant de départ, étiquetage */
+  const ouvreVideo = (S, chemins) => S.app.evaluate((_m, p) => { globalThis.__open = p; }, chemins);
+  const attendAssistant = async (S) => { const end = Date.now() + 120000; while (Date.now() < end) { if (!(await S.win.evaluate(() => !!document.querySelector("#wiz .wiz-busy, #wiz .wiz-busy-bar")))) return; await sleep(1000); } };
+
+  if (veut("manuel")) {
+    const S = await lance(dir, "complet");
+    must(await attendChargement(S), "marquage manuel : projet chargé");
+    await S.win.evaluate(() => { document.querySelector("#seg button[data-pane=manual]").click(); });
+    await parcourtOnglet(S, "analyse", rapport, "manuel", 150, { eviter: /«Analyse IA»/ });
+    garde(S, "manuel"); await S.app.close();
+  }
+
+  if (veut("questions")) {
+    const S = await lance(dir, "questions");
+    must(await attendChargement(S), "questions : projet chargé");
+    const n0 = await S.win.evaluate(() => window.FutsalDoubt.openQuestions({ doubts: window.FSAI.ai().doubts, subs: window.FSAI.ai().subs || [], uncertain: window.FSAI.ai().uncertain || [], memory: window.FSAI.memory() }).length);
+    must(n0 === 1, "questions : une question « Qui est-ce ? » est posée pour la personne douteuse (" + n0 + ")");
+    must(await S.win.evaluate(() => document.querySelectorAll("#ai-q .item, #ai-q > *").length > 0), "questions : la question est affichée dans le panneau");
+    const OUV = () => S.win.evaluate(() => ({ n: window.FutsalDoubt.openQuestions({ doubts: window.FSAI.ai().doubts, subs: window.FSAI.ai().subs || [], uncertain: window.FSAI.ai().uncertain || [], memory: window.FSAI.memory() }).length, rep: document.getElementById("ai-ans-count").textContent }));
+    await S.win.evaluate(() => { const b = [...document.querySelectorAll("#ai-q button")].find((x) => x.textContent.trim() === "Mon équipe"); if (b) b.click(); });
+    await sleep(800);
+    const apres = await OUV();
+    must(apres.n === 0 && apres.rep === "(1)", "questions : la réponse « Mon équipe » est appliquée (plus de question) et gardée dans « Mes réponses » " + apres.rep);
+    await sleep(4000);
+    await S.app.close();
+    const exe = path.join(APP, "node_modules", "electron", "dist", process.platform === "win32" ? "electron.exe" : "electron");
+    const app2 = await electron.launch({ executablePath: exe, args: [APP, "--no-sandbox", "--user-data-dir=" + S.f.ud] });
+    const w2 = await app2.firstWindow(); await w2.waitForLoadState("load"); await sleep(3500);
+    const r2 = await w2.evaluate(() => ({ n: window.FutsalDoubt.openQuestions({ doubts: window.FSAI.ai().doubts, subs: window.FSAI.ai().subs || [], uncertain: window.FSAI.ai().uncertain || [], memory: window.FSAI.memory() }).length, rep: document.getElementById("ai-ans-count").textContent }));
+    must(r2.n === 0 && r2.rep === "(1)", "questions : après fermeture et réouverture, la réponse est conservée et la question n'est pas reposée " + JSON.stringify(r2));
+    await app2.close();
+    const S2 = await lance(dir, "questions");
+    must(await attendChargement(S2), "questions (parcours complet) : projet chargé");
+    await parcourtOnglet(S2, "analyse", rapport, "questions", 450);
+    S.errors.push(...S2.errors);
+    garde(S, "questions"); await S2.app.close();
+  }
+
+  if (veut("bancs")) {
+    const S = await lance(dir, "complet");
+    must(await attendChargement(S), "bancs : projet chargé");
+    await S.win.evaluate(() => { document.getElementById("ai-advanced").open = true; document.getElementById("ai-bench-mark").click(); });
+    await sleep(500);
+    const box = await S.win.evaluate(() => { const r = document.querySelector("video").getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; });
+    await S.win.mouse.click(box.x + box.w * 0.05, box.y + box.h * 0.3); await sleep(300);
+    await S.win.mouse.click(box.x + box.w * 0.2, box.y + box.h * 0.8); await sleep(800);
+    const zones = await S.win.evaluate(() => (window.FSAI.ai().benches || window.FSAI.ai().bancs || []).length + "|" + document.getElementById("ai-bench-zones").textContent);
+    must(/^[1-9]/.test(zones) || /1/.test(zones.split("|")[1] || ""), "bancs : deux clics marquent un banc (" + zones + ")");
+    await S.win.evaluate(() => document.getElementById("ai-bench-clear").click()); await sleep(500);
+    must(await S.win.evaluate(() => (window.FSAI.ai().benches || window.FSAI.ai().bancs || []).length === 0), "bancs : « Effacer les bancs » les efface");
+    must(S.errors.length === 0, "bancs : aucune erreur" + (S.errors.length ? " : " + S.errors.join(" | ") : ""));
+    garde(S, "bancs"); await S.app.close();
+  }
+
+  if (veut("assistant")) {
+    const S = await lance(dir, "vide");
+    await ouvreVideo(S, [path.resolve(process.env.FSAL_E2E_VIDEO || path.join(dir, "essai.mp4"))]);
+    must(await S.win.evaluate(() => !!window.FSWiz), "assistant : prêt");
+    await parcourtOnglet(S, "analyse", rapport, "assistant", 80, { attend: attendAssistant, zone: "#wiz" });
+    const etat = await S.win.evaluate(() => window.FSWiz.state.step);
+    console.log("assistant : étape atteinte à la fin du parcours =", etat);
+    garde(S, "assistant"); await S.app.close();
+  }
+
+  if (veut("etiquetage")) {
+    const S = await lance(dir, "complet");
+    must(await attendChargement(S), "étiquetage : projet chargé");
+    await ouvreVideo(S, [path.resolve(process.env.FSAL_E2E_VIDEO || path.join(dir, "essai.mp4"))]);
+    await S.win.evaluate(() => window.FSLabel.open()); await sleep(600);
+    must(await S.win.evaluate(() => !document.getElementById("lab-screen").hidden), "étiquetage : l'écran s'ouvre");
+    await parcourtOnglet(S, null, rapport, "etiquetage", 120, { zone: "#lab-screen", eviter: /#lab-close/ });
+    garde(S, "etiquetage"); await S.app.close();
+  }
+
   /* 5. menus Fichier / Affichage / Aide */
   if (veut("menus")) {
     const S = await lance(dir, "complet");
@@ -286,8 +369,8 @@ function derive(dir, base, nom, filtre, duree) {
     must(await attendChargement(S), "annulation : projet chargé");
     await S.win.evaluate(() => { document.querySelector("#tabs button[data-tab=analyse]").click(); const d = document.getElementById("ai-advanced"); if (d) d.open = true; });
     const lance2 = await S.win.evaluate(() => { const b = document.getElementById("ai-run"); if (!b || b.disabled) return false; b.click(); return true; });
-    await sleep(2500);
-    const visible = await S.win.evaluate(() => { const c = document.getElementById("ai-cancel"); return !!c && !c.hidden && c.offsetParent !== null; });
+    let visible = false;
+    for (let k = 0; k < 60 && !visible; k++) { await sleep(100); visible = await S.win.evaluate(() => { const c = document.getElementById("ai-cancel"); return !!c && !c.hidden && c.offsetParent !== null; }); }
     if (lance2 && visible) {
       await S.win.evaluate(() => document.getElementById("ai-cancel").click());
       await sleep(3000);

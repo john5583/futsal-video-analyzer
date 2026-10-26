@@ -805,7 +805,7 @@
 
   /* ---------- exemples d'identification : liste datée, navigation, indicateurs, demandes, banc ---------- */
   function exEl(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
-  function exBtn(text, title, fn, cls) { const b = exEl("button", cls || "", text); b.type = "button"; if (title) b.title = title; b.addEventListener("click", fn); return b; }
+  function exBtn(text, title, fn, cls) { const b = exEl("button", cls || "", text); b.type = "button"; if (title) b.title = title; b.addEventListener("click", (ev) => { if (/^(Reculer|Avancer)|avancer dans la vidéo/i.test(title || "") && !App.isVideoReady()) { App.toast("Choisissez d'abord une vidéo."); return; } fn(ev); }); return b; }
   const SRC_TXT = { silhouette: "silhouette", pipette: "pipette", auto: "clic sur le joueur" };
   /* opts : nav (boutons avancer / reculer et champ « aller à »), bench (partie banc, vrai par défaut), onMore(cat) (donner un autre exemple),
      onChange() (le parent se redessine après un changement). Aucun bouton ne bloque l'analyse. */
@@ -829,7 +829,7 @@
       const nav = exEl("div", "ex-nav"), lab = exEl("span", "muted ex-time", App.fmt(video.currentTime || 0));
       [["−10 s", -10], ["−1 s", -1], ["+1 s", 1], ["+10 s", 10]].forEach(([txt, d]) => nav.appendChild(exBtn(txt, "Reculer / avancer dans la vidéo", () => App.seek(Math.max(0, Math.min(dur(), (video.currentTime || 0) + d))))));
       const inp = exEl("input"); inp.type = "text"; inp.placeholder = "mm:ss"; inp.size = 6; inp.setAttribute("aria-label", "Aller à l'instant (mm:ss)");
-      const go = () => { const t = App.parseTime(inp.value); if (t == null) { msg.textContent = "Écrivez l'instant sous la forme mm:ss, par exemple 2:30."; return; } App.seek(Math.max(0, Math.min(dur(), t))); };
+      const go = () => { if (!App.isVideoReady()) { msg.textContent = "Choisissez d'abord une vidéo."; return; } const t = App.parseTime(inp.value); if (t == null) { msg.textContent = "Écrivez l'instant sous la forme mm:ss, par exemple 2:30."; return; } App.seek(Math.max(0, Math.min(dur(), t))); };
       inp.addEventListener("keydown", (e) => { if (e.key === "Enter") go(); });
       nav.appendChild(lab); nav.appendChild(inp); nav.appendChild(exBtn("Aller", "Aller à cet instant", go));
       const upd = () => { if (!root.isConnected) { video.removeEventListener("timeupdate", upd); video.removeEventListener("seeked", upd); return; } lab.textContent = App.fmt(video.currentTime || 0); };
@@ -1602,7 +1602,7 @@
     video.pause();
     qHighlight = { t, ballPt: pt, label: "Ballon proposé" };
     $("ai-bs-text").textContent = "Image " + (bs.i + 1) + " sur " + bs.list.length + " (" + App.fmt(t) + ") — " + (bsBlind(t) ? "image de contrôle : le programme ne propose rien. Vois-tu le ballon (au moins la moitié visible) ? " : pt ? "le programme propose le ballon dans le cercle orange. Est-ce bien le ballon ?" : "le programme ne propose aucun ballon. Vois-tu le ballon ?") + "  [Entrée = oui, N = aucun ballon visible, ? = incertain, S = passer]";
-    $("ai-bs-ok").disabled = !pt;
+    $("ai-bs-ok").disabled = !pt; $("ai-bs-ok").title = pt ? "" : "Aucun ballon proposé sur cette image : cliquez sur le ballon dans la vidéo, ou choisissez « Aucun ballon visible ».";
     App.seek(t);
     if (pt) zoomOnPoint(pt.u, pt.v, 5); else setZoom({ k: 1, tx: 0, ty: 0 });      // agrandissement automatique autour du ballon proposé
     prefetchContours(t);
@@ -1810,7 +1810,7 @@
     running = true; abort = new AbortController(); live = null;
     if (suiviRun) { suiviRun.ctrl.abort(); suiviRun = null; suiviMsg("Suivi de la caméra interrompu : l'analyse complète suit la caméra elle-même."); }       // pas deux lectures de la vidéo en même temps
     const startedAt = Date.now();
-    $("ai-run").disabled = true; $("ai-device").disabled = true; $("ai-cancel").hidden = false; $("ai-progress").hidden = false; $("ai-bar").style.width = "0%";
+    $("ai-run").disabled = true; $("ai-run").title = "Une analyse est en cours : utilisez « Annuler » pour l'arrêter."; $("ai-device").disabled = true; $("ai-device").title = "Le calcul ne peut pas être changé pendant une analyse."; $("ai-cancel").hidden = false; $("ai-progress").hidden = false; $("ai-bar").style.width = "0%";
     msg.textContent = "Chargement du modèle de détection…";
     try {
       const camera = $("ai-camera").value;
@@ -1856,7 +1856,7 @@
       msg.textContent = "Analyse arrêtée : " + e.message;
     } finally {
       running = false; abort = null;
-      $("ai-run").disabled = engineBlocked; $("ai-device").disabled = false; $("ai-cancel").hidden = true;
+      $("ai-run").disabled = engineBlocked; $("ai-run").title = engineBlocked ? "Le détecteur n'est pas prêt : voir le message d'état en haut du panneau." : ""; $("ai-device").disabled = false; $("ai-device").title = ""; $("ai-cancel").hidden = true;
       setTimeout(() => { $("ai-progress").hidden = true; }, 600);
       if (api && api.aiStop) { /* le détecteur reste chargé pour la prochaine analyse */ }
       if (api && api.aiStatus) refreshEngine();   // la carte graphique a pu céder la place au processeur en cours de route
@@ -1891,7 +1891,7 @@
       else {
         engineKind = s.backend && s.backend.kind === "dml" ? "dml" : "cpu";
         e.className = "ai-status"; e.textContent = engineText(s) + " Fonctionne hors ligne : la vidéo ne quitte pas votre ordinateur.";
-        if (engineBlocked) { engineBlocked = false; $("ai-run").disabled = running; }
+        if (engineBlocked) { engineBlocked = false; $("ai-run").disabled = running; $("ai-run").title = running ? "Une analyse est en cours : utilisez « Annuler » pour l'arrêter." : ""; }
         updateEstimate();
       }
     }).catch(() => {});
@@ -1935,7 +1935,7 @@
     };
     ["ai-L", "ai-W", "ai-dir", "ai-flip", "ai-fps", "ai-tiles", "ai-camera", "ai-marks", "ai-reuse"].forEach((id) => $(id).addEventListener("change", upd));
     $("ai-bench").addEventListener("change", () => { upd(); reanalyzeSuggestions(); });
-    $("ai-bench-mark").addEventListener("click", () => { const h = $("ai-bench-go"); if (h) h.hidden = true; if (!startBenchMark() && h) offreBanc(h); });
+    $("ai-bench-mark").addEventListener("click", () => { const h = $("ai-bench-go"); if (h) h.hidden = true; const ok = startBenchMark(); if (!ok && h) offreBanc(h); else if (ok) App.toast("Cliquez deux coins opposés autour du banc, sur la vidéo."); });
     $("ai-bl-export").addEventListener("click", exportBallLabels);
     bindZoom();
     $("ai-v2").addEventListener("change", () => {
@@ -1987,10 +1987,10 @@
     $("ai-run").addEventListener("click", runAnalysis);
     $("ai-cancel").addEventListener("click", () => { if (abort) abort.abort(); });
     $("ai-accept-all").addEventListener("click", () => {
-      const a = state.project.ai; if (!a || !a.suggestedEvents.length) return;
+      const a = state.project.ai; if (!a || !a.suggestedEvents.length) { App.toast("Aucune erreur suggérée à accepter pour le moment."); return; }
       acceptSuggestions(a.suggestedEvents.slice());
     });
-    $("ai-clear-sugg").addEventListener("click", () => { const a = state.project.ai; if (!a) return; a.suggestedEvents.forEach((e) => D.reject(memory(), e)); a.suggestedEvents = []; a.suggested = 0; renderSuggestions(); App.changed(); });
+    $("ai-clear-sugg").addEventListener("click", () => { const a = state.project.ai; if (!a) return; if (!a.suggestedEvents.length) { App.toast("Aucune erreur suggérée à écarter pour le moment."); return; } a.suggestedEvents.forEach((e) => D.reject(memory(), e)); a.suggestedEvents = []; a.suggested = 0; renderSuggestions(); App.changed(); });
     const inVideo = (e) => { const [ix, iy] = toVideo(e.offsetX, e.offsetY); return { ix, iy, ok: ix >= 0 && iy >= 0 && ix <= video.videoWidth && iy <= video.videoHeight }; };
     ["down", "move", "up"].forEach((n) => $("overlay").addEventListener("pointer" + n, (e) => {
       if (!pointer || !pointer[n]) return;

@@ -88,3 +88,19 @@ jobs:
         run: xvfb-run -a node tests/e2e/bancs-auto.js
         env:
           CI: "true"
+      - name: Audit zero defaut - groupe 1 (projet complet, marquage manuel, bancs)
+        run: FSAL_AUDIT_SCENARIOS=complet,manuel,bancs xvfb-run -a node tests/e2e/audit-zero-defaut.js
+        env:
+          CI: "true"
+      - name: Audit zero defaut - groupe 2 (questions et reponses conservees, assistant de depart, etiquetage)
+        run: FSAL_AUDIT_SCENARIOS=questions,assistant,etiquetage xvfb-run -a node tests/e2e/audit-zero-defaut.js
+        env:
+          CI: "true"
+      - name: Audit zero defaut - groupe 3 (demarrage a froid, ancien projet, video verticale)
+        run: FSAL_AUDIT_SCENARIOS=froid,ancien,vertical xvfb-run -a node tests/e2e/audit-zero-defaut.js
+        env:
+          CI: "true"
+      - name: Audit zero defaut - groupe 4 (video tres courte, menus, reouverture, annulation)
+        run: FSAL_AUDIT_SCENARIOS=court,menus,reouverture,annulation xvfb-run -a node tests/e2e/audit-zero-defaut.js
+        env:
+          CI: "true"

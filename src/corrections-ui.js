@@ -92,7 +92,7 @@
     const v = $("corr-pip-video"), e = pip.events[pip.idx], dur = state.project.duration || v.duration || 1e9;
     pip.t0 = Math.max(0, e.t - 4); pip.t1 = Math.min(dur, e.t + 4);
     $("pip-label").textContent = "Votre match · " + App.fmt(e.t) + " (" + (pip.idx + 1) + "/" + pip.events.length + ")";
-    $("pip-prev").disabled = $("pip-next").disabled = pip.events.length < 2;
+    $("pip-prev").disabled = $("pip-next").disabled = pip.events.length < 2; $("pip-prev").title = $("pip-next").title = pip.events.length < 2 ? "Une seule situation pour cette erreur : rien d'autre à parcourir." : "";
     const go = () => { try { v.currentTime = pip.t0; } catch (_e) { /* pas encore prête */ } };
     if (v.readyState >= 1) go(); else v.addEventListener("loadedmetadata", go, { once: true });
     if (player && player.playing) v.play().catch(() => {}); else v.pause();
@@ -208,7 +208,7 @@
   function openReal() {
     const e = real.events[real.idx], a = state.project.ai, err = KB.ERRORS.find((x) => x.id === e.type);
     $("cr-label").textContent = App.fmt(e.t) + " (" + (real.idx + 1) + "/" + real.events.length + ")";
-    $("cr-prev").disabled = $("cr-next").disabled = real.events.length < 2;
+    $("cr-prev").disabled = $("cr-next").disabled = real.events.length < 2; $("cr-prev").title = $("cr-next").title = real.events.length < 2 ? "Un seul moment pour cette erreur : rien d'autre à parcourir." : "";
     $("cr-fixed").classList.toggle("active", real.mode === "fixed"); $("cr-seq").classList.toggle("active", real.mode === "seq");
     const sol = err && err.solutions && err.solutions.length ? err.solutions[0] : "";
     $("cr-text").innerHTML = "<b class=\"err\">Erreur · " + esc(err ? err.label : e.type) + "</b> — " + esc(err ? err.description : "") +
