@@ -235,6 +235,10 @@ function derive(dir, base, nom, filtre, duree) {
     const S = await lance(dir, "ancien");
     must(await attendChargement(S), "projet ancien chargé (migration)");
     must(await S.win.evaluate(() => document.getElementById("p-team").value === "Les Lions"), "projet ancien : le nom d'équipe est conservé");
+    // « Placer sur l'image » doit dire où cliquer (il restait sans aucun signe visible : bouton « mort » dans un ancien projet)
+    await S.win.evaluate(() => { document.querySelector("#tabs button[data-tab=analyse]").click(); document.getElementById("ai-calib-msg").textContent = ""; document.getElementById("ai-place").click(); });
+    await sleep(300);
+    must(await S.win.evaluate(() => /Cliquez sur la vidéo à cet endroit/.test(document.getElementById("ai-calib-msg").textContent)), "ancien projet : « Placer sur l'image » dit où cliquer");
     for (const tab of TABS) await parcourtOnglet(S, tab, rapport, "ancien");
     garde(S, "ancien"); await S.app.close();
   }
