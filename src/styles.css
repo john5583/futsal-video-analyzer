@@ -283,6 +283,8 @@ fieldset.plan-q label.plan-opt{display:flex;flex-direction:row;gap:8px;align-ite
 .ai-bancs input[type=text]{width:130px}
 .ai-suivi-q{margin:6px 0;padding:6px 8px;border:1px solid #f2b705;border-radius:6px;font-size:12px}
 .ai-suivi-q p{margin:0 0 6px}
+.ai-suivi-couleur{margin:6px 0;font-size:12px}
+.ai-suivi-couleur button,.ai-suivi-couleur select{margin:0 4px}
 .ai-suivi-q button{margin:2px 4px 2px 0}
 .trace-q{position:absolute;left:8px;bottom:8px;padding:3px 8px;border-radius:5px;background:rgba(146,64,14,.92);color:#fff;font:600 12px 'Segoe UI',Arial,sans-serif;pointer-events:none}
 .calib-go{position:absolute;left:8px;top:40px;z-index:6;padding:5px 10px;font-size:12px;font-weight:600;border-radius:6px;border:0;background:#00b8d4;color:#04222a;cursor:pointer}

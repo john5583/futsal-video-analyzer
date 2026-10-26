@@ -96,5 +96,48 @@ async function lance(dir, video, name, lineColor) {
   must(await B.win.evaluate(() => document.getElementById("ai-suivi-q").hidden), "la question disparaît une fois répondue");
   must(B.errors.length === 0, "aucune erreur (question de couleur)" + (B.errors.length ? " : " + B.errors.join(" | ") : ""));
   await B.app.close();
+
+  // ---- 3. couleur montrée en cliquant sur la ligne (loupe) : nuance apprise sur ce projet, gardée, utilisée ----
+  const C = await lance(dir, video, "clic", null);
+  must(await waitFor(C.win, () => !!window.FSAI.ai().camSuivi, 120000), "sans couleur : le suivi classique se fait");
+  const cleC = await C.win.evaluate(() => window.FSAI.ai().camSuivi.cle);
+  await C.win.evaluate(() => window.FSApp.seek(0.1));
+  await waitFor(C.win, () => Math.abs(document.querySelector("video").currentTime - 0.1) < 0.12 && !document.querySelector("video").seeking, 8000);
+  await sleep(500);
+  await C.win.evaluate(() => { [...document.querySelectorAll("#ai-suivi-q button")].find((b) => b.dataset.couleur === "clic").click(); });
+  const ecran = async (u, v) => C.win.evaluate(([u, v, VW, VH]) => { const r = document.getElementById("overlay").getBoundingClientRect(), k = Math.min(r.width / VW, r.height / VH); return { x: r.left + (r.width - VW * k) / 2 + u * k, y: r.top + (r.height - VH * k) / 2 + v * k }; }, [u, v, VW, VH]);
+  // 1er clic sur le sol : on le dit, rien n'est inventé
+  const sol = await ecran(60, 500);
+  await C.win.mouse.click(sol.x, sol.y); await sleep(400);
+  must(await C.win.evaluate(() => /pas de ligne nette|plus loin du bord/.test(document.getElementById("ai-suivi-couleur").textContent) && !window.FSAI.ai().lineColor), "clic sur le sol : « je ne vois pas de ligne nette », aucune couleur inventée");
+  // 2e clic sur une ligne noire du terrain (point connu dans la scène)
+  const pose0 = poseAt(POSE, PAN, 0.1), B0 = CF.cameraBasis(pose0), f0 = CF.focalPx(VW, pose0[5]);
+  // un point de ligne du terrain bien visible au milieu de l image (ligne médiane, touches, surfaces : la scène les trace en noir)
+  let q0 = null;
+  CF.modelPoints(L, W, { step: 0.2 }).forEach((p) => { const q = CF.project(B0, f0, VW, VH, p[0], p[1], 0); if (q && q.u > 250 && q.u < 700 && q.v > 200 && q.v < 420 && (!q0 || Math.hypot(q.u - VW / 2, q.v - VH * 0.6) < Math.hypot(q0.u - VW / 2, q0.v - VH * 0.6))) q0 = q; });
+  must(!!q0, "une ligne du terrain est visible au milieu de l image");
+  const sc = await ecran(q0.u, q0.v);
+  await C.win.mouse.click(sc.x, sc.y); await sleep(600);
+  const pr = await C.win.evaluate(() => { const a = window.FSAI.ai(); return { c: a.lineColor, p: a.lineProfile, txt: document.getElementById("ai-suivi-couleur").textContent }; });
+  if (!pr.p) console.log("   (message : " + pr.txt + " ; clic écran " + Math.round(sc.x) + "," + Math.round(sc.y) + " ; point image " + Math.round(q0.u) + "," + Math.round(q0.v) + ")");
+  must(pr.c === "custom" && pr.p && pr.p.L < 40 && pr.p.tol >= 8, "la nuance est apprise et gardée dans le projet : " + JSON.stringify(pr.p));
+  must(await waitFor(C.win, (c) => { const s = window.FSAI.ai().camSuivi; return s && s.cle !== c && s.lignes && s.lignes.couleur === "custom" && s.lignes.acceptes >= 2; }, 120000, cleC), "le suivi est refait avec cette nuance et se recale sur les lignes");
+  must(await C.win.evaluate(() => /de la couleur que vous avez montrée/.test(document.getElementById("ai-suivi").textContent) && /Confusion mesurée/.test(document.getElementById("ai-suivi").textContent)), "le bilan dit la couleur montrée et la confusion mesurée");
+  await sleep(1500);
+  must(JSON.parse(fs.readFileSync(path.join(C.ud, "autosave.json"), "utf8")).ai.lineProfile.tol >= 8, "le profil de couleur est dans le fichier du projet");
+
+  // ---- 4. dimensions proposées (question non bloquante), réponse gardée par projet ----
+  await C.win.evaluate(() => { const a = window.FSAI.ai(); a.camSuivi.dims = { L: 36, W: 18, gain: 0.27, accord: true, propose: true, images: 12 }; window.FSApp.ai.syncFromProject(); });
+  must(await C.win.evaluate(() => /Quelles sont les dimensions de ce terrain/.test(document.getElementById("ai-suivi-q").textContent)), "les dimensions déduites sont proposées, avec la question");
+  const cleD = await C.win.evaluate(() => window.FSAI.ai().camSuivi.cle);
+  await C.win.evaluate(() => { [...document.querySelectorAll("#ai-suivi-q button")].find((b) => /Oui, 36/.test(b.textContent)).click(); });
+  must(await C.win.evaluate(() => window.FSAI.ai().L === 36 && window.FSAI.ai().W === 18), "« Oui » : les dimensions sont gardées dans le projet (36 × 18)");
+  must(await waitFor(C.win, (c) => { const s = window.FSAI.ai().camSuivi; return s && s.cle !== c; }, 120000, cleD), "le suivi est refait avec ces dimensions");
+  // ---- 5. un nouveau projet ne reprend rien d'un autre ----
+  await C.win.evaluate(() => { window.FSApp.state.project = window.FSApp.newProject(); window.FSApp.hooks.onLoad(); });
+  await sleep(500);
+  must(await C.win.evaluate(() => (() => { const a = window.FSApp.state.project.ai; return !a || (!a.lineColor && !a.lineProfile && !a.camSuivi && !a.dimsAvis && a.L === 40 && a.W === 20); })() && document.getElementById("ai-suivi-couleur").hidden && document.getElementById("ai-suivi-q").hidden && document.getElementById("ai-L").value === "40"), "nouveau projet : ni couleur, ni profil, ni dimensions de l'autre projet (40 × 20 par défaut)");
+  must(C.errors.length === 0, "aucune erreur (couleur montrée, dimensions)" + (C.errors.length ? " : " + C.errors.join(" | ") : ""));
+  await C.app.close();
   if (!process.env.FSAL_VIDEO_LIGNES) fs.rmSync(dir, { recursive: true, force: true });
 })().catch((e) => { console.error("ÉCHEC : " + e.stack); process.exit(1); });

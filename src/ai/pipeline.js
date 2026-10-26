@@ -722,7 +722,8 @@
       const frames = [], lost = [], acc = [];
       // pose : caméra réelle (cap, inclinaison, champ, roulis) suivie à la place de l'homographie quand le calibrage est une vraie caméra ; null = suivi classique
       const trk = { anchor: null, M: IDENTITY, prev: null, keys: [], t: 0, lastTry: -9, pose: null, ref: null, pend: [], lastAcc: null, lastLine: -9 };
-      const lignes = { couleur: opts.lineColor || null, mode: "classique", essais: 0, acceptes: 0, rejets: {} };
+      const lignes = { couleur: opts.lineColor || null, mode: "classique", essais: 0, acceptes: 0, rejets: {}, confSomme: 0, confN: 0 };
+      const pool = { items: [], pas: 1 };       // images où les lignes sont très nettes, pour proposer les dimensions du terrain
       const addKey = () => { const last = trk.keys[trk.keys.length - 1]; if (!last || trk.t - last.t >= 1) { trk.keys.push({ prev: trk.prev, M: trk.M, pose: trk.pose, t: trk.t }); if (trk.keys.length > 14) trk.keys.splice(1, 1); } };
       const projHw = () => (trk.pose ? LGm.hDepuisPose(trk.pose, gw, gh, opts.L || 40, opts.W || 20) : null);
       const hStock = (pose) => { const Hw = pose && LGm.hDepuisPose(pose, gw, gh, opts.L || 40, opts.W || 20); return Hw ? normalizedProjection(HG.mul3(Hw, [gs, 0, 0, 0, gs, 0, 0, 0, 1]), vw, vh) : null; };
@@ -749,7 +750,7 @@
       const essaiLignes = (idx, t) => {
         try {
           lignes.essais++;
-          const c = LGm.carte({ data: rgba, width: gw, height: gh }, opts.lineColor);
+          const c = LGm.carte({ data: rgba, width: gw, height: gh }, opts.lineColor, opts.lineProfile);
           const q = LGm.affinerPose(c, trk.pose, modeleTerrain, { ouvert: false, ref: trk.ref });
           if (!q.ok) { lignes.rejets[q.raison] = (lignes.rejets[q.raison] || 0) + 1; return; }
           const t0 = trk.lastAcc != null ? trk.lastAcc : trk.pend.length ? trk.pend[0].t - 0.3 : t, corr = q.changed ? trk.pose.map((v, j) => q.pose[j] - v) : null;
@@ -761,6 +762,9 @@
             const h = hStock(trk.pose); if (h) frames[idx].h = h;
           }
           lignes.acceptes++; acc.push(t); trk.lastAcc = t; trk.pend = [];
+          const cf = LGm.confusion(c, trk.pose, modeleTerrain, opts.L || 40, opts.W || 20);
+          if (cf != null) { lignes.confSomme += cf; lignes.confN++; }
+          if (q.detail1 && q.detail1.observ >= 0.2 && lignes.acceptes % pool.pas === 0) { pool.items.push({ carte: c, pose: trk.pose.slice(), t }); if (pool.items.length > 24) { pool.items = pool.items.filter((_x, i) => i % 2 === 0); pool.pas *= 2; } }
         } catch (_e) { /* le suivi continue sans recalage */ }
       };
       let lostStart = null, nextStore = -1, ok = false;
@@ -826,8 +830,19 @@
         }
       }
       if (lostStart != null) lost.push([lostStart, times[times.length - 1]]);
-      if (lignes.mode === "pose") qualiteSuivi(frames, acc);
-      return { frames, lost, t0: tStart, t1: times.length ? times[times.length - 1] : tStart, seconds: Math.round((Date.now() - started) / 100) / 10, orb: stats.orb + stats.reloc, vw, vh, lignes: lignes.mode === "pose" ? lignes : null };
+      let dims = null;
+      if (lignes.mode === "pose") {
+        qualiteSuivi(frames, acc);
+        try {       // dimensions suggérées par les lignes (calcul découpé : l'interface reste utilisable)
+          const its = pool.items.length > 12 ? pool.items.filter((_x, i) => i % Math.ceil(pool.items.length / 12) === 0) : pool.items;
+          if (its.length >= 6 && opts.dimensions !== false) {
+            const L0 = opts.L || 40, W0 = opts.W || 20, o = LGm.DIM_OPTS, tot = {};
+            for (const [L, W] of LGm.grilleDimensions(L0, W0, o)) { tot[L + "x" + W] = LGm.voteDimensions(its, L, W, opts.prio); await new Promise((r) => setTimeout(r, 0)); if (opts.signal && opts.signal.aborted) throw new Error("Suivi interrompu"); }
+            dims = LGm.choisirDimensions(tot, L0, W0, its.length);
+          }
+        } catch (e) { if (opts.signal && opts.signal.aborted) throw e; dims = null; }
+      }
+      return { frames, lost, t0: tStart, t1: times.length ? times[times.length - 1] : tStart, seconds: Math.round((Date.now() - started) / 100) / 10, orb: stats.orb + stats.reloc, vw, vh, lignes: lignes.mode === "pose" ? Object.assign(lignes, { confusion: lignes.confN ? Math.round((1000 * lignes.confSomme) / lignes.confN) / 1000 : null }) : null, dims };
     } finally { video.removeAttribute("src"); video.load(); }
   }
 
