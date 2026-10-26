@@ -1118,6 +1118,7 @@
     video.pause();
     placing = null; pickRole = role; pip = null; preview = null; renderPipette();
     updateOverlayMode();
+    App.toast("Cliquez sur un joueur « " + ((ROLES.find((q) => q[0] === role) || [])[1] || role) + " » sur la vidéo (je lis sa tenue tout seul).");
   }
 
   async function handlePick(ix, iy) {
