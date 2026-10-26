@@ -458,3 +458,41 @@ test("remplaçants : trois personnes au même endroit au même instant — chaqu
   const old = [{ kind: "sub", t: subs[0].t, x: subs[0].x, y: subs[0].y, verdict: "joueur" }];
   assert.ok(Object.values(st(M.analyze(frames, Object.assign({ subAnswers: old }, base)))).every((v) => !v), "ancienne réponse ambiguë : refusée");
 });
+
+/* ---------- jamais « Qui est-ce ? » pour une personne dont la tenue est nette (cas réel : 20261019_212111, 00:32) ---------- */
+const equipeA = (extra) => [track(1, 100, ["A"], 10, 3), track(2, 100, ["A"], 12, 7), track(3, 100, ["A"], 14, 11), track(4, 100, ["A"], 16, 15)].concat(extra || []);
+
+test("00:32 : cinq joueurs de la même équipe, tous nettement de l'équipe (100 % des lectures) : AUCUNE question « qui est-ce ? » (remplaçant qui entre, piste coupée)", () => {
+  const cinq = toFrames(...equipeA([track(5, 100, ["A"], 18, 3)]));
+  const teams = { 1: "A", 2: "A", 3: "A", 4: "A", 5: "A" };
+  assert.deepEqual(D.trackDoubts(cinq, teams), []);
+  // même chose avec les adversaires
+  const advs = toFrames(...[1, 2, 3, 4, 5].map((id) => track(id, 100, ["B"], 10 + id * 2, 3 + id * 3)));
+  assert.deepEqual(D.trackDoubts(advs, { 1: "B", 2: "B", 3: "B", 4: "B", 5: "B" }), []);
+});
+
+test("une piste coupée en deux (l'identifiant est perdu puis repris au même endroit) ou une personne détectée deux fois ne fait pas un cinquième joueur", () => {
+  // piste 5 finit à 20 s, la piste 6 reprend à 20,2 s au même endroit : 4 personnes seulement
+  const coupee = toFrames(...[1, 2, 3, 4].map((id) => track(id, 200, ["A"], 10 + id * 2, 3 + id * 4)), track(5, 100, ["A"], 30, 3), track(6, 100, ["A"], 35.1, 3, 20.2));
+  const t5 = D.trackDoubts(coupee, { 1: "A", 2: "A", 3: "A", 4: "A", 5: "A", 6: "A" });
+  assert.equal(t5.filter((d) => /cinq/.test(d.why)).length, 0);
+  // double détection : les pistes 5 et 6 sont superposées
+  const doublon = toFrames(...[1, 2, 3, 4].map((id) => track(id, 100, ["A"], 10 + id * 2, 3 + id * 4)), track(5, 100, ["A"], 30, 3), track(6, 100, ["A"], 30.1, 3.2));
+  assert.equal(D.trackDoubts(doublon, { 1: "A", 2: "A", 3: "A", 4: "A", 5: "A", 6: "A" }).filter((d) => /cinq/.test(d.why)).length, 0);
+});
+
+test("cinq personnes dont l'une n'est pas nette (équipe lue 60 % / 40 %) : la question porte sur CELLE-LÀ, pas sur une piste prise au hasard", () => {
+  const frames = toFrames(...equipeA([track(5, 100, ["A", "A", "A", "B", "B"], 18, 3)]));
+  const ds = D.trackDoubts(frames, { 1: "A", 2: "A", 3: "A", 4: "A", 5: "A" });
+  assert.equal(ds.length, 1);
+  assert.equal(ds[0].id, 5);
+});
+
+test("propriété : aucune question pour une personne dont l'équipe est lue à au moins 90 % (marge nette), quelles que soient les autres pistes", () => {
+  for (let k = 0; k < 20; k++) {
+    const tr = [];
+    for (let id = 1; id <= 9; id++) { const side = id <= 5 ? "A" : "B"; tr.push(track(id, 60 + ((id * 7 + k) % 80), [side], 8 + id * 2.5, 2 + ((id * 3 + k) % 16), (id * 1.3 + k) % 5)); }
+    const teams = {}; for (let id = 1; id <= 9; id++) teams[id] = id <= 5 ? "A" : "B";
+    D.trackDoubts(toFrames(...tr), teams).forEach((d) => { const s = Object.values(d.votes).reduce((a, b) => a + b, 0), top = Math.max(d.votes.A || 0, d.votes.B || 0); assert.ok(top / s < 0.9 || /pantalon/.test(d.why), "question posée à une personne nette : " + JSON.stringify(d)); });
+  }
+});
