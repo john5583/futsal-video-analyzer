@@ -1816,7 +1816,7 @@
       const camera = $("ai-camera").value;
       const continuous = !!(opts && opts.continuous) || (v2 && $("ai-v2-cont").checked);        // analyse continue : chaque image de la vidéo (voir pipeline.js)
       const result = await (continuous ? P.analyseVideoContinuous : P.analyseVideo)({
-        url: App.getVideoUrl(), t0: range[0], t1: range[1], fps, tiles, camera, tol: tol(), L: L(), W: W(), calibrations: a.calibrations, suivi: $("ai-reuse").checked && suiviValide(a) ? suiviFr : null, bancsDecisions: a.bancsDecisions || [], fiches: (a.bancs && a.bancs.fiches) || [], refs: r, floorMarks: floorMarks(), benchZones: a.benchZones || [], benchFollow: memory().benchFollow !== false, dirAt, signal: abort.signal, api, ballMargin: (opts && opts.extra && opts.extra.ballMargin) || (v2 ? 6 : undefined), fullRes: !!(opts && opts.extra && opts.extra.fullRes) || v2,
+        url: App.getVideoUrl(), t0: range[0], t1: range[1], fps, tiles, camera, tol: tol(), L: L(), W: W(), calibrations: a.calibrations, suivi: suiviValide(a) && ((a.camSuivi && a.camSuivi.lignes) || $("ai-reuse").checked) ? suiviFr : null, bancsDecisions: a.bancsDecisions || [], fiches: (a.bancs && a.bancs.fiches) || [], refs: r, floorMarks: floorMarks(), benchZones: a.benchZones || [], benchFollow: memory().benchFollow !== false, dirAt, signal: abort.signal, api, ballMargin: (opts && opts.extra && opts.extra.ballMargin) || (v2 ? 6 : undefined), fullRes: !!(opts && opts.extra && opts.extra.fullRes) || v2,
         onProgress: (p) => {
           $("ai-bar").style.width = Math.round((p.done / p.total) * 100) + "%";
           msg.textContent = "Image " + p.done + " / " + p.total + " — reste environ " + fmtEta(p.eta) + (p.lost ? " (caméra perdue sur cette image)" : "");

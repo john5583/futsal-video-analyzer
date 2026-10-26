@@ -681,6 +681,15 @@
     return frames;
   }
 
+  /* Instants où le suivi de la caméra dit « recalage incertain » (q = 0) : fonction t -> booléen (la position la plus proche à moins de 0,7 s ; sans qualité = pas incertain). */
+  function svIncertain(sv) {
+    return (t) => {
+      let lo = 0, hi = sv.length - 1;
+      while (lo < hi) { const m = (lo + hi) >> 1; if (sv[m].t < t) lo = m + 1; else hi = m; }
+      const a = sv[lo], b = lo > 0 ? sv[lo - 1] : null, f = b && Math.abs(b.t - t) < Math.abs(a.t - t) ? b : a;
+      return !!f && Math.abs(f.t - t) <= 0.7 && f.q === 0;
+    };
+  }
   /* Passages où le tracé vient du suivi seul (aucune image confirmée sur les lignes alentour) sur au moins dureeMin secondes, hors passages perdus et hors passages
      que l'utilisateur a confirmés (confirmes : [[de, a]]). Rend [{ de, a }]. */
   function passagesDouteux(frames, confirmes, dureeMin) {
@@ -880,6 +889,19 @@
     if (start.note) notes.push(start.note);
     if (sv) notes.push("Position de la caméra reprise du suivi de la caméra déjà fait (pas de second suivi).");
     const times = sampleTimes(t0, Math.min(opts.t1, video.duration - 0.05), opts.fps);
+    /* Repli : là où le suivi dit « recalage incertain » (q = 0), la position vient de la chaîne de l'analyse, repartie de la position du suivi au début du passage (ancre posée à cet instant). */
+    const svUnc = sv ? svIncertain(sv) : () => false;
+    if (sv) {
+      let enRepli = false, n = 0;
+      times.forEach((tm) => {
+        const u = svUnc(tm);
+        if (u && !enRepli) { const ch = courtH(sv, calibs, "mobile", tm, vw, vh); if (ch && ch.H) calibs.push({ t: tm, H: ch.H, points: [], err: 0, ancre: true }); }
+        if (u) n++;
+        enRepli = u;
+      });
+      calibs.sort((a, b) => a.t - b.t);
+      if (n) notes.push("Recalage incertain sur " + n + " image(s) analysée(s) : la position y vient de la chaîne de l'analyse, repartie de celle du suivi.");
+    }
     // images réduites pour le suivi de la caméra
     const gw = Math.min(480, cw), gh = Math.max(2, Math.round((ch * gw) / cw)), gs = gw / vw;
     const gcanvas = document.createElement("canvas");
@@ -946,9 +968,11 @@
       if (opts.signal && opts.signal.aborted) throw new Error("Analyse interrompue");
       const t = times[i];
       const calib = calibrationAt(calibs, t);
+      const svOn = !!sv && !svUnc(t);          // suivi recalé utilisé à cet instant (sinon : chaîne de l'analyse)
+      if (svOn) { trk.anchor = null; trk.prev = null; }          // la chaîne de l'analyse repartira d'une nouvelle ancre au prochain passage incertain
       // Caméra mobile : le mouvement est suivi par petits pas (≤ 0,1 s), même si les images analysées sont plus espacées
       let trackOk = true, svH = null;
-      if (sv) {
+      if (svOn) {
         const ch = courtH(sv, calibs, "mobile", t, vw, vh);
         svH = ch && ch.H ? ch.H : null;
         if (!svH) {                       // le suivi de la caméra ne connaît pas la position ici : image ignorée, sans lecture ni détection
@@ -957,7 +981,7 @@
           continue;
         }
       }
-      if (mobile && !sv && trk.anchor && trk.anchor === calib && trk.prev) trackOk = await advanceMotion(trk, t);
+      if (mobile && !svOn && trk.anchor && trk.anchor === calib && trk.prev) trackOk = await advanceMotion(trk, t);
       else await seekTo(video, t);
       ctx.drawImage(video, 0, 0, cw, ch);
       const img = ctx.getImageData(0, 0, cw, ch);
@@ -978,7 +1002,7 @@
         if (bd) lastBall = { x: (bd.x1 + bd.x2) / 2, y: (bd.y1 + bd.y2) / 2, t };
       } else dets = dropFloorMarks(await detectCanvas(canvas, opts.tiles, opts.api, { minPerson: 0.35, minBall: BALL_CAND }), img, opts.floorMarks);
       let H = svH || calib.H, reliable = true;
-      if (mobile && !sv) {
+      if (mobile && !svOn) {
         const boxes = dets.filter((d) => d.cls === Y.CLASS_PERSON).map((d) => [d.x1 * (gw / cw), d.y1 * (gh / ch), d.x2 * (gw / cw), d.y2 * (gh / ch)]);
         trk.boxes = boxes;
         if (calib !== trk.anchor || !trk.prev) {
@@ -1334,5 +1358,5 @@
     return { dets, scale, img: ctx.getImageData(0, 0, cw, ch), width: cw, height: ch };
   }
 
-  return { isFloorMark, courtH, cibleCalibrage, suiviCamera, qualiteSuivi, passagesDouteux, cleSuivi, driftAt, conseilCalibrage, trackDrift, inBenchZone, shiftedZones, followBenches, tileRects, courtRegion, zoomRects, tileToFrame, mergeTiles, isFloorMark, dropFloorMarks, calibrationAt, processDetections, finalizeFrames, compactFrames, expandFrames, frameNear, sampleTimes, startTime, estimateDuration, learnFactor, FACTOR_MIN, FACTOR_MAX, analyseVideo, analyseVideoContinuous, stepGap, avgStep, lerpM, detectAt, detectCanvas, captureFrames, TEAM_CODE };
+  return { isFloorMark, courtH, cibleCalibrage, suiviCamera, qualiteSuivi, svIncertain, passagesDouteux, cleSuivi, driftAt, conseilCalibrage, trackDrift, inBenchZone, shiftedZones, followBenches, tileRects, courtRegion, zoomRects, tileToFrame, mergeTiles, isFloorMark, dropFloorMarks, calibrationAt, processDetections, finalizeFrames, compactFrames, expandFrames, frameNear, sampleTimes, startTime, estimateDuration, learnFactor, FACTOR_MIN, FACTOR_MAX, analyseVideo, analyseVideoContinuous, stepGap, avgStep, lerpM, detectAt, detectCanvas, captureFrames, TEAM_CODE };
 });
