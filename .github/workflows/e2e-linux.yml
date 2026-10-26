@@ -72,6 +72,10 @@ jobs:
         run: xvfb-run -a node tests/e2e/lignes-recalage.js
         env:
           CI: "true"
+      - name: Marquer le banc a un instant suivi par la camera (pas calibre, pas analyse), instant inconnu, zone transmise a lAnalyse
+        run: xvfb-run -a node tests/e2e/banc-suivi.js
+        env:
+          CI: "true"
       - name: Jamais Qui est-ce pour une personne a la tenue nette (cas 00:32, cinq joueurs en meme temps)
         run: xvfb-run -a node tests/e2e/qui-est-ce.js
         env:
