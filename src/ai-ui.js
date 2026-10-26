@@ -954,10 +954,31 @@
     if (q.good.length) { const g = document.createElement("div"); g.className = "muted q-good"; g.textContent = "Contrôles réussis : " + q.good.join(" · "); box.appendChild(g); }
   }
 
+  /* Registre des personnes : une fiche par personne (src/ai/registre.js), recalculée à chaque affichage des résultats. */
+  const EQUIPE_NOM = { A: "Mon équipe", B: "Adversaire", GKA: "Mon gardien", GKB: "Gardien adverse" };
+  function renderPersonnes() {
+    const a = state.project.ai, R = window.FutsalRegistre, det = $("ai-pers-box"), list = $("ai-pers");
+    if (!det || !list) return;
+    list.innerHTML = "";
+    if (!a || !R || !frames.length) { det.hidden = true; return; }
+    const r = R.construire(frames, { L: a.L || 40, W: a.W || 20 });
+    a.personnes = r.personnes.map((p) => ({ id: p.id, equipe: p.equipe, pistes: p.pistes, intervalles: p.intervalles, presenceS: p.presenceS, tailleRelative: p.tailleRelative, statut: p.statut, raison: p.raison }));
+    det.hidden = false;
+    const c = r.resume;
+    $("ai-pers-sum").textContent = c.total + " personne(s) : " + c.sures + " sûre(s), " + c.probables + " probable(s), " + c.nonIdentifiees + " non identifiée(s)";
+    r.personnes.slice(0, 80).forEach((p) => {
+      const row = document.createElement("div"); row.className = "ev";
+      const mn = (t) => App.fmt(t);
+      row.textContent = p.id + " — " + (EQUIPE_NOM[p.equipe] || p.equipe) + " — " + p.intervalles.map((i) => mn(i[0]) + "–" + mn(i[1])).join(", ") + " — " + p.statut + (p.raison ? " (" + p.raison + ")" : "") + (p.pistes.length > 1 ? " — pistes " + p.pistes.join(" + ") : "");
+      list.appendChild(row);
+    });
+    if (r.personnes.length > 80) { const more = document.createElement("div"); more.className = "muted"; more.textContent = "… et " + (r.personnes.length - 80) + " autre(s) personne(s)."; list.appendChild(more); }
+  }
+
   function renderStats() {
     const a = state.project.ai, box = $("ai-stats");
     box.innerHTML = "";
-    renderQuality();
+    renderQuality(); renderPersonnes();
     if (!a || !a.stats) { setChip("ai-s4-state", "Pas encore d'analyse", ""); renderNext(); return; }
     const st = a.stats;
     const cells = [

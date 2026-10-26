@@ -112,3 +112,7 @@ jobs:
         run: xvfb-run -a node tests/e2e/etiquetage-suivi.js
         env:
           CI: "true"
+      - name: Registre des personnes (fiches, statut sure / non identifiee, rien d'invente)
+        run: xvfb-run -a node tests/e2e/registre-personnes.js
+        env:
+          CI: "true"
