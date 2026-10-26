@@ -15,7 +15,7 @@
   const video = $("lab-video"), cv = $("lab-canvas"), ctx = cv.getContext("2d"), wrap = $("lab-zoom"), stage = $("lab-stage");
   let data = null, key = null, dir = "", ms = 0, mode = "ballon", team = "A", sel = null, view = { k: 1, tx: 0, ty: 0 };
   let saving = false, again = false, session = 0, drag = null, fit = { w: 0, h: 0 };
-  const every = { ballon: Number(lsGet("lab.every.ballon")) || 1, joueurs: Number(lsGet("lab.every.joueurs")) || 60 };
+  const every = { ballon: Number(lsGet("lab.every.ballon")) || 1, joueurs: Number(lsGet("lab.every.joueurs")) || 60, suivi: 1 };
   const imgDone = new Set();
 
   /* ---------- enregistrement ---------- */
@@ -76,7 +76,8 @@
     ctx.clearRect(0, 0, vw, vh);
     const px = (vw / (fit.w || vw)) / view.k;            // 1 pixel d'écran, en pixels vidéo : traits d'épaisseur constante à l'écran
     const f = data.frames[String(ms)];
-    if (mode === "ballon") {
+    if (mode === "suivi") svDraw(px);
+    else if (mode === "ballon") {
       if (f && f.ball && f.ball.state === "vu") {
         ctx.lineWidth = 2 * px; ctx.strokeStyle = "#f59e0b";
         ctx.beginPath(); ctx.arc(f.ball.u, f.ball.v, 14 * px, 0, 7); ctx.stroke();
@@ -107,7 +108,7 @@
       ? (b ? (b.state === "vu" ? "Réponse : ballon désigné." : b.state === "aucun" ? "Réponse : aucun ballon visible." : "Réponse : incertain.") : "Pas encore de réponse sur cette image.")
       : (f.playersDone ? "Image terminée (" : "Pas terminée (") + LS.boxes(data, ms).length + " cadre(s)" + ").";
     document.querySelectorAll("#lab-screen [data-mode]").forEach((e) => e.classList.toggle("active", e.dataset.mode === mode));
-    $("lab-ball-tools").hidden = mode !== "ballon"; $("lab-players-tools").hidden = mode !== "joueurs";
+    $("lab-ball-tools").hidden = mode !== "ballon"; $("lab-players-tools").hidden = mode !== "joueurs"; $("lab-suivi-tools").hidden = mode !== "suivi";
     document.querySelectorAll("#lab-teams [data-team]").forEach((e) => e.classList.toggle("active", e.dataset.team === team));
     const bx = sel ? LS.boxes(data, ms).find((x) => x.id === sel) : null;
     $("lab-sel").hidden = !bx;
@@ -190,6 +191,7 @@
     if (!drag) return;
     const d = drag; drag = null;
     if (d.pan) return;
+    if (mode === "suivi") { if (!d.moved) svClic(d.p); return; }
     if (mode === "ballon") { if (!d.moved) { setBall("vu", d.p.u, d.p.v); advance(); } return; }
     if (d.moved && d.box) {
       const b = LS.addBox(data, ms, Object.assign({ team }, d.box));
@@ -212,6 +214,10 @@
     else if (k === "+" || k === "=") { view.k = Math.min(40, view.k * 1.25); applyView(); }
     else if (k === "-") { view.k = Math.max(1, view.k * 0.8); if (view.k === 1) resetView(); else applyView(); }
     else if (k === "0") resetView();
+    else if (mode === "suivi") {
+      if (k === " ") { if (sv.run) svPause(); else if (sv.last && sv.prev) { sv.run = true; const j = ++sv.jeton; svInfo("Je suis le ballon…"); svBoucle(j); } e.preventDefault(); }
+      else if (k === "n" || k === "N" || k === "Enter") { svFin("Séquence terminée."); e.preventDefault(); }
+    }
     else if (mode === "ballon") {
       if (k === "Enter") { advance(); e.preventDefault(); }
       else if (k === "n" || k === "N") answerBall("aucun");
@@ -224,6 +230,82 @@
     }
   }
   document.addEventListener("keydown", onKey);
+
+  /* ---------- suivi assisté du ballon (images consécutives) ----------
+     John clique le ballon sur une image ; le programme le suit image après image (30 par seconde) et s'arrête quand il n'est plus sûr.
+     John clique alors le ballon (la séquence reprend) ou dit « plus de ballon » (N). Chaque séquence est enregistrée avec le temps passé. */
+  const SB = window.FutsalSuiviBallon;
+  let sv = { run: false, pts: [], last: null, prev: null, n: 0, fps: 30, t0: 0, secondes: 0, tick: 0, jeton: 0, trail: [] };
+  const svMs = (n) => Math.round((n * 1000) / sv.fps);
+  function svTick() { const now = Date.now(); if (sv.tick) sv.secondes += Math.min(20, (now - sv.tick) / 1000); sv.tick = now; }   // une pause de plus de 20 s ne compte pas
+  function svInfo(t) { const e = $("lab-sv-info"); if (e) e.textContent = t; }
+  function svResume() {
+    const c = LS.seqCounts(data), cur = sv.pts.length;
+    return "Séquences enregistrées : " + c.sequences + " (" + c.images + " images consécutives, dont " + c.clics + " clics de toi, " + c.secondes + " s de ton temps" + (c.images ? ", soit " + Math.round((c.secondes / c.images) * 100) / 100 + " s par image" : "") + ")." + (cur ? " Séquence en cours : " + cur + " images." : "");
+  }
+  /* Source des images : la vidéo (par défaut) ou une source de test (window.FSLabel.source = { fps, count, grab(n) -> ImageData }). */
+  async function svGrab(n) {
+    const src = window.FSLabel && window.FSLabel.source;
+    if (src) return src.grab(n);
+    await seekTo((n + 0.5) / sv.fps);
+    const c = document.createElement("canvas"); c.width = video.videoWidth; c.height = video.videoHeight;
+    const g = c.getContext("2d", { willReadFrequently: true }); g.drawImage(video, 0, 0, c.width, c.height);
+    return g.getImageData(0, 0, c.width, c.height);
+  }
+  function svFin(raison) {
+    sv.run = false; sv.jeton++;
+    if (sv.pts.length) {
+      svTick();
+      const s = LS.addSeq(data, { id: "s" + sv.pts[0][0], secondes: sv.secondes, fps: sv.fps, pts: sv.pts });
+      if (s) changed();
+    }
+    sv.pts = []; sv.last = null; sv.prev = null; sv.ancre = null; sv.trail = []; sv.secondes = 0; sv.tick = 0;
+    svInfo((raison ? raison + " " : "") + svResume()); draw();
+  }
+  async function svBoucle(jeton) {
+    const src = window.FSLabel && window.FSLabel.source;
+    while (sv.run && jeton === sv.jeton) {
+      const maxN = src ? src.count - 1 : Math.floor((video.duration || 0) * sv.fps) - 1;
+      if (sv.n + 1 > maxN) { svFin("Fin de la vidéo."); return; }
+      const img = await svGrab(sv.n + 1);
+      if (!sv.run || jeton !== sv.jeton) return;
+      const cur = SB.gris(img), r = SB.suivre(sv.prev, cur, sv.last, { ancre: sv.ancre });
+      if (r.perdu) {
+        sv.run = false; svTick();
+        svInfo("Je ne retrouve plus le ballon (" + r.raison + "). Clique le ballon sur cette image pour continuer, ou « Plus de ballon » (N) pour finir la séquence. " + svResume());
+        sv.n += 1; ms = svMs(sv.n); sv.prevLost = cur; draw(); return;
+      }
+      sv.n += 1; ms = svMs(sv.n);
+      sv.pts.push([ms, r.u, r.v, r.conf, "suivi"]); sv.last = [r.u, r.v]; sv.prev = cur; sv.trail.push([r.u, r.v]); if (sv.trail.length > 20) sv.trail.shift();
+      svTick(); if (sv.pts.length % 5 === 0) svInfo("Je suis le ballon… " + svResume());
+      draw();
+      await new Promise((ok) => setTimeout(ok, 0));
+    }
+  }
+  /* Clic de John : pose le point (« clic ») sur l'image affichée et lance ou relance le suivi. */
+  async function svClic(p) {
+    if (!data) return;
+    const src = window.FSLabel && window.FSLabel.source;
+    if (sv.run) { sv.run = false; sv.jeton++; await new Promise((ok) => setTimeout(ok, 30)); }
+    if (!sv.pts.length) { sv.fps = src ? src.fps : (sv.fps || 30); sv.n = Math.round((video.currentTime || 0) * sv.fps); if (src && src.start != null) sv.n = src.start; sv.secondes = 0; sv.tick = 0; }
+    svTick();
+    const img = sv.prevLost || await svGrab(sv.n);
+    sv.prevLost = null;
+    ms = svMs(sv.n);
+    const i = sv.pts.findIndex((q) => q[0] === ms);
+    const pt = [ms, p.u, p.v, 1, "clic"];
+    if (i >= 0) sv.pts[i] = pt; else sv.pts.push(pt);
+    sv.last = [p.u, p.v]; sv.prev = SB.gris(img); sv.ancre = { img: sv.prev, pos: [p.u, p.v] }; sv.trail = [[p.u, p.v]];
+    draw();
+    sv.run = true; const jeton = ++sv.jeton;
+    svInfo("Je suis le ballon… (Espace : pause)");
+    svBoucle(jeton);
+  }
+  function svPause() { if (!sv.run) { svInfo("Le suivi n'est pas en marche. " + svResume()); return; } if (sv.run) { sv.run = false; sv.jeton++; svTick(); svInfo("Pause. Clique le ballon pour corriger et reprendre. " + svResume()); } }
+  function svDraw(px) {
+    sv.trail.forEach((q, i) => { ctx.fillStyle = "rgba(245,158,11," + (0.15 + 0.6 * (i / sv.trail.length)) + ")"; ctx.beginPath(); ctx.arc(q[0], q[1], 4 * px, 0, 7); ctx.fill(); });
+    if (sv.last) { ctx.lineWidth = 2 * px; ctx.strokeStyle = sv.run ? "#22c55e" : "#f59e0b"; ctx.beginPath(); ctx.arc(sv.last[0], sv.last[1], 14 * px, 0, 7); ctx.stroke(); }
+  }
 
   /* ---------- ouverture ---------- */
   async function loadVideo(v) {
@@ -253,14 +335,17 @@
     const last = lsGet("lab.last");
     $("lab-resume").hidden = !last; $("lab-resume").textContent = last ? "Reprendre : " + last.split(/[\\/]/).pop() : "";
   }
-  async function close() { if (data) await persist(); $("lab-screen").hidden = true; video.pause(); }
+  async function close() { if (data) { if (sv.pts.length) svFin(""); await persist(); } $("lab-screen").hidden = true; video.pause(); }
 
   $("lab-pick").addEventListener("click", pick);
   $("lab-pick2").addEventListener("click", pick);
   $("lab-resume").addEventListener("click", async () => { const last = lsGet("lab.last"); if (last) await loadVideo(await api.resolveVideo(last)); });
   $("lab-close").addEventListener("click", close);
   $("lab-folder").addEventListener("click", () => { if (dir && api.showItem) api.showItem(dir + "\\etiquettes.json"); });
-  document.querySelectorAll("#lab-screen [data-mode]").forEach((b) => b.addEventListener("click", () => { mode = b.dataset.mode; sel = null; refresh(); draw(); }));
+  document.querySelectorAll("#lab-screen [data-mode]").forEach((b) => b.addEventListener("click", () => { if (mode === "suivi" && b.dataset.mode !== "suivi" && data) svFin(""); mode = b.dataset.mode; sel = null; refresh(); draw(); }));
+  $("lab-sv-pause").addEventListener("click", svPause);
+  $("lab-sv-go").addEventListener("click", () => { if (!sv.run && sv.last && sv.prev) { sv.run = true; const j = ++sv.jeton; svInfo("Je suis le ballon…"); svBoucle(j); } else if (!sv.last) svInfo("Clique d'abord le ballon sur l'image affichée. " + svResume()); });
+  $("lab-sv-end").addEventListener("click", () => svFin("Séquence terminée."));
   $("lab-step").innerHTML = STEPS.map((s) => "<option value=\"" + s[0] + "\">" + s[1] + "</option>").join("");
   $("lab-step").addEventListener("change", () => { every[mode] = Number($("lab-step").value); lsSet("lab.every." + mode, String(every[mode])); });
   $("lab-next").addEventListener("click", advance);
@@ -306,5 +391,5 @@
   window.addEventListener("resize", () => { if (!$("lab-screen").hidden && data) { layout(); resetView(); } });
   video.addEventListener("error", () => { if (!$("lab-screen").hidden) toast("Erreur de lecture de la vidéo dans l'écran d'étiquetage.", true); });
 
-  window.FSLabel = { open, close, state: () => ({ data, key, ms, mode }), goTo, loadVideo };
+  window.FSLabel = { open, close, state: () => ({ data, key, ms, mode, sv: { run: sv.run, pts: sv.pts.length } }), goTo, loadVideo, source: null };
 })();

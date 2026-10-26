@@ -185,6 +185,7 @@ async function parcourtOnglet(S, tab, rapport, nomScenario, max, opts) {
 
 const AUTORISE_SANS_EFFET = [   // [motif de l'élément, raison] : clics sans effet voulu (déjà dans l'état demandé)
   [/«Relance risquée sous pression/, "première animation déjà affichée à l'ouverture de l'onglet"],
+  [/#lab-goto/, "champ de saisie : l'effet vient du bouton « Aller » voisin"],
   [/«1 · Mon équipe»/, "type déjà choisi à l'ouverture"], [/#lab-zoom-reset/, "zoom déjà à 1×"], [/#lab-sub-who/, "liste sans choix tant qu'aucune fiche n'existe"],
   [/«Ballon»/, "mode d'étiquetage déjà actif à l'ouverture"], [/«Analyse IA»/, "onglet déjà actif"], [/«Marquage manuel»/, "onglet déjà actif"],
   [/Voir sur la vidéo/, "même écart déjà affiché par le bouton de l'heure cliqué juste avant"],
@@ -321,7 +322,13 @@ function derive(dir, base, nom, filtre, duree) {
     await ouvreVideo(S, [path.resolve(process.env.FSAL_E2E_VIDEO || path.join(dir, "essai.mp4"))]);
     await S.win.evaluate(() => window.FSLabel.open()); await sleep(600);
     must(await S.win.evaluate(() => !document.getElementById("lab-screen").hidden), "étiquetage : l'écran s'ouvre");
-    await parcourtOnglet(S, null, rapport, "etiquetage", 120, { zone: "#lab-screen", eviter: /#lab-close/ });
+    // une première passe charge la vidéo, puis une passe par mode (ballon, joueurs, suivi assisté) : chaque mode cache les outils des autres
+    await parcourtOnglet(S, null, rapport, "etiquetage", 8, { zone: "#lab-screen", eviter: /#lab-close|data-mode|«Ballon»|«Joueurs»|«Suivi assisté»/ });
+    for (const m of ["ballon", "joueurs", "suivi"]) {
+      await S.win.evaluate((m) => { const b = document.querySelector("#lab-screen [data-mode=" + m + "]"); if (b) b.click(); }, m);
+      await sleep(400);
+      await parcourtOnglet(S, null, rapport, "etiquetage", 120, { zone: "#lab-screen", eviter: /#lab-close|«Ballon»|«Joueurs»|«Suivi assisté»|#lab-pick/ });
+    }
     garde(S, "etiquetage"); await S.app.close();
   }
 

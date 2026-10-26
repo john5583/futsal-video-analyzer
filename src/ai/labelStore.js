@@ -28,7 +28,7 @@
   const gridCount = (duration) => Math.max(0, Math.ceil(duration * GRID_FPS - 1e-9) - 1);
 
   function create(video) {
-    return { version: 1, video: { name: String(video.name || ""), size: Number(video.size) || 0, duration: Number(video.duration) || 0, vw: Number(video.vw) || 0, vh: Number(video.vh) || 0 }, persons: [], subs: [], frames: {} };
+    return { version: 1, video: { name: String(video.name || ""), size: Number(video.size) || 0, duration: Number(video.duration) || 0, vw: Number(video.vw) || 0, vh: Number(video.vh) || 0 }, persons: [], subs: [], frames: {}, seqs: [] };
   }
   /* Relit un fichier de progression : refuse ce qui n'a pas la forme attendue, sans jamais lever d'erreur. */
   function normalize(raw) {
@@ -38,6 +38,7 @@
       if (p && typeof p.id === "string" && TEAMS[p.team]) d.persons.push({ id: p.id, nom: String(p.nom || "").slice(0, 60), team: p.team, role: String(p.role || "").slice(0, 30) });
     });
     if (Array.isArray(raw.subs)) d.subs = raw.subs.filter((x) => x && Number.isInteger(x.ms) && x.ms >= 0 && (x.sens === "entre" || x.sens === "sort") && d.persons.some((p) => p.id === x.who)).map((x) => ({ ms: x.ms, who: x.who, sens: x.sens })).sort((a, b) => a.ms - b.ms).slice(0, 400);
+    if (Array.isArray(raw.seqs)) d.seqs = raw.seqs.map(cleanSeq).filter(Boolean).slice(0, 500);
     if (isFinite(raw.pos) && raw.pos >= 0) d.pos = Math.round(raw.pos);      // dernière image regardée : la reprise se fait au même endroit
     const f = raw.frames && typeof raw.frames === "object" ? raw.frames : {};
     Object.keys(f).forEach((k) => {
@@ -135,6 +136,26 @@
     });
     return { added, refused };
   }
+  /* Séquences d'images CONSÉCUTIVES où le ballon est suivi (suivi assisté) : { id, debut, fin, secondes, fps, pts: [[ms, u, v, confiance, "clic" | "suivi"]] }.
+     « clic » = John a posé le point lui-même ; « suivi » = le programme l'a suivi sans que John le corrige (confiance donnée). Une image sans ballon visible s'arrête là : pas de point. */
+  function cleanSeq(s) {
+    if (!s || typeof s !== "object" || !Array.isArray(s.pts)) return null;
+    const pts = s.pts.filter((p) => Array.isArray(p) && Number.isInteger(p[0]) && p[0] >= 0 && isFinite(p[1]) && isFinite(p[2]) && p[1] >= 0 && p[2] >= 0 && (p[4] === "clic" || p[4] === "suivi"))
+      .map((p) => [p[0], Math.round(p[1] * 10) / 10, Math.round(p[2] * 10) / 10, isFinite(p[3]) ? Math.round(p[3] * 1000) / 1000 : 0, p[4]]).sort((a, b) => a[0] - b[0]).slice(0, 20000);
+    if (!pts.length) return null;
+    return { id: typeof s.id === "string" ? s.id.slice(0, 20) : "s" + pts[0][0], debut: pts[0][0], fin: pts[pts.length - 1][0], secondes: isFinite(s.secondes) && s.secondes >= 0 ? Math.round(s.secondes * 10) / 10 : 0, fps: isFinite(s.fps) && s.fps > 0 ? Math.round(s.fps * 100) / 100 : 30, pts };
+  }
+  function addSeq(d, s) {
+    const c = cleanSeq(s); if (!c) return null;
+    if (!Array.isArray(d.seqs)) d.seqs = [];
+    // une nouvelle séquence qui recouvre une ancienne la remplace (John a refait le passage)
+    d.seqs = d.seqs.filter((o) => o.fin < c.debut || o.debut > c.fin);
+    d.seqs.push(c); d.seqs.sort((a, b) => a.debut - b.debut);
+    return c;
+  }
+  function removeSeq(d, id) { const n = (d.seqs || []).length; d.seqs = (d.seqs || []).filter((o) => o.id !== id); return d.seqs.length < n; }
+  function seqCounts(d) { const l = d.seqs || []; return { sequences: l.length, images: l.reduce((a, s) => a + s.pts.length, 0), clics: l.reduce((a, s) => a + s.pts.filter((p) => p[4] === "clic").length, 0), secondes: Math.round(l.reduce((a, s) => a + (s.secondes || 0), 0) * 10) / 10 }; }
+
   function counts(d) {
     const c = { vu: 0, aucun: 0, incertain: 0, imagesJoueurs: 0, cadres: 0, changements: (d.subs || []).length };
     Object.keys(d.frames).forEach((k) => {
@@ -163,5 +184,5 @@
   function trainingBalls(d) {
     return Object.keys(d.frames).filter((k) => d.frames[k].ball && d.frames[k].ball.state !== "incertain").map((k) => Object.assign({ ms: Number(k) }, d.frames[k].ball)).sort((a, b) => a.ms - b.ms);
   }
-  return { GRID_FPS, TEAMS, MIN_BOX, msKey, gridMs, snap, gridCount, create, normalize, setBall, clearBall, addBox, boxes, removeBox, setBoxTeam, setBoxWho, setPlayersDone, addPerson, removePerson, addSub, removeSub, importPersons, counts, nextTodo, trainingBalls };
+  return { GRID_FPS, TEAMS, MIN_BOX, msKey, gridMs, snap, gridCount, create, normalize, setBall, clearBall, addBox, boxes, removeBox, setBoxTeam, setBoxWho, setPlayersDone, addPerson, removePerson, addSub, removeSub, importPersons, addSeq, removeSeq, seqCounts, cleanSeq, counts, nextTodo, trainingBalls };
 });
