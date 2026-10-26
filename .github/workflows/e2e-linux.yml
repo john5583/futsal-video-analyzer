@@ -72,6 +72,10 @@ jobs:
         run: xvfb-run -a node tests/e2e/lignes-recalage.js
         env:
           CI: "true"
+      - name: Jamais Qui est-ce pour une personne a la tenue nette (cas 00:32, cinq joueurs en meme temps)
+        run: xvfb-run -a node tests/e2e/qui-est-ce.js
+        env:
+          CI: "true"
       - name: Bancs reconnus tout seuls (fiches, entree reconnue, questions non bloquantes)
         run: xvfb-run -a node tests/e2e/bancs-auto.js
         env:
