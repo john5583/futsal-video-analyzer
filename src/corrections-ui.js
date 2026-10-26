@@ -239,7 +239,7 @@
     try {
       const out = await PL.exportVideo(seq, { fps: 30, onProgress: (p) => { $("cp-bar").style.width = Math.round(p * 100) + "%"; } });
       const r = await api.saveAnimation(out.buffer, name, out.ext);
-      if (r.canceled) { setExporting(false, ""); return; }
+      if (r.canceled) { setExporting(false, "Enregistrement annulé : rien n'a été enregistré."); return; }
       if (r.error) { setExporting(false, ""); App.toast(r.error, true); return; }
       setExporting(false, "Vidéo enregistrée (" + out.ext.toUpperCase() + ") : " + r.path);
       if (out.ext !== "mp4") App.toast("Format WebM utilisé (MP4 non pris en charge sur cet ordinateur). Lisible avec Chrome, Edge ou VLC.");
@@ -297,7 +297,7 @@
         if (renderErr) throw renderErr;
       }
       const r = await api.saveAnimation(out.buffer, name, out.ext);
-      if (r.canceled) { setExporting(false, ""); return; }
+      if (r.canceled) { setExporting(false, "Enregistrement annulé : rien n'a été enregistré."); return; }
       if (r.error) { setExporting(false, ""); App.toast(r.error, true); return; }
       setExporting(false, (kind === "gif" ? "GIF" : out.ext.toUpperCase()) + " enregistré : " + r.path);
       if (kind !== "gif" && out.ext !== "mp4") App.toast("Format WebM utilisé (MP4 non pris en charge sur cet ordinateur). Lisible avec Chrome, Edge ou VLC.");

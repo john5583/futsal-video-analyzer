@@ -1640,6 +1640,7 @@
     const r = await window.fsal.exportBallDataset(items);
     if (r && r.error) App.toast(r.error, true);
     else if (r && !r.canceled) App.toast(items.length + " image(s) exportée(s) dans : " + r.dir);
+    else App.toast("Export annulé : rien n'a été enregistré.");
   }
   function answerBallAt(pt) {
     const a = state.project.ai, ans = D.answerBall(memory(), pt), r = D.applyOne(frames, ans);
