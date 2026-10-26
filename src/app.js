@@ -549,6 +549,7 @@
         else if (action === "video") pickVideo();
         else if (action === "help") showTab("aide");
         else if (action === "labelling" && window.FSLabel) window.FSLabel.open();
+        else if (action === "controle" && window.FSControle) window.FSControle.open();
       });
     }
   }

@@ -104,3 +104,7 @@ jobs:
         run: FSAL_AUDIT_SCENARIOS=court,menus,reouverture,annulation xvfb-run -a node tests/e2e/audit-zero-defaut.js
         env:
           CI: "true"
+      - name: Controle rapide de la qualite (barre O / N / ?, reponses gardees dans le projet, menu)
+        run: xvfb-run -a node tests/e2e/controle-rapide.js
+        env:
+          CI: "true"
