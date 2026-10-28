@@ -79,6 +79,10 @@
     ouvert = true; bar.hidden = false; $("qc-comp").value = comp; charger();
   }
   function fermer() { ouvert = false; if (bar) bar.hidden = true; }
+  /* la barre est fixée en bas de l'écran : dès qu'on quitte l'onglet « Analyse vidéo » (clic sur un onglet, bouton, menu, assistant), elle se ferme
+     (les réponses sont gardées), sinon elle recouvre les boutons des autres onglets */
+  const ongletAnalyse = $("tab-analyse");
+  if (ongletAnalyse) new MutationObserver(() => { if (ouvert && !ongletAnalyse.classList.contains("active")) fermer(); }).observe(ongletAnalyse, { attributes: true, attributeFilter: ["class"] });
 
   window.FSControle = { open: ouvrir, close: fermer, state: () => ({ ouvert, comp, idx, n: liste.length }) };
   const b = $("ai-qc-start"); if (b) b.addEventListener("click", ouvrir);

@@ -83,7 +83,15 @@ const verdicts = (win) => win.evaluate(() => (window.FSAI.ai().controleRapide ||
   must(v.length === 4, "après fermeture et réouverture du programme : les 4 réponses sont là (" + v.length + ")");
   await C.app.evaluate(({ BrowserWindow }) => { BrowserWindow.getAllWindows()[0].webContents.send("menu", "controle"); });
   must(await waitFor(C.win, () => { const b = document.getElementById("qc-bar"); return !!b && !b.hidden; }, 5000), "le menu « Contrôle rapide… » ouvre la barre");
-  must(C.errors.length === 0, "aucune erreur après réouverture");
+  // la barre est fixée en bas de l'écran : quitter l'onglet « Analyse vidéo » la ferme (elle recouvrait les boutons de « Corrections animées »), sans perdre de réponse
+  await C.win.evaluate(() => document.querySelector("#tabs button[data-tab=corrections]").click()); await sleep(300);
+  must(await C.win.evaluate(() => document.getElementById("qc-bar").hidden), "clic sur l'onglet « Corrections animées » : la barre se ferme, elle ne recouvre plus ses boutons");
+  await C.win.evaluate(() => window.FSControle.open()); await sleep(400);
+  must(await C.win.evaluate(() => !document.getElementById("qc-bar").hidden && document.getElementById("tab-analyse").classList.contains("active")), "depuis un autre onglet, le contrôle se rouvre et ramène à l'analyse");
+  await C.win.evaluate(() => window.FSApp.showTab("rapport")); await sleep(300);
+  must(await C.win.evaluate(() => document.getElementById("qc-bar").hidden), "changement d'onglet par le programme (rapport) : la barre se ferme aussi");
+  must((await verdicts(C.win)).length === 4, "changer d'onglet ne fait perdre aucune réponse");
+  must(C.errors.length === 0, "aucune erreur après réouverture et changements d'onglet");
   await C.app.close();
   fs.rmSync(dir, { recursive: true, force: true });
 })().catch((e) => { console.error("ÉCHEC : " + e.stack); process.exit(1); });
