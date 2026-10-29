@@ -55,8 +55,8 @@ function ballAt(t) {
   must((t.match(/Sortie de touche/g) || []).length === 1, "une seule sortie de touche (pas une par image)");
   must(/\(3 à valider, 0 validé\(s\)\)/.test(await win.evaluate(() => document.getElementById("ai-evm-count").textContent)), "compteur : 3 à valider");
   const bil = await win.evaluate(() => document.getElementById("ai-bilan").textContent);
-  must(/Ballon vu sur \d+(,\d)? %/.test(bil) && /PAS une justesse/.test(bil), "bilan de fiabilité : ballon vu, avec la mise en garde « pas une justesse » : " + bil);
-  must(/Personnes identifiées : non évalué/.test(bil), "bilan : ce qui n'est pas calculé est dit « non évalué »");
+  must(/Ballon vu sur \d+(,\d)? %/.test(bil) && /PAS une justesse/.test(bil), "bilan de fiabilité : ballon vu, avec la mise en garde « pas une justesse » (texte : " + (/Ballon vu sur/.test(bil) ? "ok" : bil) + ")");
+  must(/Personnes identifiées : non évalué/.test(bil), "bilan : ce qui n'est pas calculé est dit clairement, sans chiffre inventé");
   // validation Oui / Non
   await win.evaluate(() => { document.querySelectorAll("#ai-evm .ev")[0].querySelector("[data-a=ok]").click(); });
   await win.evaluate(() => { document.querySelectorAll("#ai-evm .ev")[1].querySelector("[data-a=no]").click(); });
@@ -68,7 +68,7 @@ function ballAt(t) {
   await win.evaluate(() => window.FSApp.showTab("rapport"));
   await win.evaluate(() => window.FSApp.showTab("analyse"));
   must(/✔ validé/.test(await txt()) && /✖ écarté/.test(await txt()), "après un changement d'onglet, les réponses sont toujours là");
-  must(/1 validé\(s\), 1 écarté\(s\), 1 à valider/.test(await win.evaluate(() => document.getElementById("ai-bilan").textContent)), "le bilan reprend les réponses données aux événements : " + (await win.evaluate(() => document.getElementById("ai-bilan").textContent)));
+  must(/1 validé\(s\), 1 écarté\(s\), 1 à valider/.test(await win.evaluate(() => document.getElementById("ai-bilan").textContent)), "le bilan reprend les réponses données aux événements");
   must(errors.length === 0, "aucune erreur dans la console ni boîte de dialogue" + (errors.length ? " : " + errors.join(" | ") : ""));
   await app.close();
   if (!process.env.FSAL_E2E_VIDEO) fs.rmSync(dir, { recursive: true, force: true });
