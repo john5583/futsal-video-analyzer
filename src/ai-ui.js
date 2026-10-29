@@ -2,7 +2,7 @@
 (function () {
   "use strict";
   const App = window.FSApp;
-  const KB = window.FutsalKB, HG = window.FutsalHomography, K = window.FutsalKit, P = window.FutsalPipeline, M = window.FutsalMatch, V2 = window.FutsalMatchV2, RG = window.FutsalRegles, E = window.FutsalAnim, D = window.FutsalDoubt, BL = window.FutsalBallLabels, Z = window.FutsalZoom, O = window.FutsalOverlay, Q = window.FutsalQuality, EX = window.FutsalExemples;
+  const KB = window.FutsalKB, HG = window.FutsalHomography, K = window.FutsalKit, P = window.FutsalPipeline, SY = window.FutsalSynchro, M =window.FutsalMatch, V2 = window.FutsalMatchV2, RG = window.FutsalRegles, E = window.FutsalAnim, D = window.FutsalDoubt, BL = window.FutsalBallLabels, Z = window.FutsalZoom, O = window.FutsalOverlay, Q = window.FutsalQuality, EX = window.FutsalExemples;
   const $ = (id) => document.getElementById(id);
   const esc = App.esc;
   const video = App.video, api = App.api, state = App.state;
@@ -313,10 +313,12 @@
       }
     }
     // joueurs détectés
-    const f = preview || live || (frames.length ? P.frameNear(frames, t, 0.8) : null);
+    const fProche = preview || live || (frames.length ? P.frameNear(frames, t, 0.8) : null);
+    // Image arrêtée sur une image d'analyse : silhouette de cette image. Sinon (lecture, ou entre deux images d'analyse) : positions calculées à l'instant EXACT de la vidéo (src/ai/synchro.js).
+    const still = !preview && !live && !!fProche && video.paused && Math.abs(fProche.t - t) < 0.15;
+    const f = preview || live || still ? fProche : (frames.length ? SY.frameAt(frames, t) : null);
     if (f && $("ov-boxes").checked) {
       // Jamais de cadre. Image arrêtée : silhouette FIABLE de la personne (calculée en arrière-plan, 1 à 2 s) ; sinon, et en lecture, cercle au sol.
-      const still = !preview && !live && video.paused && Math.abs(f.t - t) < 0.15;
       const ceGen = still ? contoursReady(f) : null;
       if (ceGen) drawContours(ctx, f); else if (still) scheduleContours(f);
       const sil = new Set(ceGen ? ceGen.items.map((it) => it.id) : []), hInv = groundInverse(f);
@@ -421,7 +423,7 @@
     box.hidden = !has;
     if (!has) return;
     const t = video.currentTime || 0;
-    const f = live || P.frameNear(frames, t, 1.2);
+    const f = live || SY.frameAt(frames, t);   // même instant exact que la vidéo (entre deux images d'analyse), jamais l'image la plus proche
     $("mm-time").textContent = App.fmt(live ? live.t : t);
     const trails = {};
     if (!live && f && $("ov-trails").checked) {
