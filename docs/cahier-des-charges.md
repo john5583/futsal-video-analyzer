@@ -62,8 +62,10 @@ Chaque PR répond, point par point, à ceci :
 À reconnaître et à montrer pour validation en quelques secondes : **but marqué**, **sortie de balle** (touche, fond), **phase arrêtée**, **corner**, **penalty**, **coup franc**. Ils se déduisent du terrain, des buts, du ballon et des joueurs : ils ne sont fiables que si ces bases le sont. Ordre : but marqué et sortie d'abord, puis phases arrêtées, corner, penalty, coup franc. Aujourd'hui le programme détecte la position des buts (poteaux) mais **aucun** de ces événements.
 
 ## 10. Chantiers ouverts (état au 2026-10-29)
-- Terrain : tracé faux à 07:11–08:36 sur 20261019_212111 (couleur noire choisie, peu de lignes noires) ; mesure faite seulement de 0 à 215 s. En cours : lignes multicolores reliées par la géométrie, verdict « sûr / non sûr », mesure sur 13 min.
-- Événements du match (§9) : non faits.
+- Terrain : **fait et mesuré sur 20261019_212111 entière** (écart moyen 19,2 → 7,4 px, pire 111 → 31 px ; voir docs/terrain-mediane-multicolore.md). Une seule salle : autres salles non évaluées. Le verdict « sûr » est plus strict (96,6 % au lieu de 99,9 %) mais ne détecte pas tout.
+- Bilan de fiabilité par vidéo (§7) : fait (terrain sûr, ballon vu, plages à regarder) ; la justesse du ballon et des identités reste non évaluée dans ce bilan.
+- Événements du match (§9) : **proposés à valider** (sortie de touche/fond, but, phase arrêtée, corner, penalty) d'après le ballon ; testés sur données simulées seulement, **non mesurés sur un vrai match** ; coup franc précis non reconnu.
+- Ballon (§8) : ballon de départ en un clic, ballon à l'arrêt, ballon tenu : **non faits**. Séparation en couches : piste non testée.
 - Ballon : ≈ 45–61 % retrouvé selon la mesure ; l'objectif est 95/100. Aucune brique externe testée ne fait mieux (PnLCalib, SigLIP, TrackNet V3 écartés). Un entraînement demande des images consécutives étiquetées.
 - Identités par personne : registre des personnes à construire et à mesurer.
 - Questions « Qui est-ce ? » sur des cas évidents : correction en cours.
