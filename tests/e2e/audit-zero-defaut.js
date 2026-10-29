@@ -131,8 +131,14 @@ async function clique(S, item, zone) {
   }
   await sleep(350);
   await win.evaluate(() => document.querySelectorAll("[data-audit]").forEach((x) => x.removeAttribute("data-audit")));
-  const apres = await win.evaluate(EMPREINTE);
-  const ipc1 = await S.app.evaluate(() => globalThis.__ipc + globalThis.__dlg.length);
+  let apres = await win.evaluate(EMPREINTE);
+  let ipc1 = await S.app.evaluate(() => globalThis.__ipc + globalThis.__dlg.length);
+  /* un effet en retard (machine chargée : CI, PC à court de mémoire) n'est pas un élément mort : on attend jusqu'à ~1,5 s de plus avant de conclure */
+  for (let k = 0; k < 11 && avant === apres && ipc1 === ipc0 && S.dialogs.length === nbDlg; k++) {
+    await sleep(100);
+    apres = await win.evaluate(EMPREINTE);
+    ipc1 = await S.app.evaluate(() => globalThis.__ipc + globalThis.__dlg.length);
+  }
   const effet = avant !== apres || ipc1 !== ipc0 || S.dialogs.length !== nbDlg;
   return { statut: effet ? "effet" : "mort", action, erreurs: S.errors.slice(nbErr), dialogues: S.dialogs.slice(nbDlg), texte: await win.evaluate(TEXTE_ERREUR) };
 }
@@ -167,7 +173,12 @@ async function parcourtOnglet(S, tab, rapport, nomScenario, max, opts) {
     if (it.disabled) ligne.statut = it.explic ? "grisé, expliqué" : "grisé SANS explication";
     else {
       if (tab) await neutre(S, tab);
-      const r = await clique(S, it, zone);
+      let r = await clique(S, it, zone);
+      if (r.statut === "introuvable") {   // la page a changé entre le relevé et le clic (un assistant qui se ferme décale les rangs) : on retrouve l'élément par son nom, une fois
+        const l2 = await S.win.evaluate(LISTE, [zone, SELECTEUR]);
+        const it2 = l2.find((x) => x.cle === it.cle && x.visible && !x.disabled);
+        r = it2 ? await clique(S, it2, zone) : { statut: "non cliquable", detail: "not visible : l'élément a disparu avant le clic" };
+      }
       if (r.statut === "non cliquable" && /not visible|detached|not attached/.test(r.detail || "")) { ligne.statut = "plus affiché après un clic précédent (non compté)"; }
       else if (r.statut === "mort") {   // deuxième chance : état où l'action a un sens (vidéo avancée, zoom, valeur différente)
         await S.win.evaluate(() => { const v = document.querySelector("video"); if (v && v.readyState >= 1) { v.pause(); v.currentTime = Math.min(3, (v.duration || 3) - 0.5); } const z = document.getElementById("zm-reset"); if (z) z.click(); const zi = document.getElementById("zm-in"); if (zi) zi.click(); document.querySelectorAll("input[type=search], input[type=text]").forEach((e) => { if (e.id !== "p-name" && !e.id.startsWith("p-")) { e.value = ""; } }); });
