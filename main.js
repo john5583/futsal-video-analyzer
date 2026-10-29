@@ -199,6 +199,7 @@ function buildMenu() {
         { type: "separator" },
         { label: "Ouvrir une vidéo…", accelerator: "CmdOrCtrl+Shift+O", click: send("video") },
         { label: "Étiquetage du ballon et des joueurs…", accelerator: "CmdOrCtrl+E", click: send("labelling") },
+        { label: "Contrôle rapide de la qualité…", accelerator: "CmdOrCtrl+K", click: send("controle") },
         { type: "separator" },
         { label: "Quitter", role: "quit" }
       ]

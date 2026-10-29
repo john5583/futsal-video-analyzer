@@ -226,6 +226,7 @@
             <div class="muted" style="padding:4px">Étiquettes du ballon (clic droit ou clic sur la vidéo puis « Le ballon est ici ») : <span id="ai-bl-count">aucune étiquette</span>
               <button id="ai-bl-export" class="ghost" disabled title="Enregistre les images étiquetées dans un dossier de ton choix, pour entraîner le détecteur plus tard. Rien n'est envoyé sur Internet.">Exporter les images</button>
               <button id="ai-bs-start" class="ghost" title="Le programme te montre des images une à une avec le ballon qu'il propose : tu valides, tu corriges ou tu dis « aucun ballon visible ». Seules tes réponses servent à entraîner le détecteur.">Session d'étiquetage</button>
+              <button id="ai-qc-start" class="ghost" title="Le programme choisit des images au hasard et te montre ce qu'il a trouvé : tu réponds Oui / Non / Incertain. Sert à mesurer la qualité sur ta vidéo.">Contrôle rapide…</button>
               <button id="ai-bs-start-all" class="ghost" title="Toutes les images de la plage analysée, une par une (pour mesurer sur un match entier) ; environ 1 image sur 15 est une image de contrôle sans proposition.">Session complète (mesure)</button></div>
             <div id="ai-bs-box" hidden style="padding:6px;border:1px solid var(--line,#334);border-radius:8px;margin:4px 0">
               <div id="ai-bs-text" style="margin-bottom:6px"></div>
@@ -503,5 +504,7 @@
 <script src="corrections-ui.js"></script>
 <script src="plan-ui.js"></script>
 <script src="labelling-ui.js"></script>
+<script src="ai/controle.js"></script>
+<script src="controle-ui.js"></script>
 </body>
 </html>
