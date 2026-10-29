@@ -173,7 +173,12 @@ async function parcourtOnglet(S, tab, rapport, nomScenario, max, opts) {
     if (it.disabled) ligne.statut = it.explic ? "grisé, expliqué" : "grisé SANS explication";
     else {
       if (tab) await neutre(S, tab);
-      const r = await clique(S, it, zone);
+      let r = await clique(S, it, zone);
+      if (r.statut === "introuvable") {   // la page a changé entre le relevé et le clic (un assistant qui se ferme décale les rangs) : on retrouve l'élément par son nom, une fois
+        const l2 = await S.win.evaluate(LISTE, [zone, SELECTEUR]);
+        const it2 = l2.find((x) => x.cle === it.cle && x.visible && !x.disabled);
+        r = it2 ? await clique(S, it2, zone) : { statut: "non cliquable", detail: "not visible : l'élément a disparu avant le clic" };
+      }
       if (r.statut === "non cliquable" && /not visible|detached|not attached/.test(r.detail || "")) { ligne.statut = "plus affiché après un clic précédent (non compté)"; }
       else if (r.statut === "mort") {   // deuxième chance : état où l'action a un sens (vidéo avancée, zoom, valeur différente)
         await S.win.evaluate(() => { const v = document.querySelector("video"); if (v && v.readyState >= 1) { v.pause(); v.currentTime = Math.min(3, (v.duration || 3) - 0.5); } const z = document.getElementById("zm-reset"); if (z) z.click(); const zi = document.getElementById("zm-in"); if (zi) zi.click(); document.querySelectorAll("input[type=search], input[type=text]").forEach((e) => { if (e.id !== "p-name" && !e.id.startsWith("p-")) { e.value = ""; } }); });
