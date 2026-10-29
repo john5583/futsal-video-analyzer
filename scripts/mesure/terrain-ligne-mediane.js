@@ -1,6 +1,10 @@
 /* Écart (px, échelle 1920) entre des points de la ligne médiane de 20261019_212111 lus à la main sur l'image (instants 71, 110, 160, 210 s) et la ligne médiane du modèle projetée par un suivi de caméra (sortie de FutsalPipeline.suiviCamera). Usage : node scripts/mesure/terrain-ligne-mediane.js suivi.json */
 const fs=require("fs"),HG=require("../../src/ai/homography");
-const GT={71:[[1237,300],[1228,400],[1218,500],[1214,550]],110:[[1236,280],[1230,380],[1224,460]],160:[[1072,220],[1068,300],[1066,400],[1064,480]],210:[[1395,350],[1385,400],[1375,450],[1362,490]]};
+const GT={71:[[1237,300],[1228,400],[1218,500],[1214,550]],110:[[1236,280],[1230,380],[1224,460]],160:[[1072,220],[1068,300],[1066,400],[1064,480]],210:[[1395,350],[1385,400],[1375,450],[1362,490]],
+  /* 2026-10-29 : instants où John voit un tracé faux (lus à la main sur l'image 1920×1080, ± 5 px ; la ligne médiane y est noire, jaune, rouge puis noire sur une même droite) */
+  431:[[1188,250],[1174,400],[1160,550],[1147,700]],
+  442:[[340,300],[393,450],[446,600],[516,800],[586,1000]],
+  516:[[1809,250],[1750,400],[1691,550],[1632,700],[1593,800]]};
 const [f,L,W]=[process.argv[2],40,20];const d=JSON.parse(fs.readFileSync(f,"utf8")),r=d.r;
 const VW=1920,VH=1080;
 function ligne(h){ // ligne médiane x=20, y 0..20 -> pixels 1920

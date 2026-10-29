@@ -218,6 +218,10 @@
             <div id="ai-stats" class="ai-stats"></div>
             <details id="ai-pers-box" class="ai-pers" hidden><summary><b>Personnes reconnues</b> <span id="ai-pers-sum" class="muted"></span></summary><p class="muted" style="padding:0 4px">Une fiche par personne vue sur le terrain. Deux morceaux de piste ne sont rattachés que s'il n'y a aucune ambiguïté ; au moindre doute la personne reste « non identifiée ». Les numéros de maillot et les tenues par personne ne sont pas encore lus.</p><div id="ai-pers" class="events"></div></details>
             <details id="ai-cov" hidden><summary><b>Couverture des erreurs (analyse v2)</b> <span id="ai-cov-sum" class="muted"></span></summary><div id="ai-cov-list"></div></details>
+            <h3 class="ai-h">Fiabilité de cette analyse</h3>
+            <div id="ai-bilan" class="muted" style="padding:6px"></div>
+            <h3 class="ai-h">Événements du match à valider <span id="ai-evm-count" class="muted"></span></h3>
+            <div id="ai-evm" class="events"></div>
             <h3 class="ai-h">Erreurs suggérées <span id="ai-sugg-count" class="muted"></span></h3>
             <div class="ai-run"><button id="ai-accept-all">Tout accepter</button><button id="ai-clear-sugg" class="ghost">Tout écarter</button></div>
             <div id="ai-sugg" class="events"></div>
@@ -498,6 +502,8 @@
 <script src="ai/balltrack.js"></script>
 <script src="ai/pipeline.js"></script>
 <script src="ai/synchro.js"></script>
+<script src="ai/evenements.js"></script>
+<script src="ai/bilan.js"></script>
 <script src="ai/overlay.js"></script>
 <script src="report.js"></script>
 <script src="app.js"></script>

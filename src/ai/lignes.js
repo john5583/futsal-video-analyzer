@@ -29,10 +29,19 @@
 
   /* ---------- carte des traits ---------- */
   /* rgba : { data (RGBA), width, height } ; couleur : clé de CF.COLORS. Rend { w, h, mask, D } (D : distance au trait le plus proche, en pixels). */
-  function carte(rgba, couleur, profil) {
+  /* extra (facultatif) : autres couleurs de lignes (clés de CF.COLORS) que la LIGNE MÉDIANE seule peut avoir sur un même trait (ex. noir, jaune, rouge, noir).
+     Elles donnent une seconde carte Dm (union des traits) utilisée UNIQUEMENT pour les points du modèle de la médiane ; les autres lignes restent sur la couleur choisie. */
+  function carte(rgba, couleur, profil, extra) {
     if (couleur === "custom" ? !(profil && profil.tol > 0) : !CF.COLORS[couleur]) throw new Error("Couleur de lignes inconnue");
     const work = CF.prepare(rgba, rgba.width), rm = CF.ridgeMap(work, couleur, couleur === "custom" ? profil : null);
-    return { w: rm.w, h: rm.h, mask: rm.mask, D: CF.distanceTransform(rm.mask, rm.w, rm.h) };
+    const c = { w: rm.w, h: rm.h, mask: rm.mask, D: CF.distanceTransform(rm.mask, rm.w, rm.h) };
+    const autres = (extra || []).filter((k) => k !== couleur && CF.COLORS[k]);
+    if (autres.length) {
+      const u = Uint8Array.from(rm.mask);
+      autres.forEach((k) => { const m = CF.ridgeMap(work, k).mask; for (let i = 0; i < u.length; i++) if (m[i]) u[i] = 1; });
+      c.Dm = CF.distanceTransform(u, rm.w, rm.h);
+    }
+    return c;
   }
 
   /* ---------- modèle du terrain : polylignes (mètres) ---------- */
@@ -87,41 +96,42 @@
   /* ---------- projection du modèle et score ---------- */
   /* Points du modèle visibles dans l'image selon Hw (pixels -> terrain) : { q: Float32Array [u, v, ...], w, tx, ty (tangente en pixels), n }. */
   function projeter(mod, Hw, w, h, marge) {
-    const Hi = HG.invert(Hw), m = marge == null ? 0 : marge, q = [], ws = [], tg = [];
+    const Hi = HG.invert(Hw), m = marge == null ? 0 : marge, q = [], ws = [], tg = [], gm = [];
     mod.pts.forEach((p) => {
       const a = HG.apply(Hi, p.x, p.y), b = HG.apply(Hi, p.x + p.tx * 0.2, p.y + p.ty * 0.2);
       if (!isFinite(a[0]) || !isFinite(a[1]) || !isFinite(b[0]) || !isFinite(b[1])) return;
       if (a[0] < -m || a[1] < -m || a[0] > w + m || a[1] > h + m) return;
       const dx = b[0] - a[0], dy = b[1] - a[1], d = Math.hypot(dx, dy) || 1;
-      q.push(a[0], a[1]); ws.push(p.w * Math.min(LONG_MAX, d * 1.5)); tg.push(dx / d, dy / d);
+      q.push(a[0], a[1]); ws.push(p.w * Math.min(LONG_MAX, d * 1.5)); tg.push(dx / d, dy / d); gm.push(p.g === "mediane" ? 1 : 0);
     });
-    return { q: Float32Array.from(q), w: Float32Array.from(ws), tg: Float32Array.from(tg), n: ws.length };
+    return { q: Float32Array.from(q), w: Float32Array.from(ws), tg: Float32Array.from(tg), gm: Uint8Array.from(gm), n: ws.length };
   }
   /* Correction c = [tx, ty, rot (rad), ln(échelle)] autour du centre de l'image : p = centre + s R (q - centre) + t. */
   /* Vote : longueur de ligne (en nombre de points pondérés) qui tombe sur un trait ; un point sans trait ne coûte rien (dans cette salle seules
      quelques lignes du modèle sont de la couleur choisie). large : largeur du noyau (px), grande au début de la recherche pour attirer de loin. */
-  function vote(P, c, D, w, h, large, pas) {
+  function vote(P, c, D, w, h, large, pas, Dm) {
     const cs = Math.cos(c[2]), sn = Math.sin(c[2]), s = Math.exp(c[3]), cx = w / 2, cy = h / 2, st = pas || 1, l2 = large * large;
     let somme = 0;
     for (let i = 0; i < P.n; i += st) {
       const x = P.q[2 * i] - cx, y = P.q[2 * i + 1] - cy;
       const u = cx + s * (cs * x - sn * y) + c[0], v = cy + s * (sn * x + cs * y) + c[1];
       if (u < 1 || v < 1 || u >= w - 2 || v >= h - 2) continue;       // sorti de l'image : ne compte pas
-      const d = D[(v | 0) * w + (u | 0)];
+      const d = (Dm && P.gm && P.gm[i] ? Dm : D)[(v | 0) * w + (u | 0)];
       if (d < large) somme += P.w[i] * (1 - (d * d) / l2);
     }
     return somme * st;
   }
   /* Détails d'une correction : nombre de points (pondéré) sur un trait, écart moyen (px) de ces points, observabilité des directions des traits vus. */
-  function detail(P, c, D, w, h) {
+  function detail(P, c, D, w, h, Dm) {
     const cs = Math.cos(c[2]), sn = Math.sin(c[2]), s = Math.exp(c[3]), cx = w / 2, cy = h / 2;
-    let tot = 0, sur = 0, dm = 0, nm = 0, sxx = 0, sxy = 0, syy = 0;
+    let tot = 0, sur = 0, dm = 0, nm = 0, sxx = 0, sxy = 0, syy = 0, medTot = 0, medSur = 0;
     for (let i = 0; i < P.n; i++) {
       const x = P.q[2 * i] - cx, y = P.q[2 * i + 1] - cy;
       const u = cx + s * (cs * x - sn * y) + c[0], v = cy + s * (sn * x + cs * y) + c[1];
       if (u < 1 || v < 1 || u >= w - 2 || v >= h - 2) continue;
-      const d = D[(v | 0) * w + (u | 0)];
+      const d = (Dm && P.gm && P.gm[i] ? Dm : D)[(v | 0) * w + (u | 0)];
       tot += P.w[i];
+      if (P.gm && P.gm[i]) { medTot += P.w[i]; if (d <= PROCHE) medSur += P.w[i]; }
       if (d <= PROCHE) {
         sur += P.w[i]; dm += d; nm++;
         const tx = cs * P.tg[2 * i] - sn * P.tg[2 * i + 1], ty = sn * P.tg[2 * i] + cs * P.tg[2 * i + 1], nx = -ty, ny = tx;   // normale au trait
@@ -129,7 +139,7 @@
       }
     }
     const tr = sxx + syy, det = sxx * syy - sxy * sxy, mini = nm ? (tr / 2 - Math.sqrt(Math.max(0, (tr * tr) / 4 - det))) / nm : 0;
-    return { sur, n: nm, ecart: nm ? dm / nm : null, observ: mini, vis: tot };
+    return { sur, n: nm, ecart: nm ? dm / nm : null, observ: mini, vis: tot, medSur, medVis: medTot };
   }
 
   /* Recherche locale (pattern search) de la meilleure correction à partir de c0, dans les limites lim ; le noyau du vote se resserre peu à peu. */
@@ -270,19 +280,20 @@
   }
   /* Points du modèle vus par la pose : même forme que projeter(). */
   function projeterPose(mod, pose, w, h) {
-    const q = [], ws = [], tg = [];
+    const q = [], ws = [], tg = [], gm = [];
     mod.pts.forEach((p) => {
       const a = poseVersImage(pose, w, h, p.x, p.y, 0), b = poseVersImage(pose, w, h, p.x + p.tx * 0.2, p.y + p.ty * 0.2, 0);
       if (!a || !b || a[0] < 0 || a[1] < 0 || a[0] > w || a[1] > h) return;
       const dx = b[0] - a[0], dy = b[1] - a[1], d = Math.hypot(dx, dy) || 1;
-      q.push(a[0], a[1]); ws.push(p.w * Math.min(LONG_MAX, d * 1.5)); tg.push(dx / d, dy / d);
+      q.push(a[0], a[1]); ws.push(p.w * Math.min(LONG_MAX, d * 1.5)); tg.push(dx / d, dy / d); gm.push(p.g === "mediane" ? 1 : 0);
     });
-    return { q: Float32Array.from(q), w: Float32Array.from(ws), tg: Float32Array.from(tg), n: ws.length };
+    return { q: Float32Array.from(q), w: Float32Array.from(ws), tg: Float32Array.from(tg), gm: Uint8Array.from(gm), n: ws.length };
   }
   const SANS = [0, 0, 0, 0];
   /* Recherche locale de la pose (cap, inclinaison, champ, roulis ; position bornée près de pose0) qui met le plus de lignes du modèle sur les traits. */
   function affinerPose(carteL, pose0, mod, opts) {
     const o = Object.assign({ ouvert: false, posRange: [1.5, 1.5, 0.6] }, opts || {}), { w, h, D } = carteL;
+    let Dm = carteL.Dm || null;
     const marge = o.ouvert ? [14, 9, 18, 6] : [4, 2.5, 7, 3];         // cap°, inclinaison°, champ (%), roulis° : limites autour de la pose de départ
     const lo = pose0.slice(), hi = pose0.slice();
     for (let k = 0; k < 3; k++) { lo[k] = pose0[k] - o.posRange[k]; hi[k] = pose0[k] + o.posRange[k]; }
@@ -293,7 +304,7 @@
       for (let k = 0; k < 3; k++) { lo[k] = Math.max(lo[k], o.ref[k] - 3); hi[k] = Math.min(hi[k], o.ref[k] + 3); }
       lo[4] = Math.max(lo[4], 5); lo[5] = Math.max(lo[5], o.ref[5] * 0.7); hi[5] = Math.min(hi[5], o.ref[5] * 1.4);
     }
-    const fv = (pose, large) => vote(projeterPose(mod, pose, w, h), SANS, D, w, h, large, 1);
+    const fv = (pose, large) => vote(projeterPose(mod, pose, w, h), SANS, D, w, h, large, 1, Dm);
     const raf = (start) => {
       let p = start.slice();
       const pas = [0.3, 0.3, 0.12, 0.8, 0.5, 1.2, 0.4], noyaux = [12, 7, 4, 3, 3];
@@ -314,13 +325,15 @@
     };
     const P0 = projeterPose(mod, pose0, w, h);
     if (P0.n < 60) return { ok: false, changed: false, raison: "trop peu de terrain visible" };
-    const v0 = vote(P0, SANS, D, w, h, 3, 1), d0 = detail(P0, SANS, D, w, h);
+    /* Adaptatif : si la couleur choisie couvre déjà l'essentiel de la ligne médiane visible, les autres couleurs ne servent pas (salle à lignes d'une seule couleur : rien ne change). */
+    if (Dm) { const dd = detail(P0, SANS, D, w, h); if (dd.medVis > 0 && dd.medSur / dd.medVis >= 0.5) Dm = null; }
+    const v0 = vote(P0, SANS, D, w, h, 3, 1, Dm), d0 = detail(P0, SANS, D, w, h, Dm);
     const starts = [pose0.slice()];
     if (o.ouvert) {                                  // plusieurs départs sur la plage de cap / inclinaison
       for (const dy of [-0.6, 0, 0.6]) for (const dp of [-0.6, 0, 0.6]) if (dy || dp) { const p = pose0.slice(); p[3] += dy * marge[0]; p[4] += dp * marge[1]; starts.push(p); }
     }
     const sols = starts.map(raf).sort((a, b) => b.f - a.f);
-    const best = sols[0], P1 = projeterPose(mod, best.p, w, h), d1 = detail(P1, SANS, D, w, h);
+    const best = sols[0], P1 = projeterPose(mod, best.p, w, h), d1 = detail(P1, SANS, D, w, h, Dm);
     const autre = sols.find((s) => Math.abs(s.p[3] - best.p[3]) > 1.5 || Math.abs(s.p[4] - best.p[4]) > 1 || Math.abs(s.p[5] / best.p[5] - 1) > 0.05);
     const info = { vote0: v0, vote1: best.f, detail0: d0, detail1: d1, pose: best.p };
     const cale0 = d0.sur >= SEUILS.pointsMin && d0.observ >= SEUILS.observ && best.f <= v0 * (1 + SEUILS.gainRel);
@@ -456,5 +469,5 @@
     return { vote: vote(P, c0, carteL.D, carteL.w, carteL.h, 3, 1), n: d.n, ecart: d.ecart, observ: d.observ, vis: d.vis };
   }
 
-  return { profilDepuisClic, confusion, proposerDimensions, voteDimensions, grilleDimensions, choisirDimensions, DIM_OPTS, ecartSol, solSous, poseApres, poseDepuisH, hDepuisPose, projeterPose, affinerPose, poseVersImage, PLAGE, PROCHE, LIM, SEUILS, GROUPES, carte, modele, groupesDepuisRepères, projeter, vote, detail, raffiner, affiner, matG, partie, mesure };
+  return { COULEURS_MEDIANE: ["black", "yellow", "red"], profilDepuisClic, confusion, proposerDimensions, voteDimensions, grilleDimensions, choisirDimensions, DIM_OPTS, ecartSol, solSous, poseApres, poseDepuisH, hDepuisPose, projeterPose, affinerPose, poseVersImage, PLAGE, PROCHE, LIM, SEUILS, GROUPES, carte, modele, groupesDepuisRepères, projeter, vote, detail, raffiner, affiner, matG, partie, mesure };
 });

@@ -146,3 +146,8 @@ jobs:
         run: xvfb-run -a node tests/e2e/registre-personnes.js
         env:
           CI: "true"
+      - name: Evenements du match (sortie, phase arretee, but, validation Oui / Non, reponses gardees) et bilan de fiabilite
+        if: ${{ inputs.groupe == '' }}
+        run: xvfb-run -a node tests/e2e/evenements.js
+        env:
+          CI: "true"
