@@ -18,6 +18,7 @@
       "<div class=\"qc-btns\"><button id=\"qc-prev\" type=\"button\" class=\"ghost\" title=\"Image précédente (←)\">◀</button><button id=\"qc-oui\" type=\"button\" class=\"primary\" title=\"Oui, c'est juste (O)\">Oui (O)</button><button id=\"qc-non\" type=\"button\" title=\"Non, c'est faux (N)\">Non (N)</button><button id=\"qc-inc\" type=\"button\" class=\"ghost\" title=\"Tu hésites : ni pour ni contre (?)\">Incertain (?)</button><button id=\"qc-next\" type=\"button\" class=\"ghost\" title=\"Image suivante (→)\">▶</button></div>" +
       "<div id=\"qc-sum\" class=\"muted qc-sum\"></div>";
     document.body.appendChild(bar);
+    if (window.ResizeObserver) new ResizeObserver(() => reserve()).observe(bar);
     const sel = $("qc-comp");
     Object.keys(C.COMPS).forEach((k) => { const o = document.createElement("option"); o.value = k; o.textContent = C.COMPS[k].nom; sel.appendChild(o); });
     sel.addEventListener("change", () => { comp = sel.value; charger(); });
@@ -76,9 +77,16 @@
     if (!frames.length) { App.toast("Faites d'abord une analyse : le contrôle rapide vérifie ce que le programme a trouvé."); return; }
     if (!bar) construire();
     App.showTab("analyse");
-    ouvert = true; bar.hidden = false; $("qc-comp").value = comp; charger();
+    ouvert = true; bar.hidden = false; $("qc-comp").value = comp; reserve(); charger();
   }
-  function fermer() { ouvert = false; if (bar) bar.hidden = true; }
+  /* la barre est fixée par-dessus la page : tant qu'elle est ouverte, on réserve sa hauteur sous l'onglet pour que tous ses boutons restent atteignables au-dessus */
+  function reserve() { const m = document.querySelector("main"); if (m) m.style.paddingBottom = ouvert && bar && !bar.hidden ? (bar.offsetHeight + 24) + "px" : ""; }
+  function fermer() { ouvert = false; if (bar) bar.hidden = true; reserve(); }
+  window.addEventListener("resize", reserve);
+  /* la barre est fixée en bas de l'écran : dès qu'on quitte l'onglet « Analyse vidéo » (clic sur un onglet, bouton, menu, assistant), elle se ferme
+     (les réponses sont gardées), sinon elle recouvre les boutons des autres onglets */
+  const ongletAnalyse = $("tab-analyse");
+  if (ongletAnalyse) new MutationObserver(() => { if (ouvert && !ongletAnalyse.classList.contains("active")) fermer(); }).observe(ongletAnalyse, { attributes: true, attributeFilter: ["class"] });
 
   window.FSControle = { open: ouvrir, close: fermer, state: () => ({ ouvert, comp, idx, n: liste.length }) };
   const b = $("ai-qc-start"); if (b) b.addEventListener("click", ouvrir);
