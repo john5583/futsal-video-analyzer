@@ -131,8 +131,14 @@ async function clique(S, item, zone) {
   }
   await sleep(350);
   await win.evaluate(() => document.querySelectorAll("[data-audit]").forEach((x) => x.removeAttribute("data-audit")));
-  const apres = await win.evaluate(EMPREINTE);
-  const ipc1 = await S.app.evaluate(() => globalThis.__ipc + globalThis.__dlg.length);
+  let apres = await win.evaluate(EMPREINTE);
+  let ipc1 = await S.app.evaluate(() => globalThis.__ipc + globalThis.__dlg.length);
+  /* un effet en retard (machine chargée : CI, PC à court de mémoire) n'est pas un élément mort : on attend jusqu'à ~1,5 s de plus avant de conclure */
+  for (let k = 0; k < 11 && avant === apres && ipc1 === ipc0 && S.dialogs.length === nbDlg; k++) {
+    await sleep(100);
+    apres = await win.evaluate(EMPREINTE);
+    ipc1 = await S.app.evaluate(() => globalThis.__ipc + globalThis.__dlg.length);
+  }
   const effet = avant !== apres || ipc1 !== ipc0 || S.dialogs.length !== nbDlg;
   return { statut: effet ? "effet" : "mort", action, erreurs: S.errors.slice(nbErr), dialogues: S.dialogs.slice(nbDlg), texte: await win.evaluate(TEXTE_ERREUR) };
 }
