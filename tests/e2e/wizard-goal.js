@@ -52,12 +52,13 @@ const FAKE = () => { FSAI.segmentImpl = async (req) => ({ masks: req.boxes.map((
   await win.mouse.click(x, y); await win.waitForTimeout(200);
   must(await win.evaluate(() => FSWiz.state.T.clicks.length) === 1, "1er clic enregistré");
   must(await win.evaluate(() => !!FSWiz.state.T.pose), "pose calculée après un clic");
+  for (let i = 0; i < 3; i++) await win.click("[data-act=skipTarget]");   // centre du rond, 2 bouts de médiane : pas dans cette scène
   [ix, iy] = vid(9, 10); [x, y] = at(ix, iy); await win.mouse.click(x, y); await win.waitForTimeout(200);
   must(await win.evaluate(() => FSWiz.state.T.clicks.length) === 2, "2e clic (9 m)");
   out("erreur de reprojection:", await win.evaluate(() => FSWiz.state.T.err.toFixed(2)), "px");
   await win.click("[data-act=undoClick]"); must(await win.evaluate(() => FSWiz.state.T.clicks.length) === 1, "annuler le dernier clic");
   [ix, iy] = vid(9, 10); [x, y] = at(ix, iy); await win.mouse.click(x, y); await win.waitForTimeout(200);
-  await win.click("[data-act=skipTarget]"); await win.click("[data-act=skipTarget]");
+  await win.click("[data-act=skipTarget]"); await win.click("[data-act=skipTarget]");   // les 2 bouts des 6 m
   must(!(await win.evaluate(() => FSWiz.state.T.msg)), "pas de message d'erreur : " + (await win.evaluate(() => FSWiz.state.T.msg)));
   await win.click("[data-act=validateTerrain][data-side=def]");
   await waitFor(win, () => FSWiz.state.step === "players", null, { timeout: 10000 });
