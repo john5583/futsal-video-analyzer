@@ -216,6 +216,7 @@
             </div>
             <div id="ai-quality" class="ai-quality" hidden></div>
             <div id="ai-stats" class="ai-stats"></div>
+            <details id="ai-pers-box" class="ai-pers" hidden><summary><b>Personnes reconnues</b> <span id="ai-pers-sum" class="muted"></span></summary><p class="muted" style="padding:0 4px">Une fiche par personne vue sur le terrain. Deux morceaux de piste ne sont rattachés que s'il n'y a aucune ambiguïté ; au moindre doute la personne reste « non identifiée ». Les numéros de maillot et les tenues par personne ne sont pas encore lus.</p><div id="ai-pers" class="events"></div></details>
             <details id="ai-cov" hidden><summary><b>Couverture des erreurs (analyse v2)</b> <span id="ai-cov-sum" class="muted"></span></summary><div id="ai-cov-list"></div></details>
             <h3 class="ai-h">Erreurs suggérées <span id="ai-sugg-count" class="muted"></span></h3>
             <div class="ai-run"><button id="ai-accept-all">Tout accepter</button><button id="ai-clear-sugg" class="ghost">Tout écarter</button></div>
@@ -499,6 +500,7 @@
 <script src="ai/overlay.js"></script>
 <script src="report.js"></script>
 <script src="app.js"></script>
+<script src="ai/registre.js"></script>
 <script src="ai-ui.js"></script>
 <script src="ai/goal.js"></script>
 <script src="ai/court-fit.js"></script>
