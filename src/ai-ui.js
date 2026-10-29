@@ -2,7 +2,7 @@
 (function () {
   "use strict";
   const App = window.FSApp;
-  const KB = window.FutsalKB, HG = window.FutsalHomography, K = window.FutsalKit, P = window.FutsalPipeline, M = window.FutsalMatch, V2 = window.FutsalMatchV2, RG = window.FutsalRegles, E = window.FutsalAnim, D = window.FutsalDoubt, BL = window.FutsalBallLabels, Z = window.FutsalZoom, O = window.FutsalOverlay, Q = window.FutsalQuality, EX = window.FutsalExemples;
+  const KB = window.FutsalKB, HG = window.FutsalHomography, K = window.FutsalKit, P = window.FutsalPipeline, SY = window.FutsalSynchro, EVM = window.FutsalEvenements, BIL = window.FutsalBilan, M =window.FutsalMatch, V2 = window.FutsalMatchV2, RG = window.FutsalRegles, E = window.FutsalAnim, D = window.FutsalDoubt, BL = window.FutsalBallLabels, Z = window.FutsalZoom, O = window.FutsalOverlay, Q = window.FutsalQuality, EX = window.FutsalExemples;
   const $ = (id) => document.getElementById(id);
   const esc = App.esc;
   const video = App.video, api = App.api, state = App.state;
@@ -313,10 +313,12 @@
       }
     }
     // joueurs détectés
-    const f = preview || live || (frames.length ? P.frameNear(frames, t, 0.8) : null);
+    const fProche = preview || live || (frames.length ? P.frameNear(frames, t, 0.8) : null);
+    // Image arrêtée sur une image d'analyse : silhouette de cette image. Sinon (lecture, ou entre deux images d'analyse) : positions calculées à l'instant EXACT de la vidéo (src/ai/synchro.js).
+    const still = !preview && !live && !!fProche && video.paused && Math.abs(fProche.t - t) < 0.15;
+    const f = preview || live || still ? fProche : (frames.length ? SY.frameAt(frames, t) : null);
     if (f && $("ov-boxes").checked) {
       // Jamais de cadre. Image arrêtée : silhouette FIABLE de la personne (calculée en arrière-plan, 1 à 2 s) ; sinon, et en lecture, cercle au sol.
-      const still = !preview && !live && video.paused && Math.abs(f.t - t) < 0.15;
       const ceGen = still ? contoursReady(f) : null;
       if (ceGen) drawContours(ctx, f); else if (still) scheduleContours(f);
       const sil = new Set(ceGen ? ceGen.items.map((it) => it.id) : []), hInv = groundInverse(f);
@@ -421,7 +423,7 @@
     box.hidden = !has;
     if (!has) return;
     const t = video.currentTime || 0;
-    const f = live || P.frameNear(frames, t, 1.2);
+    const f = live || SY.frameAt(frames, t);   // même instant exact que la vidéo (entre deux images d'analyse), jamais l'image la plus proche
     $("mm-time").textContent = App.fmt(live ? live.t : t);
     const trails = {};
     if (!live && f && $("ov-trails").checked) {
@@ -582,6 +584,7 @@
     if (!a || !a.lineColor) return null;
     let c = a.lineColor;
     if (c === "custom") { const p = a.lineProfile || {}; c = "custom" + [p.L, p.a, p.b, p.tol, p.tolL].join(","); }
+    if (Array.isArray(a.couleursMediane) && a.couleursMediane.length) c += "+med:" + a.couleursMediane.join("/");   // autres couleurs de la ligne médiane : un autre suivi
     const l = Number(a.L) || 40, w = Number(a.W) || 20;
     return l === 40 && w === 20 ? c : c + "@" + l + "x" + w;
   }
@@ -605,7 +608,7 @@
     try {
       const r = await P.suiviCamera({
         url: App.getVideoUrl(), calibrations: a.calibrations.map((c) => ({ t: c.t, H: c.H })), signal: ctrl.signal,
-        lineColor: a.lineColor || null, lineProfile: a.lineColor === "custom" ? a.lineProfile : null, L: L(), W: W(), prio: prioLignes(a),
+        lineColor: a.lineColor || null, lineProfile: a.lineColor === "custom" ? a.lineProfile : null, couleursMediane: a.couleursMediane || null, L: L(), W: W(), prio: prioLignes(a),
         onProgress: (p) => {
           run.pct = Math.round((100 * p.done) / p.total); run.t = p.t;
           suiviMsg("Suivi de la caméra : " + run.pct + " % — le terrain se trace déjà jusqu'à " + App.fmt(p.t) + " — reste environ " + fmtEta(p.eta), run.pct);
@@ -1023,7 +1026,45 @@
       list.appendChild(row);
     });
   }
+  /* Événements du match (but, sortie, phase arrêtée, corner, penalty) déduits du ballon : propositions à valider « Oui / Non » ; les réponses sont gardées dans le projet et jamais reposées. */
+  const EVM_NOM = { but: "But", sortie_touche: "Sortie de touche", sortie_fond: "Sortie de fond", corner: "Corner", penalty: "Penalty", phase_arretee: "Phase arrêtée" };
+  function evenementsMatch() {
+    const a = state.project.ai;
+    if (!a || !EVM || !frames.length) return [];
+    const cle = frames.length + ":" + frames[frames.length - 1].t;
+    if (a.evenementsMatchCle !== cle) {
+      const anc = a.evenementsMatch || [];
+      const neufs = EVM.evenements(frames.map((f) => { const o = orient(f); return { t: f.t, ball: o.ball }; }), { L: L(), W: W(), dirAt: () => 1 });
+      a.evenementsMatch = neufs.map((e, i) => { const v = anc.find((x) => x.type === e.type && Math.abs(x.t - e.t) < 1.5); return Object.assign({ sid: "m" + i + "-" + Math.round(e.t * 10) }, e, v && v.statut ? { statut: v.statut } : {}); });
+      a.evenementsMatchCle = cle;
+    }
+    return a.evenementsMatch || [];
+  }
+  /* Bilan de fiabilité : part du terrain sûr, ballon vu, passages à regarder ; gardé dans le projet pour le rapport. Ce qui n'est pas calculé est dit « non évalué ». */
+  function renderBilan() {
+    const box = $("ai-bilan"), a = state.project.ai; if (!box || !BIL || !a) return;
+    a.bilan = BIL.bilan({ camSuivi: a.camSuivi, frames, evenementsMatch: a.evenementsMatch }).map((l) => l.texte);
+    box.innerHTML = a.bilan.map((t) => "<div>" + esc(t) + "</div>").join("");
+  }
+  function renderEvenementsMatch() {
+    const box = $("ai-evm"); if (!box) return;
+    const a = state.project.ai, items = evenementsMatch();
+    box.innerHTML = "";
+    renderBilan();
+    const att = items.filter((e) => !e.statut).length;
+    $("ai-evm-count").textContent = "(" + att + " à valider, " + items.filter((e) => e.statut === "ok").length + " validé(s))";
+    if (!items.length) { box.innerHTML = "<p class=\"muted\" style=\"padding:6px\">Aucun événement proposé : le ballon n'a pas été vu assez longtemps près d'une ligne, d'un but ou immobile (rien n'est deviné).</p>"; return; }
+    items.forEach((e) => {
+      const row = document.createElement("div"); row.className = "ev";
+      row.innerHTML = "<button class=\"t\">" + App.fmt(e.t) + "</button><div><div class=\"lbl\">" + esc(EVM_NOM[e.type] || e.type) + (e.equipe ? (e.equipe === "A" ? " — pour mon équipe" : " — pour l'adversaire") : "") + (e.statut === "ok" ? " ✔ validé" : e.statut === "non" ? " ✖ écarté" : "") + "</div><div class=\"chips\">" + esc(e.note || "") + "</div></div><div class=\"btns\"><button data-a=\"ok\" title=\"Oui, c'est juste\">✔</button><button data-a=\"no\" title=\"Non, ce n'est pas juste\">✖</button></div>";
+      row.querySelector(".t").addEventListener("click", () => App.seek(Math.max(0, e.t - 3)));
+      ["ok", "no"].forEach((k) => row.querySelector("[data-a=" + k + "]").addEventListener("click", () => { e.statut = k === "ok" ? "ok" : "non"; renderEvenementsMatch(); App.changed(); }));
+      box.appendChild(row);
+    });
+    renderBilan();
+  }
   function renderSuggestions() {
+    renderEvenementsMatch();
     renderCoverage();
     const a = state.project.ai, list = $("ai-sugg");
     list.innerHTML = "";

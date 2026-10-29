@@ -654,7 +654,7 @@
     const s = (calibs || []).slice().sort((a, b) => a.t - b.t).map((c) => c.t.toFixed(2) + ":" + (c.H || []).map((v) => Number(v).toPrecision(6)).join(",")).join("|") + "@" + Math.round(duree || 0) + (couleur ? "#" + couleur : "");
     let h = 2166136261;
     for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
-    return (couleur ? "s2-" : "s1-") + h.toString(16);
+    return (couleur ? "s3-" : "s1-") + h.toString(16);
   }
   /* Module de recalage sur les lignes (chargé à la demande : même fichier en navigateur et dans les tests). */
   function lignesMod() {
@@ -664,6 +664,8 @@
   const LIGNES_PAS = 0.9;          // s : un essai de recalage sur les lignes à peu près toutes les 0,9 s
   const LIGNES_PROCHE = 5;         // s : une position à moins de 5 s d'une image confirmée sur les lignes est dite confirmée
   const LIGNES_ECART_MAX = 20;     // s : entre deux images confirmées plus espacées que ça, les positions du milieu ne sont plus dites confirmées
+  const MED_VUE_MIN = 40;           // poids du modèle : en dessous, la ligne médiane est trop peu visible pour juger
+  const MED_PART_MIN = 0.4;         // part de la ligne médiane visible qui doit tomber sur un trait pour dire « tracé sûr »
   const POSE_ERR_MAX = 8;          // px (image de travail) : écart maximal pour dire qu'un calibrage est une vraie caméra (sinon suivi classique, sans lignes)
 
   /* Qualité de chaque position d'un suivi recalé : 2 = lignes retrouvées sur cette image, 1 = propagée entre deux images confirmées proches, 0 = suivi seul (« recalage incertain »).
@@ -708,6 +710,7 @@
     const calibs = (opts.calibrations || []).slice().sort((a, b) => a.t - b.t);
     if (!calibs.length) throw new Error("Aucun calibrage du terrain");
     const LGm = opts.lineColor ? lignesMod() : null;
+    const medianeCouleurs = opts.couleursMediane !== undefined && opts.couleursMediane !== null ? opts.couleursMediane : (LGm && opts.lineColor && opts.lineColor !== "custom" ? LGm.COULEURS_MEDIANE : null);   // la ligne médiane peut changer de couleur (noir, jaune, rouge, noir) : voir lignes.js
     const modeleTerrain = LGm ? LGm.modele(opts.L || 40, opts.W || 20, { pointilles: false, prio: opts.prio || ["cercle"] }) : null;
     const video = document.createElement("video");
     video.muted = true; video.preload = "auto"; video.crossOrigin = "anonymous";
@@ -759,7 +762,7 @@
       const essaiLignes = (idx, t) => {
         try {
           lignes.essais++;
-          const c = LGm.carte({ data: rgba, width: gw, height: gh }, opts.lineColor, opts.lineProfile);
+          const c = LGm.carte({ data: rgba, width: gw, height: gh }, opts.lineColor, opts.lineProfile, medianeCouleurs);
           const q = LGm.affinerPose(c, trk.pose, modeleTerrain, { ouvert: false, ref: trk.ref });
           if (!q.ok) { lignes.rejets[q.raison] = (lignes.rejets[q.raison] || 0) + 1; return; }
           const t0 = trk.lastAcc != null ? trk.lastAcc : trk.pend.length ? trk.pend[0].t - 0.3 : t, corr = q.changed ? trk.pose.map((v, j) => q.pose[j] - v) : null;
@@ -770,7 +773,10 @@
             trk.pose = q.pose.slice();
             const h = hStock(trk.pose); if (h) frames[idx].h = h;
           }
-          lignes.acceptes++; acc.push(t); trk.lastAcc = t; trk.pend = [];
+          lignes.acceptes++; trk.lastAcc = t; trk.pend = [];
+          /* « Sûr » seulement si la ligne médiane, quand on la voit, est bien sur un trait : retrouver le seul cercle central ne dit pas dans quel sens est le terrain. */
+          const d1 = q.detail1 || {}, medVue = (d1.medVis || 0) >= MED_VUE_MIN, medOk = !medVue || d1.medSur / d1.medVis >= MED_PART_MIN;
+          if (medOk) acc.push(t); else lignes.medIncertain = (lignes.medIncertain || 0) + 1;
           const cf = LGm.confusion(c, trk.pose, modeleTerrain, opts.L || 40, opts.W || 20);
           if (cf != null) { lignes.confSomme += cf; lignes.confN++; }
           if (q.detail1 && q.detail1.observ >= 0.2 && lignes.acceptes % pool.pas === 0) { pool.items.push({ carte: c, pose: trk.pose.slice(), t }); if (pool.items.length > 24) { pool.items = pool.items.filter((_x, i) => i % 2 === 0); pool.pas *= 2; } }

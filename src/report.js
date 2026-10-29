@@ -38,6 +38,11 @@
       (st.possession && st.possession.known ? card("Possession (mon équipe)", st.possession.A + " %") + card("Possession (adversaire)", st.possession.B + " %") + (st.possession.deduced ? card("Dont ballon tenu déduit (non vu)", st.possession.deduced + " %") : "") : "") +
       (st.shape ? card("Profondeur moyenne", st.shape.depth + " m") + card("Largeur moyenne", st.shape.width + " m") : "") +
       card("Erreurs suggérées (à valider)", (ai.suggestedEvents || []).length) + "</div>";
+    if ((ai.bilan || []).length) h += "<h3>Fiabilité de cette analyse</h3><ul>" + ai.bilan.map((t) => "<li>" + String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;") + "</li>").join("") + "</ul>";
+    {   // événements du match : seuls ceux que vous avez validés sont comptés ; les autres restent « à valider »
+      const em = ai.evenementsMatch || [], ok = em.filter((e) => e.statut === "ok"), att = em.filter((e) => !e.statut).length, nb = (t) => ok.filter((e) => e.type === t).length;
+      if (em.length) h += "<p class=\"note\"><b>Événements du match validés par vous</b> : " + nb("but") + " but(s), " + nb("sortie_touche") + " sortie(s) de touche, " + nb("sortie_fond") + " sortie(s) de fond, " + nb("corner") + " corner(s), " + nb("penalty") + " penalty(s), " + nb("phase_arretee") + " phase(s) arrêtée(s)." + (att ? " " + att + " événement(s) proposé(s) attendent encore votre validation et ne sont pas comptés." : "") + "</p>";
+    }
     if ((ai.suggestedEvents || []).length) h += "<p class=\"note\"><b>" + ai.suggestedEvents.length + " erreur(s) détectée(s) par l'IA attendent votre validation</b> : elles ne sont pas encore comptées dans le diagnostic ni dans les corrections. Retournez dans « Analyse vidéo → 4. Résultats » et cliquez sur « Tout accepter » (ou validez-les une par une).</p>";
     if (!(st.possession && st.possession.known)) h += "<p class=\"empty\">Le ballon n'a pas été détecté de façon fiable : la possession et les pertes de balle ne sont pas calculées.</p>";
     if (st.heat && E) {
