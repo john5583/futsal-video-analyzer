@@ -412,7 +412,7 @@
   <div id="lab-main" class="lab-main" hidden>
     <div id="lab-stage" class="lab-stage"><div id="lab-zoom"><video id="lab-video" muted preload="auto"></video><canvas id="lab-canvas"></canvas></div></div>
     <div class="lab-side">
-      <div class="lab-modes"><button data-mode="ballon">Ballon</button><button data-mode="joueurs">Joueurs</button></div>
+      <div class="lab-modes"><button data-mode="ballon">Ballon</button><button data-mode="joueurs">Joueurs</button><button data-mode="suivi" title="Tu cliques le ballon une fois, le programme le suit image après image ; tu ne corriges que quand il le perd.">Suivi assisté</button></div>
       <div id="lab-time" style="font-weight:600"></div>
       <div id="lab-this" class="muted"></div>
       <label>Pas entre les images <select id="lab-step"></select></label>
@@ -421,6 +421,11 @@
       <div id="lab-ball-tools">
         <p class="muted">Clique sur le <b>centre du ballon</b> (molette = zoom, clic droit glissé = déplacer). Si tu ne vois pas au moins la moitié du ballon : « Aucun ballon visible ». Un ballon masqué ou camouflé compte comme non visible.</p>
         <div class="lab-row"><button id="lab-none" title="Touche N">Aucun ballon visible (N)</button><button id="lab-unsure" title="Touche ?">Incertain (?)</button><button id="lab-clear" title="Suppr">Effacer</button></div>
+      </div>
+      <div id="lab-suivi-tools" hidden>
+        <p class="muted">Mets la vidéo sur une image où le ballon se voit bien (flèches), puis <b>clique son centre</b> : le programme le <b>suit tout seul</b> sur les images qui suivent (30 par seconde). Il s'arrête quand il n'est plus sûr : clique alors le ballon, ou « Plus de ballon » (N) s'il est caché ou sorti. Espace : pause / reprise. Ce que tu laisses passer est enregistré comme « suivi » avec sa confiance.</p>
+        <div class="lab-row"><button id="lab-sv-go" class="primary">Reprendre le suivi (Espace)</button><button id="lab-sv-pause">Pause</button><button id="lab-sv-end" title="Touche N ou Entrée">Plus de ballon / fin de séquence (N)</button></div>
+        <p id="lab-sv-info" class="muted">Clique le ballon sur l'image affichée pour commencer.</p>
       </div>
       <div id="lab-players-tools" hidden>
         <p class="muted">Choisis le type (touches 1 à 8), puis <b>trace un cadre</b> autour de chaque personne visible, en tirant avec la souris. Clique un cadre pour le choisir. Quand toutes les personnes de l'image sont cadrées : « Image terminée » (Entrée).</p>
@@ -503,6 +508,7 @@
 <script src="engine/compliance.js"></script>
 <script src="corrections-ui.js"></script>
 <script src="plan-ui.js"></script>
+<script src="ai/suiviBallon.js"></script>
 <script src="labelling-ui.js"></script>
 <script src="ai/controle.js"></script>
 <script src="controle-ui.js"></script>

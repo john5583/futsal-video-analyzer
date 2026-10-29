@@ -136,3 +136,8 @@ jobs:
         run: xvfb-run -a node tests/e2e/controle-rapide.js
         env:
           CI: "true"
+      - name: Etiquetage assiste du ballon sur images consecutives (suivi, arret a la perte, sequence enregistree)
+        if: ${{ inputs.groupe == '' }}
+        run: xvfb-run -a node tests/e2e/etiquetage-suivi.js
+        env:
+          CI: "true"
