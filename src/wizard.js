@@ -118,6 +118,7 @@
       (placed ? "<p class=\"muted\">Le cercle rouge indique où je pense qu'il se trouve.</p>" : "");
     else ask = "<p class=\"wiz-now\">Tous les repères sont placés.</p>";
     return head + ask +
+      "<p class=\"muted\">Vous pouvez avancer, reculer ou lire la vidéo : le but et vos repères restent accrochés au terrain et suivent la caméra. Vous pouvez cliquer sur n'importe quelle image (le suivi est sûr quand rien n'est en rouge).</p>" +
       "<p class=\"wiz-count\">Les lignes <b style=\"color:#22d3ee\">bleues</b> (6 m) et <b style=\"color:#facc15\">jaunes</b> (9 m) tracées sur la vidéo doivent recouvrir les lignes du terrain.</p>" +
       (T.msg ? "<p class=\"wiz-err\">" + esc(T.msg) + "</p>" : "") +
       "<div class=\"wiz-btns\">" + (next && !next.required ? "<button data-act=\"skipTarget\">Passer (non visible)</button>" : "") + (placed ? "<button data-act=\"undoClick\">↶ Annuler le dernier clic</button>" : "") + "</div>" +
@@ -343,6 +344,57 @@
     return TARGETS.find((x) => !T.clicks.some((c) => c.key === x.key) && !T.skipped.has(x.key)) || null;
   }
 
+  /* Suivi des repères du coach : le but et les clics sont accrochés à l'image où il les a posés (image de référence) et suivent la caméra quand la vidéo
+     avance, recule ou se lit. Ils ne sont dessinés que si le suivi est sûr à cet instant ; sinon un message le dit (rien n'est deviné). */
+  const Cam = window.FutsalCamera;
+  const IDENT = [1, 0, 0, 0, 1, 0, 0, 0, 1];
+  const FOL = { canvas: null, ref: null, H: IDENT, Hi: IDENT, tc: null, ok: true, busy: false, again: false, last: null };
+  function grabSmall() {
+    const vw = video.videoWidth, vh = video.videoHeight, gw = Math.min(480, vw), gh = Math.max(2, Math.round((vh * gw) / vw));
+    if (!FOL.canvas) FOL.canvas = document.createElement("canvas");
+    FOL.canvas.width = gw; FOL.canvas.height = gh;
+    const ctx = FOL.canvas.getContext("2d", { willReadFrequently: true });
+    ctx.drawImage(video, 0, 0, gw, gh);
+    return Cam.prepare(ctx.getImageData(0, 0, gw, gh).data, gw, gh, [], 4);
+  }
+  function followReset() {
+    FOL.ref = null; FOL.H = IDENT; FOL.Hi = IDENT; FOL.ok = true; FOL.last = null; FOL.again = false; FOL.tc = null;
+    if (!W.T || !W.T.frame || !video.videoWidth || !Cam) return;
+    try { FOL.ref = grabSmall(); FOL.tc = W.T.frame.t; FOL.last = { prep: FOL.ref, H: IDENT, t: FOL.tc }; } catch (_e) { FOL.ref = null; }
+  }
+  const surReference = () => !W.T || !W.T.frame || Math.abs(video.currentTime - W.T.frame.t) < 0.04;
+  async function followUpdate() {
+    const T = W.T;
+    if (W.step !== "terrain" || !T || !T.frame || !FOL.ref || !video.videoWidth) return;
+    const t = video.currentTime;
+    if (surReference()) { FOL.H = IDENT; FOL.Hi = IDENT; FOL.ok = true; FOL.tc = t; FOL.last = { prep: FOL.ref, H: IDENT, t }; AI.redraw(); return; }
+    if (FOL.busy) { FOL.again = true; return; }
+    if (FOL.tc != null && Math.abs(t - FOL.tc) < 0.02) return;
+    FOL.busy = true;
+    try {
+      const cur = grabSmall(), gs = cur.w / video.videoWidth;
+      let H = null;
+      const r = Cam.estimateMotion(FOL.ref, cur, FOL.ref.mask, cur.mask, { maxCorners: 320 });
+      if (r.ok) H = Cam.toNative(r.H, gs);                                  // direct depuis l'image de référence : pas de dérive
+      else if (FOL.last && Math.abs(t - FOL.last.t) < 4) {                  // sinon, de proche en proche depuis la dernière image suivie
+        const r2 = Cam.estimateMotion(FOL.last.prep, cur, FOL.last.prep.mask, cur.mask, { maxCorners: 320 });
+        if (r2.ok) H = HG.mul3(Cam.toNative(r2.H, gs), FOL.last.H);
+      }
+      FOL.ok = !!H; FOL.tc = t;
+      if (H) { FOL.H = H; FOL.Hi = HG.invert(H); FOL.last = { prep: cur, H, t }; }
+    } catch (_e) { FOL.ok = false; }
+    FOL.busy = false;
+    AI.redraw();
+    if (FOL.again) { FOL.again = false; followUpdate(); }
+  }
+  /* Point cliqué sur l'image affichée -> coordonnées de l'image de référence ; null si le suivi n'est pas sûr ici. */
+  function refPoint(ix, iy) {
+    if (surReference()) return [ix, iy];
+    if (!FOL.ok || FOL.tc == null || Math.abs(video.currentTime - FOL.tc) > 0.3) return null;
+    const q = HG.apply(FOL.Hi, ix, iy);
+    return isFinite(q[0]) && isFinite(q[1]) ? q : null;
+  }
+
   async function startTerrain() {
     if (W.T) W.T.cancel = true;
     W.T = { phase: "scan", cands: [], text: "", msg: "", clicks: [], skipped: new Set(), colors: [], colorKey: null, cancel: false, busy: true, results: [], resultIdx: 0, pose: null, work: null, goal: null, frame: null };
@@ -393,6 +445,7 @@
     T.busy = true; video.pause();
     const g = AI.grabSam(), wk = CF.prepare(g.img, 640), goal = GL.detect(wk, goalOpts()).goals[0] || null;
     T.frame = { t: g.t, w: g.w, h: g.h, k: g.k }; T.work = wk; T.goal = goal; T.clicks = []; T.skipped = new Set(); T.pose = null; T.msg = "";
+    followReset();
     if (!goal) {
       const cand = GL.candidates(wk)[0] || null;
       if (cand) { T.cand = cand; T.phase = "confirmGoal"; T.msg = ""; T.busy = false; render(); AI.redraw(); return false; }
@@ -421,13 +474,15 @@
     video.pause();
     const g = AI.grabSam(), wk = CF.prepare(g.img, 640);
     T.frame = { t: g.t, w: g.w, h: g.h, k: g.k }; T.work = wk; T.goal = null; T.clicks = []; T.skipped = new Set(); T.pose = null; T.msg = ""; T.mg = []; T.phase = "mgoal"; T.busy = false;
+    followReset();
     render(); AI.redraw();
   }
   function onGoalClick(ix, iy, ok) {
     const T = W.T;
     if (!ok || !T || T.phase !== "mgoal" || T.busy) return;
-    const kk = T.work.w / AI.videoSize().w;
-    T.mg.push({ u: ix * kk, v: iy * kk }); T.msg = "";
+    const kk = T.work.w / AI.videoSize().w, rp = refPoint(ix, iy);
+    if (!rp) { T.msg = "Le suivi du terrain n'est pas sûr à cet instant : revenez à " + App.fmt(T.frame.t) + " ou attendez une image plus nette."; render(); return; }
+    T.mg.push({ u: rp[0] * kk, v: rp[1] * kk }); T.msg = "";
     if (T.mg.length < 3) { render(); AI.redraw(); return; }
     const [a, b, c] = T.mg;
     const left = a.u <= b.u ? a : b, right = a.u <= b.u ? b : a;
@@ -479,8 +534,9 @@
     if (!ok || !T || T.phase !== "clicks" || T.busy) return;
     const tg = nextTarget();
     if (!tg) return;
-    const kk = T.work.w / AI.videoSize().w;
-    let u = ix * kk, v = iy * kk;
+    const kk = T.work.w / AI.videoSize().w, rp = refPoint(ix, iy);
+    if (!rp) { T.msg = "Le suivi du terrain n'est pas sûr à cet instant : revenez à " + App.fmt(T.frame.t) + " ou attendez une image plus nette."; render(); return; }
+    let u = rp[0] * kk, v = rp[1] * kk;
     if (v < (T.goal.left.v1 + T.goal.right.v1) / 2 - 3) { T.msg = "Cliquez sur une ligne du sol, devant le but (plus bas que le pied des poteaux)."; render(); return; }
     if (T.rm) { const sn = CF.snapToRidge(T.rm, u, v, 8); u = sn.u; v = sn.v; }
     T.clicks.push({ key: tg.key, dy: tg.dy, x: tg.x, u, v });
@@ -510,8 +566,16 @@
   AI.addLayer((ctx, h) => {
     const T = W.T;
     if (W.step !== "terrain" || !T || !T.work || T.phase === "manual" || T.phase === "scan") return;
-    const kk = AI.videoSize().w / T.work.w, V = (u, v) => h.toView(u * kk, v * kk);
-    if (T.maskCanvas && (T.phase === "clicks")) {
+    const kk = AI.videoSize().w / T.work.w, HF = FOL.H, V = (u, v) => { const q = HG.apply(HF, u * kk, v * kk); return h.toView(q[0], q[1]); };
+    const bouge = !surReference();
+    if (bouge && (!FOL.ok || FOL.tc == null || Math.abs(video.currentTime - FOL.tc) > 0.5)) {
+      // suivi pas sûr à cet instant : on ne dessine rien (un repère mal placé serait pire qu'aucun)
+      ctx.fillStyle = "rgba(185,28,28,.9)"; ctx.fillRect(8, 8, 520, 26);
+      ctx.fillStyle = "#fff"; ctx.font = "600 13px 'Segoe UI',Arial,sans-serif";
+      ctx.fillText(FOL.busy ? "Je suis le terrain…" : "Suivi du terrain pas sûr ici : revenez à " + App.fmt(T.frame.t) + " ou avancez par petits pas", 16, 26);
+      return;
+    }
+    if (T.maskCanvas && T.phase === "clicks" && !bouge) {
       const o = V(0, 0), e = V(T.work.w, T.work.h);
       ctx.drawImage(T.maskCanvas, o[0], o[1], e[0] - o[0], e[1] - o[1]);
     }
@@ -847,11 +911,8 @@
   // changer d'image pendant la pose des repères invalide les repères déjà posés
   video.addEventListener("seeked", () => {
     if (W.step === "terrain" && W.T && W.T.phase !== "manual") {
-      const T = W.T;
-      if (!T.busy && T.frame && (T.phase === "clicks" || T.phase === "color" || T.phase === "mgoal" || T.phase === "confirmGoal") && Math.abs(video.currentTime - T.frame.t) > 0.05) {
-        T.msg = "Vous avez déplacé la vidéo : je cherche à nouveau le but sur cette image.";
-        prepareFrame().then(() => { if (W.T && !W.T.goal) { W.T.msg = "Aucun but repéré sur cette image."; render(); } });
-      }
+      // ce que le coach a montré reste accroché au terrain et suit la vidéo (le suivi se fait ici, rien n'est effacé)
+      if (W.T.frame && W.T.phase !== "scan" && W.T.phase !== "nogoal") followUpdate();
       return;
     }
     if (W.step === "terrain" && AI.getPoints().length && W.terrainT != null && Math.abs(video.currentTime - W.terrainT) > 0.05) {
@@ -860,6 +921,16 @@
       // l'image découpée n'est plus celle affichée : les silhouettes ne s'y superposent plus
       W.det = null; W.hover = -1; render(); AI.redraw();
     }
+  });
+
+  // pendant la lecture : les repères suivent l'image (quelques mises à jour par seconde)
+  video.addEventListener("timeupdate", () => { if (W.step === "terrain" && W.T && W.T.frame && W.T.phase !== "manual" && W.T.phase !== "scan") followUpdate(); });
+  let followLoop = false;
+  video.addEventListener("play", () => {
+    if (followLoop) return;
+    followLoop = true;
+    const loop = () => { if (video.paused || W.step !== "terrain" || !W.T) { followLoop = false; return; } followUpdate(); setTimeout(loop, 120); };
+    loop();
   });
 
   /* « Nouveau » / « Ouvrir » : le projet change hors de l'assistant -> on repart de l'accueil. */
@@ -874,6 +945,6 @@
   const prevOnLoad = App.hooks.onLoad;
   App.hooks.onLoad = function () { prevOnLoad.apply(this, arguments); if (!W.internalLoad) resetWizard(); };
 
-  window.FSWiz = { state: W, actions: ACTIONS, render };
+  window.FSWiz = { state: W, actions: ACTIONS, render, follow: FOL, followUpdate };
   render();
 })();

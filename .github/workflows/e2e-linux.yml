@@ -31,6 +31,11 @@ jobs:
         run: xvfb-run -a node tests/e2e/wizard-goal.js
         env:
           CI: "true"
+      - name: Repères du coach qui suivent la caméra (but suivi sur une vidéo qui tourne)
+        if: ${{ inputs.groupe == '' }}
+        run: xvfb-run -a node tests/e2e/wizard-suivi.js
+        env:
+          CI: "true"
       - name: Questions du programme, mémoire du projet, Mes réponses (annuler), cadre orange
         if: ${{ inputs.groupe == '' }}
         run: xvfb-run -a node tests/e2e/questions.js
