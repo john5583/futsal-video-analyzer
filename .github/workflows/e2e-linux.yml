@@ -36,6 +36,11 @@ jobs:
         run: xvfb-run -a node tests/e2e/wizard-rond.js
         env:
           CI: "true"
+      - name: "Journal de décisions (réponses du coach au contrôle Terrain, seuils réglés)"
+        if: ${{ inputs.groupe == '' }}
+        run: xvfb-run -a node tests/e2e/journal.js
+        env:
+          CI: "true"
       - name: "Longueur et largeur du terrain (message visible, valeur gardée, hors limites refusé)"
         if: ${{ inputs.groupe == '' }}
         run: xvfb-run -a node tests/e2e/dimensions.js

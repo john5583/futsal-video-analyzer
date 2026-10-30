@@ -40,13 +40,14 @@
   }
 
   function charger() {
-    const frames = window.FSApp.ai && window.FSApp.ai.getFrames ? window.FSApp.ai.getFrames() : [];
+    const frames = comp === "terrain" ? (window.FSApp.ai && window.FSApp.ai.getSuiviFrames ? window.FSApp.ai.getSuiviFrames() : []) : (window.FSApp.ai && window.FSApp.ai.getFrames ? window.FSApp.ai.getFrames() : []);
+    if (comp === "terrain") { const oc = $("ov-court"); if (oc && !oc.checked) { oc.checked = true; oc.dispatchEvent(new Event("change")); } }      // le tracé doit être affiché pour être jugé
     liste = C.echantillon(frames, comp, App.state.project.videoName || "", { n: 100, ecart: 2 });
     const v = verdicts();
     const premier = liste.findIndex((t) => !C.verdictDe(v, t, comp));
     idx = premier >= 0 ? premier : 0;
     $("qc-q").textContent = C.COMPS[comp].question;
-    if (!liste.length) { $("qc-pos").textContent = ""; $("qc-sum").textContent = "Rien à contrôler pour ce sujet : le programme n'a rien affiché de ce type dans l'analyse."; return; }
+    if (!liste.length) { $("qc-pos").textContent = ""; $("qc-sum").textContent = "Rien à contrôler pour ce sujet : "+(comp === "terrain" ? "le suivi de la caméra n'est pas terminé pour cette vidéo." : "le programme n'a rien affiché de ce type dans l'analyse.")+""; return; }
     aller(idx);
   }
 
@@ -61,12 +62,14 @@
 
   function resumeTexte() {
     const r = C.resume(verdicts(), comp);
-    $("qc-sum").textContent = "Oui " + r.oui + " · Non " + r.non + " · Incertain " + r.incertain + (r.wilson ? " — juste " + pct(r.wilson.p) + " % [" + pct(r.wilson.bas) + " – " + pct(r.wilson.haut) + "] sur " + r.n + (r.n < 100 ? " (moins de 100 : pas assez pour prouver 95 %)" : "") : "");
+    const jt = comp === "terrain" && window.FSApp.ai && window.FSApp.ai.journalTexte ? " " + window.FSApp.ai.journalTexte() : "";
+    $("qc-sum").textContent = "Oui " + r.oui + " · Non " + r.non + " · Incertain " + r.incertain + (r.wilson ? " — juste " + pct(r.wilson.p) + " % [" + pct(r.wilson.bas) + " – " + pct(r.wilson.haut) + "] sur " + r.n + (r.n < 100 ? " (moins de 100 : pas assez pour prouver 95 %)" : "") : "") + jt;
   }
 
   function repondre(v) {
     if (!liste.length) { App.toast("Rien à contrôler pour ce sujet."); return; }
     C.repondre(verdicts(), liste[idx], comp, v);
+    if (comp === "terrain" && window.FSApp.ai && window.FSApp.ai.verdictTerrain) window.FSApp.ai.verdictTerrain(liste[idx], v);      // mesure + verdict gardés dans le journal de décisions
     App.changed();
     if (idx < liste.length - 1) aller(idx + 1); else { aller(idx); App.toast("Dernière image de ce sujet : merci. Tes réponses sont gardées dans le projet."); }
   }
@@ -74,7 +77,9 @@
   function ouvrir() {
     const frames = window.FSApp.ai && window.FSApp.ai.getFrames ? window.FSApp.ai.getFrames() : [];
     if (!App.isVideoReady()) { App.toast("Choisissez d'abord une vidéo."); return; }
-    if (!frames.length) { App.toast("Faites d'abord une analyse : le contrôle rapide vérifie ce que le programme a trouvé."); return; }
+    const suivi = window.FSApp.ai && window.FSApp.ai.getSuiviFrames ? window.FSApp.ai.getSuiviFrames() : [];
+    if (!frames.length && !suivi.length) { App.toast("Faites d'abord une analyse : le contrôle rapide vérifie ce que le programme a trouvé."); return; }
+    if (!frames.length) comp = "terrain";      // pas d'analyse mais le suivi du terrain est fait : on peut déjà juger le tracé
     if (!bar) construire();
     App.showTab("analyse");
     ouvert = true; bar.hidden = false; $("qc-comp").value = comp; reserve(); charger();
@@ -88,6 +93,6 @@
   const ongletAnalyse = $("tab-analyse");
   if (ongletAnalyse) new MutationObserver(() => { if (ouvert && !ongletAnalyse.classList.contains("active")) fermer(); }).observe(ongletAnalyse, { attributes: true, attributeFilter: ["class"] });
 
-  window.FSControle = { open: ouvrir, close: fermer, state: () => ({ ouvert, comp, idx, n: liste.length }) };
+  window.FSControle = { open: ouvrir, close: fermer, state: () => ({ ouvert, comp, idx, n: liste.length, t: liste[idx] }) };
   const b = $("ai-qc-start"); if (b) b.addEventListener("click", ouvrir);
 })();

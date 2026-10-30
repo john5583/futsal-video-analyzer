@@ -17,7 +17,7 @@ Le programme trouve **lui-même** tous ses repères, comme un vrai coach : terra
 - **Toute réponse de l'utilisateur est appliquée et conservée** dans le projet. Elle n'est jamais reposée.
 - **Chaque personne a sa fiche** dans le projet (tenue par zones, numéro si lisible, taille et silhouette relatives, accessoire stable, rôle, historique d'entrées et de sorties).
 - **Chaque personne identifiée est reconnue tout au long de la vidéo** (même après une coupure, un masquage, un passage au banc). En cas de doute : « non identifiée », jamais une fausse étiquette.
-- La mémoire est **par projet seulement**.
+- La mémoire est **par projet seulement**. **Exception validée par John le 2026-10-30 :** un **journal de décisions** commun à tous les projets garde les **calculs, seuils et verdicts** du programme (chiffres seulement), pour qu'il apprenne de ses erreurs sans que John revienne à chaque vidéo. Premier sujet : le terrain (le coach répond « oui / non » dans le Contrôle rapide, sujet « Terrain »). Voir `src/ai/journal.js`.
 
 ## 3. Le terrain
 - Tracé **continu**, collé aux **vraies lignes**, lié aux éléments choisis au calibrage (cercle central, etc.).

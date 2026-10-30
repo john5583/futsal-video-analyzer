@@ -586,7 +586,28 @@
     if (c === "custom") { const p = a.lineProfile || {}; c = "custom" + [p.L, p.a, p.b, p.tol, p.tolL].join(","); }
     if (Array.isArray(a.couleursMediane) && a.couleursMediane.length) c += "+med:" + a.couleursMediane.join("/");   // autres couleurs de la ligne médiane : un autre suivi
     const l = Number(a.L) || 40, w = Number(a.W) || 20;
+    if (journalSeuils && (journalSeuils.rondPart !== 0.5 || journalSeuils.touchePart !== 0.35)) c += "#r" + journalSeuils.rondPart + "t" + journalSeuils.touchePart;     // seuils réglés par le journal : autre verdict, donc autre suivi
     return l === 40 && w === 20 ? c : c + "@" + l + "x" + w;
+  }
+  /* Journal de décisions entre projets : les seuils du terrain sont réglés d'après les réponses « oui / non » du coach (voir src/ai/journal.js). */
+  let journalSeuils = null, journalCal = null;
+  async function chargeJournal() {
+    if (!window.FutsalJournal || !api || !api.journalLoad) return;
+    try {
+      const r = await api.journalLoad();
+      journalCal = window.FutsalJournal.calibrer(r && Array.isArray(r.entries) ? r.entries : []);
+      journalSeuils = journalCal.seuils;
+    } catch (_e) { journalSeuils = null; }
+  }
+  /* Réponse du coach au contrôle rapide « terrain » : mesure et verdict sont gardés dans le journal, puis les seuils sont recalculés. */
+  async function verdictTerrain(t, v) {
+    const a = ai(), J = window.FutsalJournal;
+    if (!J || !api || !api.journalAppend || !a || !a.camSuivi || !Array.isArray(a.camSuivi.mesures) || (v !== "oui" && v !== "non")) return;
+    let ligne = null;
+    a.camSuivi.mesures.forEach((m) => { if (Math.abs(m[0] - t) <= 1.5 && (!ligne || Math.abs(m[0] - t) < Math.abs(ligne[0] - t))) ligne = m; });
+    const e = ligne ? J.entreeTerrain(ligne, v, { video: App.state.project.videoName || "", seuils: journalSeuils || J.DEFAUT }) : null;
+    if (!e) return;
+    try { await api.journalAppend(e); await chargeJournal(); const m = $("ai-suivi"); if (m && journalCal) m.title = J.texteSeuils(journalCal); } catch (_e) { /* le journal est un plus : jamais d'erreur affichée */ }
   }
   const suiviValide = (a) => !!(a && (a.camera || $("ai-camera").value) === "mobile" && a.camSuivi && suiviFr.length > 1 && a.camSuivi.cle === P.cleSuivi(a.calibrations, video.duration, couleurCle(a)));
   function planSuivi(delay) {
@@ -596,6 +617,7 @@
   async function lanceSuivi() {
     const a = ai();
     if (!a || !P.suiviCamera) return;
+    if (journalCal === null) await chargeJournal();
     if (suiviRun) { suiviRun.ctrl.abort(); suiviRun = null; }
     const cam = a.camera || $("ai-camera").value;
     if (cam !== "mobile" || !a.calibrations.length || !App.isVideoReady() || !(video.duration > 0)) { if (cam !== "mobile" || !a.calibrations.length) { suiviFr = []; suiviMsg(""); } return; }
@@ -608,7 +630,7 @@
     try {
       const r = await P.suiviCamera({
         url: App.getVideoUrl(), calibrations: a.calibrations.map((c) => ({ t: c.t, H: c.H })), signal: ctrl.signal,
-        lineColor: a.lineColor || null, lineProfile: a.lineColor === "custom" ? a.lineProfile : null, couleursMediane: a.couleursMediane || null, L: L(), W: W(), prio: prioLignes(a),
+        seuils: (window.FutsalJournal && journalSeuils) || null, lineColor: a.lineColor || null, lineProfile: a.lineColor === "custom" ? a.lineProfile : null, couleursMediane: a.couleursMediane || null, L: L(), W: W(), prio: prioLignes(a),
         onProgress: (p) => {
           run.pct = Math.round((100 * p.done) / p.total); run.t = p.t;
           suiviMsg("Suivi de la caméra : " + run.pct + " % — le terrain se trace déjà jusqu'à " + App.fmt(p.t) + " — reste environ " + fmtEta(p.eta), run.pct);
@@ -620,6 +642,7 @@
       suiviRun = null;
       a.camSuivi = { cle, t0: r.t0, t1: r.t1, seconds: r.seconds, lost: r.lost.map((x) => [Math.round(x[0] * 100) / 100, Math.round(x[1] * 100) / 100]), frames: r.frames.map((q) => (q.q == null ? [q.t, q.h] : [q.t, q.h, q.q])) };
       if (r.lignes) a.camSuivi.lignes = { couleur: r.lignes.couleur, essais: r.lignes.essais, acceptes: r.lignes.acceptes, confusion: r.lignes.confusion };
+      a.camSuivi.mesures = r.mesures || [];
       if (r.dims) a.camSuivi.dims = r.dims;
       else if (!a.lineColor) a.camSuivi.sansLignes = false; else a.camSuivi.sansLignes = true;
       chargeSuivi(); suiviMsg(suiviBilan(a.camSuivi)); renderSuiviQ(); App.changed(); refreshLive();
@@ -2202,6 +2225,6 @@
     toggle: (id, on) => { const e = $(id); if (e) { e.checked = on; refreshLive(); } }
   };
 
-  window.FSApp.ai = { syncFromProject, dirAt, refreshLive, getFrames: () => frames };
+  window.FSApp.ai = { syncFromProject, dirAt, refreshLive, getFrames: () => frames, getSuiviFrames: () => { const a = ai(); return a && a.camSuivi && Array.isArray(a.camSuivi.mesures) ? a.camSuivi.mesures.map((m) => ({ t: m[0], players: [] })) : []; }, verdictTerrain, journalTexte: () => (window.FutsalJournal ? window.FutsalJournal.texteSeuils(journalCal) : "") };
   init();
 })();

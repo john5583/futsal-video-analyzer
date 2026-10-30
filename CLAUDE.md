@@ -12,7 +12,7 @@ Dépôt : GitHub `john5583/futsal-video-analyzer`, branche principale `main`. Do
 3. **Ne jamais promettre 100 % ni 98 % de précision** : dire les limites, donner les chiffres mesurés (sur des vidéos jamais vues à l'entraînement).
 4. **Rien ne se modifie, ne se pousse, ne se publie, ne s'installe, ne se télécharge sans l'accord explicite de John.** Il valide à chaque étape. Une phrase d'explication avant chaque demande d'autorisation.
 5. **Le programme n'invente jamais** : au moindre doute il pose une question (joueur, remplaçant, arbitre, ballon, but…) ; ce qui n'est pas certain reste « non analysé ».
-6. La mémoire du programme est **par projet seulement** (jamais entre projets) ; le détecteur n'apprend que de ce que John confirme (réponses, clics, étiquettes).
+6. La mémoire du programme est **par projet seulement** (jamais entre projets) ; le détecteur n'apprend que de ce que John confirme (réponses, clics, étiquettes). **Exception demandée et validée par John le 2026-10-30 :** le **journal de décisions** (`src/ai/journal.js`) garde, d'un projet à l'autre, les **mesures, seuils et verdicts** du programme (que des chiffres : jamais le contenu d'un match ni l'identité d'un joueur), pour qu'il règle ses seuils d'après ses erreurs. Il ne sert qu'à durcir ou régler des seuils avec des exemples « oui » et « non » du coach ; sans exemples suffisants, valeurs de départ.
 
 ## Carte du code
 - `main.js` (processus principal, IPC, fil de détection), `preload.js`, `updater.js` (mise à jour automatique, electron-updater).

@@ -375,6 +375,20 @@ function registerIpc() {
   ipcMain.handle("labels:save", (_e, key, data) => labelsSafe(() => LF.save(labelsHome(), key, data)));
   ipcMain.handle("labels:saveImage", (_e, key, ms, jpeg) => labelsSafe(() => LF.saveImage(labelsHome(), key, ms, jpeg ? Buffer.from(jpeg) : null)));
   ipcMain.handle("labels:key", (_e, name, size) => LF.videoKey(name, size));
+  /* Journal de décisions (src/ai/journal.js) : un fichier de lignes JSON sur cet ordinateur, commun à tous les projets ; seulement des mesures et des verdicts. */
+  const journalFile = () => path.join(process.env.FSAL_JOURNAL_DIR || app.getPath("userData"), "journal-decisions.jsonl");
+  ipcMain.handle("journal:append", (_e, entry) => labelsSafe(() => {
+    if (!entry || typeof entry !== "object" || entry.type !== "terrain") return { ok: false };
+    const line = JSON.stringify(entry);
+    if (line.length > 2000) return { ok: false };
+    fs.mkdirSync(path.dirname(journalFile()), { recursive: true }); fs.appendFileSync(journalFile(), line + "\n"); return { ok: true };
+  }));
+  ipcMain.handle("journal:load", () => labelsSafe(() => {
+    if (!fs.existsSync(journalFile())) return { entries: [] };
+    const lines = fs.readFileSync(journalFile(), "utf8").split("\n").filter(Boolean).slice(-5000), entries = [];
+    lines.forEach((l) => { try { const o = JSON.parse(l); if (o && o.type === "terrain") entries.push(o); } catch (_x) { /* ligne abîmée : ignorée */ } });
+    return { entries };
+  }));
   ipcMain.handle("animation:save", async (_e, buffer, defaultName, ext) => {
     const e = ext === "mp4" ? "mp4" : ext === "gif" ? "gif" : "webm";
     const r = await dialog.showSaveDialog(mainWindow, {
