@@ -9,6 +9,7 @@
   const COMPS = {
     ballon: { nom: "Ballon", question: "Le repère du ballon est-il bien posé sur le ballon ?", eligible: (f) => !!f.ball },
     joueurs: { nom: "Joueurs", question: "Chaque joueur et chaque gardien sur le terrain est-il repéré, sans personne en trop (public, remplaçant, arbitre) ?", eligible: (f) => f.players.length >= 2 },
+    terrain: { nom: "Terrain", question: "Le tracé cyan du terrain colle-t-il aux lignes noires du terrain (rond central, lignes de touche, surfaces) ? Réponds « Non » si une ligne tombe à côté, même un peu.", eligible: () => true },
     equipes: { nom: "Équipes", question: "Les couleurs d'équipe affichées sont-elles justes sur cette image ?", eligible: (f) => f.players.length >= 2 }
   };
   const VERDICTS = { oui: 1, non: 1, incertain: 1 };

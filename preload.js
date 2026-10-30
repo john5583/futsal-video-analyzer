@@ -16,6 +16,8 @@ contextBridge.exposeInMainWorld("fsal", {
   aiStop: () => ipcRenderer.invoke("ai:stop"),
   aiSetDevice: (device) => ipcRenderer.invoke("ai:setDevice", device),
   labelsKey: (name, size) => ipcRenderer.invoke("labels:key", name, size),
+  journalAppend: (entry) => ipcRenderer.invoke("journal:append", entry),
+  journalLoad: () => ipcRenderer.invoke("journal:load"),
   labelsLoad: (key) => ipcRenderer.invoke("labels:load", key),
   labelsSave: (key, data) => ipcRenderer.invoke("labels:save", key, data),
   labelsSaveImage: (key, ms, jpeg) => ipcRenderer.invoke("labels:saveImage", key, ms, jpeg),

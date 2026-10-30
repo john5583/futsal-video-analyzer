@@ -733,7 +733,7 @@
       for (let t = tStart; t <= tEnd + 1e-6; t += pas) grid.add(Math.round(t * 1000) / 1000);
       calibs.forEach((c) => { if (c.t >= tStart && c.t <= tEnd) grid.add(Math.round(c.t * 1000) / 1000); });
       grid.forEach((t) => times.push(t)); times.sort((a, b) => a - b);
-      const frames = [], lost = [], acc = [];
+      const frames = [], lost = [], acc = [], mesures = [];
       // pose : caméra réelle (cap, inclinaison, champ, roulis) suivie à la place de l'homographie quand le calibrage est une vraie caméra ; null = suivi classique
       const trk = { anchor: null, M: IDENTITY, prev: null, keys: [], t: 0, lastTry: -9, pose: null, ref: null, pend: [], lastAcc: null, lastLine: -9 };
       const lignes = { couleur: opts.lineColor || null, mode: "classique", essais: 0, acceptes: 0, rejets: {}, confSomme: 0, confN: 0 };
@@ -779,7 +779,10 @@
           /* « Sûr » seulement si la ligne médiane, quand on la voit, est bien sur un trait : retrouver le seul cercle central ne dit pas dans quel sens est le terrain. */
           const d1 = q.detail1 || {}, medVue = (d1.medVis || 0) >= MED_VUE_MIN, medOk = !medVue || d1.medSur / d1.medVis >= MED_PART_MIN;
           /* Le rond central doit aussi être sur un trait du sol : sinon le terrain est mal calé en profondeur (mesuré : rond sur un trait 0 à 16 % des points sur un tracé faux). */
-          const cr = LGm.couvertureRond(modeleTerrain, trk.pose, c, { data: rgba, width: gw, height: gh }), rondOk = (cr.vis < ROND_VUE_MIN || cr.sur / cr.vis >= ROND_PART_MIN) && (cr.tVis < TOUCHE_VUE_MIN || cr.tSur / cr.tVis >= TOUCHE_PART_MIN);
+          const cr = LGm.couvertureRond(modeleTerrain, trk.pose, c, { data: rgba, width: gw, height: gh }), sd = opts.seuils || {}, rondMin = sd.rondPart != null ? sd.rondPart : ROND_PART_MIN, toucheMin = sd.touchePart != null ? sd.touchePart : TOUCHE_PART_MIN;
+          const rondOk = (cr.vis < ROND_VUE_MIN || cr.sur / cr.vis >= rondMin) && (cr.tVis < TOUCHE_VUE_MIN || cr.tSur / cr.tVis >= toucheMin);
+          // mesures gardées (une ligne par essai) : le coach peut juger cet instant plus tard, et le journal relie la mesure au verdict
+          mesures.push([Math.round(t * 100) / 100, cr.sur, cr.vis, cr.tSur, cr.tVis, Math.round(d1.medSur || 0), Math.round(d1.medVis || 0), medOk && rondOk ? 1 : 0]);
           if (medOk && rondOk) acc.push(t); else if (!medOk) lignes.medIncertain = (lignes.medIncertain || 0) + 1; else lignes.rondIncertain = (lignes.rondIncertain || 0) + 1;
           const cf = LGm.confusion(c, trk.pose, modeleTerrain, opts.L || 40, opts.W || 20);
           if (cf != null) { lignes.confSomme += cf; lignes.confN++; }
@@ -861,7 +864,7 @@
           }
         } catch (e) { if (opts.signal && opts.signal.aborted) throw e; dims = null; }
       }
-      return { frames, lost, t0: tStart, t1: times.length ? times[times.length - 1] : tStart, seconds: Math.round((Date.now() - started) / 100) / 10, orb: stats.orb + stats.reloc, vw, vh, lignes: lignes.mode === "pose" ? Object.assign(lignes, { confusion: lignes.confN ? Math.round((1000 * lignes.confSomme) / lignes.confN) / 1000 : null }) : null, dims };
+      return { frames, lost, t0: tStart, t1: times.length ? times[times.length - 1] : tStart, seconds: Math.round((Date.now() - started) / 100) / 10, orb: stats.orb + stats.reloc, vw, vh, mesures, lignes: lignes.mode === "pose" ? Object.assign(lignes, { confusion: lignes.confN ? Math.round((1000 * lignes.confSomme) / lignes.confN) / 1000 : null }) : null, dims };
     } finally { video.removeAttribute("src"); video.load(); }
   }
 
