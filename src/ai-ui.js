@@ -1992,9 +1992,17 @@
   function bindSettings() {
     const upd = () => {
       const a = ai();
-      const l = Number($("ai-L").value), w = Number($("ai-W").value);
+      const l = Number($("ai-L").value), w = Number($("ai-W").value), avant = [a.L, a.W];
       if (l >= 25 && l <= 42) a.L = l;
       if (w >= 15 && w <= 25) a.W = w;
+      /* la taille du terrain change le tracé et la vue du dessus : on le dit et on redessine, sinon le champ semble sans effet */
+      if (a.L !== avant[0] || a.W !== avant[1]) {
+        const cL = a.L !== avant[0], nom = cL ? "Longueur" : "Largeur", val = String(cL ? a.L : a.W).replace(".", ",");
+        App.toast(nom + " mise à " + val + " m : terrain re-tracé"); refreshLive();
+      } else if ((l < 25 || l > 42) || (w < 15 || w > 25)) {
+        App.toast((l < 25 || l > 42 ? "Longueur entre 25 et 42 m" : "Largeur entre 15 et 25 m") + " : valeur non retenue", true);
+        $("ai-L").value = a.L; $("ai-W").value = a.W;
+      }
       a.dir = Number($("ai-dir").value); a.flip = $("ai-flip").checked; a.camera = $("ai-camera").value;
       a.settings = Object.assign({}, a.settings, { fps: Number($("ai-fps").value), tiles: Number($("ai-tiles").value), tol: tol(), floorMarks: floorMarks(), reuseSuivi: $("ai-reuse").checked, bench: benchSetting() });
       fillLandmarks(); App.changed();
