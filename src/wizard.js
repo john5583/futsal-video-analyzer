@@ -26,11 +26,16 @@
   };
   const TARGETS = [
     { key: "six", x: 6, dy: 0, required: true, label: "la ligne pleine des 6 m, juste devant le milieu du but" },
+    // milieu du terrain : fixe la profondeur (le rond est le meilleur repère) ; le côté (gauche / droite) des bouts de la médiane est déduit par le calcul
+    { key: "center", xf: 0.5, dy: 0, label: "le CENTRE du rond central (au milieu du terrain)", libre: true },
+    { key: "mid_a", xf: 0.5, dy: 0, label: "un bout de la ligne médiane, là où elle touche une ligne de touche (le plus visible)", libre: true },
+    { key: "mid_b", xf: 0.5, dy: 0, label: "l'autre bout de la ligne médiane, sur l'autre ligne de touche", libre: true },
     { key: "nine", x: 9, dy: 0, label: "la ligne pointillée des 9 m, devant le milieu du but" },
     { key: "endL", x: 0, dy: -7.5, label: "le bout GAUCHE de la ligne des 6 m, là où elle touche la ligne de but" },
     { key: "endR", x: 0, dy: 7.5, label: "le bout DROIT de la ligne des 6 m, là où elle touche la ligne de but" }
   ];
   const root = $("wiz");
+  const tgX = (tg) => (tg.xf != null ? tg.xf * AI.ai().L : tg.x);
 
   /* ---------- utilitaires ---------- */
   const cur = () => CATS[W.catIdx];
@@ -114,7 +119,7 @@
     const cname = T.colorKey ? (CF.COLORS[T.colorKey].name || "").toLowerCase() : "";
     const placed = T.clicks.length;
     let ask;
-    if (next) ask = "<p class=\"wiz-now\">" + (placed ? "Repère suivant (recommandé : 3 à 4 repères donnent un terrain plus précis) : " : "Le but est repéré (en vert). ") + "Cliquez sur " + esc(next.label) + (cname ? " (ligne " + esc(cname) + ")" : "") + ".</p>" +
+    if (next) ask = "<p class=\"wiz-now\">" + (placed ? "Repère suivant (le centre du rond central et les bouts de la ligne médiane sont les plus utiles : ils fixent la profondeur du terrain) : " : "Le but est repéré (en vert). ") + "Cliquez sur " + esc(next.label) + (cname ? " (ligne " + esc(cname) + ")" : "") + ".</p>" +
       (placed ? "<p class=\"muted\">Le cercle rouge indique où je pense qu'il se trouve.</p>" : "");
     else ask = "<p class=\"wiz-now\">Tous les repères sont placés.</p>";
     return head + ask +
@@ -523,8 +528,18 @@
   function solveNow() {
     const T = W.T, a = AI.ai();
     if (!T.clicks.length) { T.pose = null; return; }
-    const extras = T.clicks.map((c) => ({ x: c.x, y: a.W / 2 + c.dy, u: c.u, v: c.v }));
-    const r = CF.poseFromGoal(T.goal, T.work.w, T.work.h, a.L, a.W, false, [], extras);
+    // les bouts de la médiane : on ne sait pas lequel est de quel côté ; on essaie les deux possibilités et on garde celle qui colle le mieux
+    const mids = T.clicks.filter((c) => /^mid_/.test(c.key)), combos = [];
+    for (let m = 0; m < (1 << mids.length); m++) if (mids.length < 2 || ((m & 1) !== ((m >> 1) & 1))) combos.push(m);
+    let best = null;
+    combos.forEach((m) => {
+      mids.forEach((c, i) => { c.dy = ((m >> i) & 1 ? 1 : -1) * a.W / 2; });
+      const extras = T.clicks.map((c) => ({ x: c.x, y: a.W / 2 + c.dy, u: c.u, v: c.v }));
+      const r = CF.poseFromGoal(T.goal, T.work.w, T.work.h, a.L, a.W, false, [], extras);
+      if (!best || r.err < best.r.err) best = { r, m };
+    });
+    mids.forEach((c, i) => { c.dy = ((best.m >> i) & 1 ? 1 : -1) * a.W / 2; });
+    const r = best.r;
     T.pose = r.pose; T.err = r.err;
     T.msg = r.err > 6 ? "Les repères ne sont pas cohérents entre eux (écart " + r.err.toFixed(0) + " px) : annulez le dernier clic ou cliquez plus précisément sur la ligne." : "";
   }
@@ -537,9 +552,9 @@
     const kk = T.work.w / AI.videoSize().w, rp = refPoint(ix, iy);
     if (!rp) { T.msg = "Le suivi du terrain n'est pas sûr à cet instant : revenez à " + App.fmt(T.frame.t) + " ou attendez une image plus nette."; render(); return; }
     let u = rp[0] * kk, v = rp[1] * kk;
-    if (v < (T.goal.left.v1 + T.goal.right.v1) / 2 - 3) { T.msg = "Cliquez sur une ligne du sol, devant le but (plus bas que le pied des poteaux)."; render(); return; }
-    if (T.rm) { const sn = CF.snapToRidge(T.rm, u, v, 8); u = sn.u; v = sn.v; }
-    T.clicks.push({ key: tg.key, dy: tg.dy, x: tg.x, u, v });
+    if (!tg.libre && v < (T.goal.left.v1 + T.goal.right.v1) / 2 - 3) { T.msg = "Cliquez sur une ligne du sol, devant le but (plus bas que le pied des poteaux)."; render(); return; }
+    if (T.rm && tg.key !== "center") { const sn = CF.snapToRidge(T.rm, u, v, 8); u = sn.u; v = sn.v; }      // le centre du rond n'est sur aucun trait : pas d'aimantation
+    T.clicks.push({ key: tg.key, dy: tg.dy, x: tgX(tg), u, v });
     T.msg = "";
     solveNow();
     render(); AI.redraw();
@@ -624,8 +639,8 @@
       ctx.strokeStyle = "#ef4444"; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(v[0] - 8, v[1]); ctx.lineTo(v[0] + 8, v[1]); ctx.moveTo(v[0], v[1] - 8); ctx.lineTo(v[0], v[1] + 8); ctx.stroke();
     });
     const nx = nextTarget();
-    if (nx && T.pose) {
-      const B = CF.cameraBasis(T.pose), f = CF.focalPx(T.work.w, T.pose[5]), q = CF.project(B, f, T.work.w, T.work.h, nx.x, aiState.W / 2 + nx.dy, 0);
+    if (nx && T.pose && !/^mid_/.test(nx.key)) {
+      const B = CF.cameraBasis(T.pose), f = CF.focalPx(T.work.w, T.pose[5]), q = CF.project(B, f, T.work.w, T.work.h, tgX(nx), aiState.W / 2 + nx.dy, 0);
       if (q) { const v = V(q.u, q.v); ctx.setLineDash([4, 3]); ctx.strokeStyle = "#ef4444"; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.arc(v[0], v[1], 14, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]); }
     }
     ctx.fillStyle = "rgba(11,18,32,.85)"; ctx.fillRect(8, 8, 520, 26);
