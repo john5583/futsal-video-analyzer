@@ -345,6 +345,27 @@
     return Object.assign({ ok: true, changed: true, raison: "recalé sur les lignes" }, info);
   }
 
+  /* Le rond central du modèle est-il sur un trait de la couleur choisie, SUR LE SOL ? Un rond du modèle posé sur le mur (portes, ombres) ou sur le sol nu ne compte pas.
+     Rend { vis (points du rond dans l'image), sur (points sur un trait, avec du sol bleu autour), tVis / tSur : pareil pour les lignes de touche, là où l'on voit du sol } : sur / vis proche de 1 = le rond colle, proche de 0 = le tracé est faux (mesuré 2 à 17 % sur un tracé faux). */
+  function couvertureRond(mod, pose, carteL, rgba) {
+    const w = carteL.w, h = carteL.h, D = carteL.D, R = 5;
+    if (!rgba || !rgba.data || rgba.width !== w || rgba.height !== h) return { vis: 0, sur: 0, tVis: 0, tSur: 0 };
+    const bl = new Uint8Array(w * h), I = new Int32Array((w + 1) * (h + 1));
+    for (let i = 0; i < w * h; i++) { const r = rgba.data[4 * i], g = rgba.data[4 * i + 1], b = rgba.data[4 * i + 2]; bl[i] = b - r > 30 && b > g ? 1 : 0; }
+    for (let y = 0; y < h; y++) { let sm = 0; for (let x = 0; x < w; x++) { sm += bl[y * w + x]; I[(y + 1) * (w + 1) + x + 1] = I[y * (w + 1) + x + 1] + sm; } }
+    const sol = (x, y) => { const x0 = Math.max(0, x - R), x1 = Math.min(w, x + R + 1), y0 = Math.max(0, y - R), y1 = Math.min(h, y + R + 1), n = I[y1 * (w + 1) + x1] - I[y0 * (w + 1) + x1] - I[y1 * (w + 1) + x0] + I[y0 * (w + 1) + x0]; return n / ((x1 - x0) * (y1 - y0)) >= 0.4; };
+    let vis = 0, sur = 0, tVis = 0, tSur = 0;
+    mod.pts.forEach((p) => {
+      if (p.g !== "cercle" && p.g !== "touches") return;
+      const a = poseVersImage(pose, w, h, p.x, p.y, 0);
+      if (!a || a[0] < 1 || a[1] < 1 || a[0] >= w - 2 || a[1] >= h - 2) return;
+      const u = a[0] | 0, v = a[1] | 0, ok = D[v * w + u] <= PROCHE && sol(u, v);
+      if (p.g === "cercle") { vis++; if (ok) sur++; }
+      else if (sol(u, v)) { tVis++; if (ok) tSur++; }        // lignes de touche : seulement là où l'on voit du sol (pas sous la rambarde ni sur le mur)
+    });
+    return { vis, sur, tVis, tSur };
+  }
+
   /* Point du sol vu par le pixel (u, v) de la pose (roulis retiré), ou null au-dessus de l'horizon. */
   function solSous(pose, w, h, u, v) {
     const r = (pose[6] || 0) * Math.PI / 180, cs = Math.cos(r), sn = Math.sin(r), dx = u - w / 2, dy = v - h / 2;
@@ -469,5 +490,5 @@
     return { vote: vote(P, c0, carteL.D, carteL.w, carteL.h, 3, 1), n: d.n, ecart: d.ecart, observ: d.observ, vis: d.vis };
   }
 
-  return { COULEURS_MEDIANE: ["black", "yellow", "red"], profilDepuisClic, confusion, proposerDimensions, voteDimensions, grilleDimensions, choisirDimensions, DIM_OPTS, ecartSol, solSous, poseApres, poseDepuisH, hDepuisPose, projeterPose, affinerPose, poseVersImage, PLAGE, PROCHE, LIM, SEUILS, GROUPES, carte, modele, groupesDepuisRepères, projeter, vote, detail, raffiner, affiner, matG, partie, mesure };
+  return { COULEURS_MEDIANE: ["black", "yellow", "red"], profilDepuisClic, confusion, proposerDimensions, voteDimensions, grilleDimensions, choisirDimensions, DIM_OPTS, ecartSol, solSous, poseApres, poseDepuisH, hDepuisPose, projeterPose, affinerPose, couvertureRond, poseVersImage, PLAGE, PROCHE, LIM, SEUILS, GROUPES, carte, modele, groupesDepuisRepères, projeter, vote, detail, raffiner, affiner, matG, partie, mesure };
 });
