@@ -47,10 +47,10 @@ if (require.main === module) {
       const t = i / fps, coupure = pan.saut && t >= pan.saut[0] && t < pan.saut[1];
       enc(coupure ? gris : makeFrame(poseAt(pose, pan, t), Object.assign({}, sceneOpts, { bus: false })), "f" + String(i).padStart(4, "0") + ".jpg");
     }
-    execFileSync("ffmpeg", ["-y", "-loglevel", "error", "-framerate", String(fps), "-i", path.join(dir, "f%04d.jpg"), "-c:v", "libx264", "-pix_fmt", "yuv420p", out]);
+    execFileSync("ffmpeg", ["-y", "-loglevel", "error", "-framerate", String(fps), "-i", path.join(dir, "f%04d.jpg"), "-vf", "scale=in_range=full:out_range=limited,format=yuv420p", "-color_range", "tv", "-c:v", "libx264", out]);
   } else {
     enc(makeFrame(pose, sceneOpts), "f.jpg");
-    execFileSync("ffmpeg", ["-y", "-loglevel", "error", "-loop", "1", "-framerate", "10", "-t", "6", "-i", path.join(dir, "f.jpg"), "-c:v", "libx264", "-pix_fmt", "yuv420p", out]);
+    execFileSync("ffmpeg", ["-y", "-loglevel", "error", "-loop", "1", "-framerate", "10", "-t", "6", "-i", path.join(dir, "f.jpg"), "-vf", "scale=in_range=full:out_range=limited,format=yuv420p", "-color_range", "tv", "-c:v", "libx264", out]);
   }
   fs.writeFileSync(out + ".pose.json", JSON.stringify(pose));
   console.log("ok", out);

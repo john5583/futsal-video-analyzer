@@ -31,6 +31,16 @@ jobs:
         run: xvfb-run -a node tests/e2e/wizard-goal.js
         env:
           CI: "true"
+      - name: Calibrage guidé (centre du rond et bouts de la médiane fixent la profondeur)
+        if: ${{ inputs.groupe == '' }}
+        run: xvfb-run -a node tests/e2e/wizard-rond.js
+        env:
+          CI: "true"
+      - name: "Longueur et largeur du terrain (message visible, valeur gardée, hors limites refusé)"
+        if: ${{ inputs.groupe == '' }}
+        run: xvfb-run -a node tests/e2e/dimensions.js
+        env:
+          CI: "true"
       - name: Repères du coach qui suivent la caméra (but suivi sur une vidéo qui tourne)
         if: ${{ inputs.groupe == '' }}
         run: xvfb-run -a node tests/e2e/wizard-suivi.js
