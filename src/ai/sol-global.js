@@ -146,6 +146,12 @@
   }
   const vecteur = (M) => { const v = []; for (const p of COINS) { const q = ap(M, p[0], p[1]); v.push(q[0] * F480, q[1] * F480); } return v; };
   const ecart = (a, b) => { let m = 0; for (let q = 0; q < 10; q += 2) m = Math.max(m, Math.hypot(a[q] - b[q], a[q + 1] - b[q + 1])); return m; };
+  /* écart (px sur 480) entre deux positions M1 et M2 de la MÊME image : déviation de M1·M2⁻¹ par rapport à l'identité, mesurée dans le repère de cette image */
+  function ecartH(M1, M2) {
+    const R = mul(M1, inv(M2)); let m = 0;
+    for (const p of COINS) { const y = ap(R, p[0], p[1]); m = Math.max(m, Math.hypot(y[0] - p[0], y[1] - p[1]) * F480); }
+    return m;
+  }
   /* deux images se recouvrent-elles (d'après G) ? */
   function serecouvrent(G, a, b) {
     const M = mul(G[b], inv(G[a])); if (!M.every(isFinite)) return false;
@@ -252,18 +258,19 @@
       if (k % 200 === 1) prog("images", k / n);
     }
 
-    /* 5. filtre temporel appuyé sur le suivi : écarte les positions isolées */
+    /* 5. filtre temporel appuyé sur le suivi : écarte les positions isolées (comparaison dans le repère de l'image) */
     let Gs = Gf.map((g) => g.slice());
     const FEN = 10, TOL = 2.5;
     for (let it = 0; it < 3; it++) {
       const Gn = Gs.map((g) => g.slice());
       for (let k = 0; k < n; k++) {
         const cand = [];
-        for (let d = -FEN; d <= FEN; d++) { const j = k + d; if (j < 0 || j >= n || seg[j] !== seg[k]) continue; const M = mul(mul(C[k], Ci[j]), Gs[j]); if (!M.every(isFinite)) continue; const Mn = norm9(M); cand.push({ M: Mn, v: vecteur(Mn) }); }
+        for (let d = -FEN; d <= FEN; d++) { const j = k + d; if (j < 0 || j >= n || seg[j] !== seg[k]) continue; const M = mul(mul(C[k], Ci[j]), Gs[j]); if (!M.every(isFinite)) continue; cand.push(norm9(M)); }
         if (cand.length < 4) continue;
-        const med = []; for (let q = 0; q < 10; q++) { const a = cand.map((c) => c.v[q]).sort((x, y) => x - y); med.push(a[a.length >> 1]); }
-        const keep = cand.filter((c) => ecart(c.v, med) <= TOL); if (keep.length < 3) continue;
-        const A = new Array(9).fill(0); keep.forEach((c) => c.M.forEach((v, q) => { A[q] += v / keep.length; })); Gn[k] = norm9(A);
+        let ref = null, meilleur = Infinity;                        // candidat le plus proche de tous les autres (médoïde)
+        for (const c of cand) { const sc = cand.map((o) => ecartH(c, o)).sort((x, y) => x - y)[cand.length >> 1]; if (sc < meilleur) { meilleur = sc; ref = c; } }
+        const keep = cand.filter((c) => ecartH(c, ref) <= TOL); if (keep.length < 3) continue;
+        const A = new Array(9).fill(0); keep.forEach((c) => c.forEach((v, q) => { A[q] += v / keep.length; })); Gn[k] = norm9(A);
       }
       Gs = Gn;
     }
@@ -286,8 +293,25 @@
     for (let k = 0; k < n; k++) { if (score[k] !== null || (k % PV) === 0) continue; const a = Math.floor(k / PV) * PV, b = Math.min(a + PV, evalues[evalues.length - 1]); verdict[k] = (verdict[a] === "ok" && verdict[b] === "ok") ? "ok" : "incertain"; }
     for (let k = 0; k < n; k++) if (!Gs[k] || !Gs[k].every(isFinite)) verdict[k] = "incertain";
 
+    /* 7. pont : un passage « incertain » encadré par deux images « ok » est relié par le suivi image à image depuis chaque bord ; une image n'est gardée
+       (verdict « pont », moins précis que « ok ») que si les deux estimations s'accordent à pontMax px (sur 480) près. Hors accord : reste « incertain ». */
+    const PONT_MAX = opts.pontMax || 4;
+    const depuis = (a, k) => (seg[a] === seg[k] ? norm9(mul(mul(C[k], Ci[a]), Gs[a])) : null);
+    let nPont = 0;
+    for (let k = 0; k < n;) {
+      if (verdict[k] !== "incertain") { k++; continue; }
+      const s0 = k; while (k < n && verdict[k] === "incertain") k++;
+      const a = s0 - 1, b = k < n ? k : -1;
+      if (a < 0 || b < 0 || verdict[a] !== "ok" || verdict[b] !== "ok") continue;
+      const nouveaux = [];
+      for (let j = s0; j < k; j++) {
+        const A = depuis(a, j), B = depuis(b, j); if (!A || !B || !A.every(isFinite) || !B.every(isFinite)) continue;
+        if (ecartH(A, B) <= PONT_MAX) { const w = (j - a) / (b - a); nouveaux.push([j, norm9(A.map((v, q) => v * (1 - w) + B[q] * w))]); }
+      }
+      nouveaux.forEach(([j, M]) => { Gs[j] = M; verdict[j] = "pont"; nPont++; });
+    }
     const nOk = verdict.filter((v) => v === "ok").length;
-    return { G: Gs, verdict, score, stats: { n, cles: cles.length, aretes: aretes.length, aveugles: nAveugle, rejetees, ecartMedian: res.length ? res[res.length >> 1] : null, ruptures, repli: nRepli, ok: nOk, partOk: n ? nOk / n : 0 } };
+    return { G: Gs, verdict, score, stats: { n, cles: cles.length, aretes: aretes.length, aveugles: nAveugle, rejetees, ecartMedian: res.length ? res[res.length >> 1] : null, ruptures, repli: nRepli, ok: nOk, partOk: n ? nOk / n : 0, pont: nPont, partPont: n ? nPont / n : 0 } };
   }
 
   return { construire, masqueSolBleu, carteLignes, alignerCartes, tauxTraits, serecouvrent, versNorm, Nm, F480 };

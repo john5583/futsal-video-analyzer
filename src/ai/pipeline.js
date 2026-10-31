@@ -870,7 +870,7 @@
 
   /* Suivi global du sol (voir sol-global.js) : toute la vidéo est lue à 4 images/s, le calcul se fait dans le processus principal, et le résultat
      reprend la forme du suivi de la caméra ({ frames [{ t, h, q }], lost, ... }) pour que le reste du programme n'ait rien à changer.
-     Seules les images au verdict « ok » (lignes retrouvées dans au moins 2 images éloignées) donnent un tracé (q = 2) ; ailleurs rien n'est tracé.
+     Les images au verdict « ok » (lignes retrouvées dans au moins 2 images éloignées) donnent un tracé vérifié (q = 2) ; les images « pont » (position reliée par le suivi entre deux images vérifiées, accord contrôlé) un tracé moins précis (q = 1) ; ailleurs rien n'est tracé.
      opts : { url, calibrations [{ t, H }], signal, api (preload), onProgress({ etape, f, t }), lineColor } */
   const SOLG_PAS = 0.25;
   async function suiviSolGlobal(opts) {
@@ -912,12 +912,12 @@
       for (let k = 0; k < n; k++) {
         let ci = 0; calibs.forEach((c, i) => { if (Math.abs(c.t - times[k]) < Math.abs(calibs[ci].t - times[k])) ci = i; });
         let h = null;
-        if (r.verdict[k] === "ok") {
+        if (r.verdict[k] === "ok" || r.verdict[k] === "pont") {
           const Gc = r.G[kc[ci]], Gk = r.G[k];
           const Hs = HG.mul3(Ni, HG.mul3(HG.mul3(Gc, HG.invert(Gk)), Nm));        // pixels réduits de l'image k → pixels réduits de l'image du calibrage
           h = normalizedProjection(HG.mul3(calibs[ci].H, HG.mul3(Si, HG.mul3(Hs, S))), vw, vh);
         }
-        if (h) { frames.push({ t: Math.round(times[k] * 100) / 100, h, q: 2 }); nOk++; if (lostStart != null) { lost.push([lostStart, times[k]]); lostStart = null; } }
+        if (h) { frames.push({ t: Math.round(times[k] * 100) / 100, h, q: r.verdict[k] === "ok" ? 2 : 1 }); nOk++; if (lostStart != null) { lost.push([lostStart, times[k]]); lostStart = null; } }
         else if (lostStart == null) lostStart = times[k];
       }
       if (lostStart != null) lost.push([lostStart, times[n - 1]]);

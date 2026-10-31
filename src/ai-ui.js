@@ -571,7 +571,7 @@
     if (s.global) {
       const span = Math.max(0.1, s.t1 - s.t0), part = typeof s.globalPart === "number" ? s.globalPart : 0;
       return "Suivi précis du sol terminé en " + fmtDur(s.seconds || 0) + " : terrain tracé et vérifié sur " + String(Math.round(1000 * part) / 10).replace(".", ",") +
-        " % de la vidéo (" + App.fmt(s.t0) + " à " + App.fmt(s.t1) + "). « Vérifié » = les lignes de l'image, reportées dans au moins 2 images éloignées dans le temps, retombent sur de vraies lignes. Ailleurs, rien n'est tracé (non analysé), jamais de tracé inventé." +
+        " % de la vidéo (" + App.fmt(s.t0) + " à " + App.fmt(s.t1) + ")" + (s.globalPont > 0.0005 ? ", plus " + String(Math.round(1000 * s.globalPont) / 10).replace(".", ",") + " % reliées par le suivi entre deux passages vérifiés (un peu moins précis)" : "") + ". « Vérifié » = les lignes de l'image, reportées dans au moins 2 images éloignées dans le temps, retombent sur de vraies lignes. Ailleurs, rien n'est tracé (non analysé), jamais de tracé inventé." +
         (span > 0 ? "" : "");
     }
     const lost = s.lost || [], span = Math.max(0.1, s.t1 - s.t0), ls = lost.reduce((x, r) => x + (r[1] - r[0]), 0), pct = Math.round(1000 * (1 - ls / span)) / 10;
@@ -677,13 +677,14 @@
       });
       if (globalRun !== run || !a.camSuivi || a.camSuivi.cle !== cle) return;
       globalRun = null;
-      const g = r.frames.map((q) => [q.t, q.h, 2]), gt = r.frames.map((q) => q.t);
+      const g = r.frames.map((q) => [q.t, q.h, q.q === 1 ? 1 : 2]), gt = r.frames.map((q) => q.t);
       const gardes = (a.camSuivi.frames || []).filter((c) => c[2] === 2 && !gt.some((t) => Math.abs(t - c[0]) < 0.3));
       a.camSuivi.frames = g.concat(gardes).sort((x, y) => x[0] - y[0]);
       a.camSuivi.lost = r.lost.map((x) => [Math.round(x[0] * 100) / 100, Math.round(x[1] * 100) / 100]);
       a.camSuivi.lignes = a.camSuivi.lignes || r.lignes;
       a.camSuivi.global = true; a.camSuivi.seconds = r.seconds; a.camSuivi.t0 = r.t0; a.camSuivi.t1 = r.t1;
       a.camSuivi.globalPart = r.stats && typeof r.stats.partOk === "number" ? r.stats.partOk : 0;
+      a.camSuivi.globalPont = r.stats && typeof r.stats.partPont === "number" ? r.stats.partPont : 0;
       chargeSuivi(); suiviMsg(suiviBilan(a.camSuivi)); renderSuiviQ(); App.changed(); refreshLive();
     } catch (e) {
       if (globalRun === run) { globalRun = null; suiviMsg(ctrl.signal.aborted ? "" : "Suivi précis du sol interrompu : le suivi de la caméra reste utilisé ; il sera repris au prochain chargement."); }
