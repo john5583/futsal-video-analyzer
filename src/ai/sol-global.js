@@ -63,12 +63,14 @@
     return [gx, gy];
   }
   /* carte de lignes d'une image : crêtes des 4 couleurs, limitées au sol, réduites à 240×135, pyramide + gradients + masques de sol */
-  function carteLignes(rgba, masqueSol) {
+  const POIDS_CHOISIE = 3;
+  function carteLignes(rgba, masqueSol, choisie) {
     const work = CF.prepare({ data: rgba, width: W0, height: H0 }, W0);
     const R = new Float32Array(W0 * H0);
-    for (const key of ["white", "yellow", "red", "black"]) { const rm = CF.ridgeMap(work, key); for (let k = 0; k < R.length; k++) if (rm.R[k] > R[k]) R[k] = rm.R[k]; }
+    const Rc = new Float32Array(W0 * H0);
+    for (const key of ["white", "yellow", "red", "black"]) { const rm = CF.ridgeMap(work, key), w = key === choisie ? POIDS_CHOISIE : 1; for (let k = 0; k < R.length; k++) { const v = Math.min(1, w * rm.R[k]); if (v > R[k]) R[k] = v; if (key === choisie) Rc[k] = rm.R[k]; } }
     const fm = masqueSol(rgba, W0, H0);
-    for (let k = 0; k < R.length; k++) if (!fm[k]) R[k] = 0;
+    for (let k = 0; k < R.length; k++) if (!fm[k]) { R[k] = 0; Rc[k] = 0; }
     let a = flou(reduire(R, W0, H0), W, HH), cw = W, ch = HH, cur = a;
     const I = [a], M = [];
     for (let l = 1; l < NIV; l++) { cur = reduire(cur, cw, ch); cw >>= 1; ch >>= 1; I.push(flou(cur, cw, ch)); }
@@ -80,7 +82,7 @@
       for (let y = 0; y < nh; y++) for (let x = 0; x < nw; x++) n[y * nw + x] = M[l - 1][2 * y * cw + 2 * x] & M[l - 1][2 * y * cw + 2 * x + 1] & M[l - 1][(2 * y + 1) * cw + 2 * x] & M[l - 1][(2 * y + 1) * cw + 2 * x + 1];
       M.push(n); cw = nw; ch = nh;
     }
-    return { I, G: I.map((x, l) => gradients(x, W >> l, HH >> l)), M };
+    return { I, G: I.map((x, l) => gradients(x, W >> l, HH >> l)), M, Ic: flou(reduire(Rc, W0, H0), W, HH) };
   }
   const bil = (A, w, x, y) => { const x0 = x | 0, y0 = y | 0, fx = x - x0, fy = y - y0, i = y0 * w + x0; return A[i] * (1 - fx) * (1 - fy) + A[i + 1] * fx * (1 - fy) + A[i + w] * (1 - fx) * fy + A[i + w + 1] * fx * fy; };
   function resoudre(A, b, n) {
@@ -144,6 +146,20 @@
     }
     return n < 300 ? null : hit / n;
   }
+  function tauxChoisi(ca, cb, Hn) {
+    let n = 0, hit = 0;
+    for (let y = 4; y < HH - 4; y++) for (let x = 4; x < W - 4; x++) {
+      if (!ca.M[0][y * W + x] || ca.Ic[y * W + x] < 0.12) continue;
+      const q = ap(Hn, (x - W / 2) / F0, (y - HH / 2) / F0), u = W / 2 + F0 * q[0], v = HH / 2 + F0 * q[1];
+      if (!(u >= 3 && v >= 3 && u < W - 4 && v < HH - 4) || !cb.M[0][(v | 0) * W + (u | 0)]) continue;
+      n++; let m = 0;
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const vv = cb.Ic[((v | 0) + dy) * W + ((u | 0) + dx)]; if (vv > m) m = vv; }
+      if (m > 0.12) hit++;
+    }
+    return n < 80 ? null : hit / n;
+  }
+  /* un lien (ou une position) est refusé si la couleur choisie, quand elle est assez visible dans les deux images, ne retombe pas sur elle-même */
+  const choisiOk = (ca, cb, Hn) => { const t = tauxChoisi(ca, cb, Hn); return t === null || t >= 0.7; };
   const vecteur = (M) => { const v = []; for (const p of COINS) { const q = ap(M, p[0], p[1]); v.push(q[0] * F480, q[1] * F480); } return v; };
   const ecart = (a, b) => { let m = 0; for (let q = 0; q < 10; q += 2) m = Math.max(m, Math.hypot(a[q] - b[q], a[q + 1] - b[q + 1])); return m; };
   /* écart (px sur 480) entre deux positions M1 et M2 de la MÊME image : déviation de M1·M2⁻¹ par rapport à l'identité, mesurée dans le repère de cette image */
@@ -164,11 +180,11 @@
   /* ---------- construction ---------- */
   /* opts : { n, image(k) → RGBA 480×270, masqueSol?, pasCle=20, pasVerdict=4, seuil=0.85, progression?(étape, fraction) } */
   function construire(opts) {
-    const n = opts.n, masqueSol = opts.masqueSol || masqueSolBleu, KS = opts.pasCle || 20, TH = opts.seuil || 0.85;
+    const n = opts.n, choisie = opts.couleur || "black", masqueSol = opts.masqueSol || masqueSolBleu, KS = opts.pasCle || 20, TH = opts.seuil || 0.85;
     const prog = opts.progression || (() => {});
     const cacheC = new Map(), cacheD = new Map(), cachePrep = new Map();
     const rgba = (k) => opts.image(k);
-    const carte = (k) => { let c = cacheC.get(k); if (!c) { c = carteLignes(rgba(k), masqueSol); cacheC.set(k, c); if (cacheC.size > 300) cacheC.delete(cacheC.keys().next().value); } return c; };
+    const carte = (k) => { let c = cacheC.get(k); if (!c) { c = carteLignes(rgba(k), masqueSol, choisie); cacheC.set(k, c); if (cacheC.size > 300) cacheC.delete(cacheC.keys().next().value); } return c; };
     const prep = (k, avecMasque) => {
       const key = k * 2 + avecMasque; let p = cachePrep.get(key);
       if (!p) { const px = rgba(k); p = Cam.prepare(px, W0, H0, [], 4); p.mask = avecMasque ? masqueSol(px, W0, H0) : new Uint8Array(W0 * H0).fill(1); cachePrep.set(key, p); if (cachePrep.size > 60) cachePrep.delete(cachePrep.keys().next().value); }
@@ -204,7 +220,7 @@
       for (let ib = ia + 2; ib < cles.length; ib++) {
         const a = cles[ia], b = cles[ib]; if (!serecouvrent(G0, a, b)) continue;
         const H0 = norm9(mul(G0[b], inv(G0[a]))); let r; try { r = alignerCartes(carte(b), carte(a), H0); } catch (e) { r = { ok: false }; }
-        if (r.ok && r.inl > 0.5) { const Hr = norm9(r.H); const t = tauxTraits(carte(a), carte(b), Hr); if (t !== null && t >= TH) ajoute(a, b, Hr, Math.min(2, r.inl * 2)); }
+        if (r.ok && r.inl > 0.5) { const Hr = norm9(r.H); const t = tauxTraits(carte(a), carte(b), Hr); if (t !== null && t >= TH && choisiOk(carte(a), carte(b), Hr)) ajoute(a, b, Hr, Math.min(2, r.inl * 2)); }
         essais++;
       }
       prog("cles", ia / cles.length);
@@ -219,7 +235,7 @@
           if (!(r && r.ok)) continue;
           const H0m = versNorm(Array.from(r.H)); let rr; try { rr = alignerCartes(carte(b), carte(a), H0m); } catch (e) { rr = { ok: false }; }
           const cands = [H0m]; if (rr.ok) cands.push(norm9(rr.H));
-          for (const H of cands) { const t = tauxTraits(carte(a), carte(b), H); if (t !== null && t >= 0.9 && (!meilleur || t > meilleur.t)) meilleur = { H, t }; }
+          for (const H of cands) { const t = tauxTraits(carte(a), carte(b), H); if (t !== null && t >= 0.9 && choisiOk(carte(a), carte(b), H) && (!meilleur || t > meilleur.t)) meilleur = { H, t }; }
         }
         if (meilleur) { ajoute(a, b, meilleur.H, 2); nAveugle++; }
       }
@@ -284,7 +300,7 @@
     for (let k = 0; k < n; k += PV) {
       const cand = []; for (let j = 0; j < n; j += 3) if (Math.abs(j - k) >= MINGAP && serecouvrent(Gs, k, j)) cand.push(j);
       const refs = []; while (refs.length < NREF && cand.length) { const j = cand.splice((rnd() * cand.length) | 0, 1)[0]; if (refs.every((r) => Math.abs(r - j) >= Math.min(30, MINGAP / 2))) refs.push(j); }
-      const hs = []; for (const j of refs) { const t = tauxTraits(carte(k), carte(j), norm9(mul(Gs[j], Gi[k]))); if (t !== null) hs.push(t); }
+      const hs = []; for (const j of refs) { const H = norm9(mul(Gs[j], Gi[k])); let t = tauxTraits(carte(k), carte(j), H); if (t !== null && !choisiOk(carte(k), carte(j), H)) t = Math.min(t, 0.5); if (t !== null) hs.push(t); }
       hs.sort((x, y) => x - y); const med = hs.length ? hs[hs.length >> 1] : null, bons = hs.filter((v) => v >= TH).length;
       evalues.push(k); score[k] = med; verdict[k] = (hs.length >= 2 && bons >= 2 && med >= TH) ? "ok" : "incertain";
       if ((k / PV) % 50 === 0) prog("verdict", k / n);
@@ -310,9 +326,34 @@
       }
       nouveaux.forEach(([j, M]) => { Gs[j] = M; verdict[j] = "pont"; nPont++; });
     }
+    /* 8. rattrapage vérifié : une image encore « incertain » reçoit la position obtenue en la reliant par le suivi image à image aux images « ok » les plus
+       proches (des deux côtés si possible, d'un seul sinon et à moins de 40 images) ; elle n'est gardée (verdict « pont ») que si cette position passe le MÊME contrôle
+       que les autres (lignes et couleur choisie retombant sur au moins 2 images « ok » éloignées dans le temps). Sinon elle reste « incertain ». */
+    const GMAX1 = 40; let nRattrapes = 0;
+    const okIdx = []; for (let k = 0; k < n; k++) if (verdict[k] === "ok") okIdx.push(k);
+    const verifie = (k) => {
+      const cand = []; for (let j = 0; j < n; j += 3) if (verdict[j] === "ok" && Math.abs(j - k) >= MINGAP && serecouvrent(Gs, k, j)) cand.push(j);
+      const refs = []; while (refs.length < NREF && cand.length) { const j = cand.splice((rnd() * cand.length) | 0, 1)[0]; if (refs.every((r) => Math.abs(r - j) >= Math.min(30, MINGAP / 2))) refs.push(j); }
+      const gk = inv(Gs[k]), hs = [];
+      for (const j of refs) { const H = norm9(mul(Gs[j], gk)); let t = tauxTraits(carte(k), carte(j), H); if (t !== null && !choisiOk(carte(k), carte(j), H)) t = Math.min(t, 0.5); if (t !== null) hs.push(t); }
+      hs.sort((x, y) => x - y); const med = hs.length ? hs[hs.length >> 1] : null;
+      return hs.length >= 2 && hs.filter((v) => v >= TH).length >= 2 && med >= TH;
+    };
+    for (let k = 0; k < n; k++) {
+      if (verdict[k] !== "incertain") continue;
+      let a = k - 1; while (a >= 0 && verdict[a] !== "ok") a--;
+      let b = k + 1; while (b < n && verdict[b] !== "ok") b++;
+      const A = (a >= 0 && k - a <= GMAX1) ? depuis(a, k) : null, B = (b < n && b - k <= GMAX1) ? depuis(b, k) : null;
+      const cands = [];
+      if (A && B && A.every(isFinite) && B.every(isFinite)) { const w = (k - a) / (b - a); cands.push(norm9(A.map((v, q) => v * (1 - w) + B[q] * w))); }
+      if (A && A.every(isFinite)) cands.push(A);
+      if (B && B.every(isFinite)) cands.push(B);
+      const avant = Gs[k];
+      for (const c of cands) { Gs[k] = c; if (verifie(k)) { verdict[k] = "pont"; nRattrapes++; break; } Gs[k] = avant; }
+    }
     const nOk = verdict.filter((v) => v === "ok").length;
-    return { G: Gs, verdict, score, stats: { n, cles: cles.length, aretes: aretes.length, aveugles: nAveugle, rejetees, ecartMedian: res.length ? res[res.length >> 1] : null, ruptures, repli: nRepli, ok: nOk, partOk: n ? nOk / n : 0, pont: nPont, partPont: n ? nPont / n : 0 } };
+    return { G: Gs, verdict, score, stats: { n, cles: cles.length, aretes: aretes.length, aveugles: nAveugle, rejetees, ecartMedian: res.length ? res[res.length >> 1] : null, ruptures, repli: nRepli, ok: nOk, partOk: n ? nOk / n : 0, pont: nPont + nRattrapes, partPont: n ? (nPont + nRattrapes) / n : 0 } };
   }
 
-  return { construire, masqueSolBleu, carteLignes, alignerCartes, tauxTraits, serecouvrent, versNorm, Nm, F480 };
+  return { construire, tauxChoisi, masqueSolBleu, carteLignes, alignerCartes, tauxTraits, serecouvrent, versNorm, Nm, F480 };
 });
