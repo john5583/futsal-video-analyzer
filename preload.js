@@ -14,6 +14,15 @@ contextBridge.exposeInMainWorld("fsal", {
   aiDetect: (buffer, opts) => ipcRenderer.invoke("ai:detect", buffer, opts || {}),
   aiSegment: (req) => ipcRenderer.invoke("ai:segment", req),
   aiStop: () => ipcRenderer.invoke("ai:stop"),
+  solGlobalBegin: (n) => ipcRenderer.invoke("solglobal:begin", n),
+  solGlobalFrame: (id, k, buf) => ipcRenderer.invoke("solglobal:frame", id, k, buf),
+  solGlobalRun: (id) => ipcRenderer.invoke("solglobal:run", id),
+  solGlobalCancel: (id) => ipcRenderer.invoke("solglobal:cancel", id),
+  onSolGlobalProgress: (cb) => {
+    const handler = (_e, id, p) => cb(id, p);
+    ipcRenderer.on("solglobal:progress", handler);
+    return () => ipcRenderer.removeListener("solglobal:progress", handler);
+  },
   aiSetDevice: (device) => ipcRenderer.invoke("ai:setDevice", device),
   labelsKey: (name, size) => ipcRenderer.invoke("labels:key", name, size),
   journalAppend: (entry) => ipcRenderer.invoke("journal:append", entry),

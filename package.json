@@ -30,6 +30,7 @@
       "preload.js",
       "updater.js",
       "labelsFs.js",
+      "solGlobalFs.js",
       "src/**/*",
       "build/icon.png",
       "package.json",

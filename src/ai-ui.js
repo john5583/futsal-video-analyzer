@@ -568,6 +568,12 @@
   }
   /* Phrase de bilan du suivi (part de la vidéo où la caméra est suivie, passages perdus). */
   function suiviBilan(s) {
+    if (s.global) {
+      const span = Math.max(0.1, s.t1 - s.t0), part = typeof s.globalPart === "number" ? s.globalPart : 0;
+      return "Suivi précis du sol terminé en " + fmtDur(s.seconds || 0) + " : terrain tracé et vérifié sur " + String(Math.round(1000 * part) / 10).replace(".", ",") +
+        " % de la vidéo (" + App.fmt(s.t0) + " à " + App.fmt(s.t1) + "). « Vérifié » = les lignes de l'image, reportées dans au moins 2 images éloignées dans le temps, retombent sur de vraies lignes. Ailleurs, rien n'est tracé (non analysé), jamais de tracé inventé." +
+        (span > 0 ? "" : "");
+    }
     const lost = s.lost || [], span = Math.max(0.1, s.t1 - s.t0), ls = lost.reduce((x, r) => x + (r[1] - r[0]), 0), pct = Math.round(1000 * (1 - ls / span)) / 10;
     let m = "Suivi de la caméra terminé : caméra suivie sur " + String(pct).replace(".", ",") + " % de la vidéo (" + App.fmt(s.t0) + " à " + App.fmt(s.t1) + "), en " + fmtDur(s.seconds || 0) + ".";
     if (s.lignes) {
@@ -623,7 +629,7 @@
     if (cam !== "mobile" || !a.calibrations.length || !App.isVideoReady() || !(video.duration > 0)) { if (cam !== "mobile" || !a.calibrations.length) { suiviFr = []; suiviMsg(""); } return; }
     if (running) { planSuivi(5000); return; }              // l'analyse complète fait déjà son propre suivi
     const cle = P.cleSuivi(a.calibrations, video.duration, couleurCle(a));
-    if (a.camSuivi && a.camSuivi.cle === cle) { chargeSuivi(); suiviMsg(suiviBilan(a.camSuivi)); renderSuiviQ(); refreshLive(); return; }
+    if (a.camSuivi && a.camSuivi.cle === cle) { chargeSuivi(); suiviMsg(suiviBilan(a.camSuivi)); renderSuiviQ(); refreshLive(); if (!a.camSuivi.global) planSolGlobal(3000); return; }
     suiviFr = []; a.camSuivi = null; refreshLive();
     const ctrl = new AbortController(), run = { ctrl, pct: 0 }; suiviRun = run;
     suiviMsg("Suivi de la caméra en cours (en arrière-plan, vous pouvez continuer)…", 0);
@@ -646,8 +652,41 @@
       if (r.dims) a.camSuivi.dims = r.dims;
       else if (!a.lineColor) a.camSuivi.sansLignes = false; else a.camSuivi.sansLignes = true;
       chargeSuivi(); suiviMsg(suiviBilan(a.camSuivi)); renderSuiviQ(); App.changed(); refreshLive();
+      planSolGlobal(2000);
     } catch (e) {
       if (suiviRun === run) { suiviRun = null; suiviMsg(ctrl.signal.aborted ? "" : "Suivi de la caméra interrompu : il sera repris au prochain chargement de la vidéo."); }
+    }
+  }
+
+  /* ---------- suivi précis du sol (voir sol-global.js) : toute la vidéo, en arrière-plan, après le suivi classique ----------
+     Remplace les positions du suivi classique par celles du graphe global là où le verdict est « ok » ; là où il ne l'est pas, on ne garde du suivi classique
+     que les positions déjà vérifiées sur les lignes (q = 2) ; ailleurs rien n'est tracé. */
+  let globalRun = null, globalTimer = null;
+  function planSolGlobal(delay) { clearTimeout(globalTimer); globalTimer = setTimeout(lanceSolGlobal, delay == null ? 2000 : delay); }
+  async function lanceSolGlobal() {
+    const a = ai();
+    if (!a || !a.camSuivi || a.camSuivi.global || globalRun || !P.suiviSolGlobal || !window.fsal || !window.fsal.solGlobalBegin) return;
+    if (running || suiviRun) { planSolGlobal(5000); return; }
+    const cle = a.camSuivi.cle, ctrl = new AbortController(), run = { ctrl }; globalRun = run;
+    const etapes = { images: "lecture de la vidéo", suivi: "suivi image par image", cles: "images clés", aveugle: "liens entre images éloignées", ajuste: "ajustement", filtre: "filtrage", verdict: "vérification" };
+    suiviMsg("Suivi précis du sol en cours (en arrière-plan, vous pouvez continuer)…", 0);
+    try {
+      const r = await P.suiviSolGlobal({
+        url: App.getVideoUrl(), calibrations: a.calibrations.map((c) => ({ t: c.t, H: c.H })), signal: ctrl.signal, api: window.fsal, lineColor: a.lineColor || null,
+        onProgress: (p) => { suiviMsg("Suivi précis du sol : " + (etapes[p.etape] || p.etape) + " " + Math.round(100 * (p.f || 0)) + " %", Math.round(100 * (p.f || 0))); }
+      });
+      if (globalRun !== run || !a.camSuivi || a.camSuivi.cle !== cle) return;
+      globalRun = null;
+      const g = r.frames.map((q) => [q.t, q.h, 2]), gt = r.frames.map((q) => q.t);
+      const gardes = (a.camSuivi.frames || []).filter((c) => c[2] === 2 && !gt.some((t) => Math.abs(t - c[0]) < 0.3));
+      a.camSuivi.frames = g.concat(gardes).sort((x, y) => x[0] - y[0]);
+      a.camSuivi.lost = r.lost.map((x) => [Math.round(x[0] * 100) / 100, Math.round(x[1] * 100) / 100]);
+      a.camSuivi.lignes = a.camSuivi.lignes || r.lignes;
+      a.camSuivi.global = true; a.camSuivi.seconds = r.seconds; a.camSuivi.t0 = r.t0; a.camSuivi.t1 = r.t1;
+      a.camSuivi.globalPart = r.stats && typeof r.stats.partOk === "number" ? r.stats.partOk : 0;
+      chargeSuivi(); suiviMsg(suiviBilan(a.camSuivi)); renderSuiviQ(); App.changed(); refreshLive();
+    } catch (e) {
+      if (globalRun === run) { globalRun = null; suiviMsg(ctrl.signal.aborted ? "" : "Suivi précis du sol interrompu : le suivi de la caméra reste utilisé ; il sera repris au prochain chargement."); }
     }
   }
 

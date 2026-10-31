@@ -350,6 +350,19 @@ function registerIpc() {
     } catch (err) { return { error: String(err && err.message || err) }; }
   });
   ipcMain.handle("ai:stop", () => { aiStop(); return true; });
+  /* suivi global du sol (voir solGlobalFs.js) : images envoyées une à une, calcul dans un fil séparé */
+  const SOL = require("./solGlobalFs");
+  ipcMain.handle("solglobal:begin", (_e, n) => SOL.begin(n, app.getPath("temp")));
+  ipcMain.handle("solglobal:frame", (_e, id, k, buf) => SOL.frame(id, k, buf));
+  ipcMain.handle("solglobal:run", async (e, id) => {
+    const workerFile = path.join(__dirname, "src", "ai", "sol-global-worker.js").replace("app.asar" + path.sep, "app.asar.unpacked" + path.sep);
+    try {
+      const r = await SOL.run(id, workerFile, (p) => { try { e.sender.send("solglobal:progress", id, p); } catch (_x) { /* fenêtre fermée */ } });
+      return { ok: true, G: r.G, verdict: r.verdict, score: r.score, stats: r.stats, Nm: r.Nm };
+    } catch (err) { return { ok: false, error: String((err && err.message) || err) }; }
+    finally { SOL.close(id); }
+  });
+  ipcMain.handle("solglobal:cancel", (_e, id) => { SOL.close(id); return true; });
 
   ipcMain.handle("dataset:exportBall", async (_e, items) => {
     if (!Array.isArray(items) || !items.length || items.length > 5000) return { error: "Aucune image à exporter." };
