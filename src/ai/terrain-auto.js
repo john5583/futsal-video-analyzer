@@ -225,6 +225,17 @@
     return w > 200 ? s / w : null;
   }
 
+  /* La caméra étant fixe, un VRAI rond redonne, dans d'autres images, la même distance et la même hauteur de caméra ; une fausse détection (mur, personnes, autre arc) non.
+     dets : ellipses candidates { e, n, frac } (ou null) ; rend le nombre d'images concordantes (distance ±5 %, hauteur ±8 %, résidu < 1 px). */
+  function confirmerCamera(dets, jRef, pose, fov, o) {
+    o = o || {}; let ok = 0;
+    dets.forEach((d, j) => {
+      if (j === jRef || !d || d.n < (o.minPts || 50) || d.frac < (o.minFrac || 0.4) || !(d.e.cx > 0 && d.e.cx < W && d.e.cy > 0 && d.e.cy < H)) return;
+      const p = poseDepuisEllipse(d.e, fov, { essais: o.essais || 20, seed: j + 1 });
+      if (p && p.residu < 1 && Math.abs(p.q[0] - pose.q[0]) <= 0.05 * pose.q[0] && Math.abs(p.q[1] - pose.q[1]) <= 0.08 * pose.q[1]) ok++;
+    });
+    return ok;
+  }
   /* ---------- analyse complète ---------- */
   /* o : { n, image(k) -> RGBA 480×270, G, verdict, Nm, pas = 4, fov, progression(etape, f) }
      Rend { ok, fov, q, kref, Hr, echantillons : [{ k, genre, c, dx, dy, s }], stats } ; genre : « rond » (le suivi tombe sur le rond), « rond-corr » (remis sur le rond),
@@ -245,6 +256,8 @@
     if (jr < 0) return { ok: false, raison: "Rond central noir introuvable" };
     const pose = poseDepuisEllipse(det[jr].e, fov, { seed: 5 });
     if (!pose || pose.residu > 1.5) return { ok: false, raison: "Pose du rond non fiable" };
+    const concordantes = confirmerCamera(det, jr, pose, fov);
+    if (concordantes < 8) return { ok: false, raison: "Rond central noir non confirmé (" + concordantes + " images concordantes sur 8 exigées)" };
     const Hr = poseDepuisRond(pose.q, fov), kref = idx[jr], Gri = inv(G[kref]);
     const Hn = (j) => mul(mul(G[idx[j]], Gri), Hr);
     prog("terrain-rond", 0);
@@ -449,5 +462,5 @@
     return { Hn, c: e.c, dx: e.dx, dy: e.dy, genre: e.genre, niveau: niveau(e.genre, e.ro), probable: niveau(e.genre, e.ro) === "probable", P: projecteur(Hn, e.c, e.dx, e.dy) };
   }
 
-  return { W, H, FOV_DEFAUT, RAYON_ROND, poseH, poseDepuisRond, versPixel, pointsRond, ajusterConique, conique2ellipse, detecterEllipse, distEllipse, poseDepuisEllipse, residuRond, carteNoire, carteLignes8, ajusterRond, batirMosaique, scoreMosaique, projecteur, analyser, projectionImage, promouvoirParButs, niveau, orienterCalibrage, homographieProgramme, ecartProjecteurs, poserPonts, D4, nelderMead, setF480: (v) => { F480 = v; }, getF480: () => F480, rnd, mul, inv };
+  return { W, H, FOV_DEFAUT, RAYON_ROND, poseH, poseDepuisRond, versPixel, pointsRond, ajusterConique, conique2ellipse, detecterEllipse, distEllipse, poseDepuisEllipse, residuRond, carteNoire, carteLignes8, ajusterRond, batirMosaique, scoreMosaique, projecteur, analyser, confirmerCamera, projectionImage, promouvoirParButs, niveau, orienterCalibrage, homographieProgramme, ecartProjecteurs, poserPonts, D4, nelderMead, setF480: (v) => { F480 = v; }, getF480: () => F480, rnd, mul, inv };
 });

@@ -141,3 +141,18 @@ test("veto du but : une image vérifiée où le but détecté est très loin de 
   assert.strictEqual(res.stats.veto, 1);
   assert.strictEqual(res.stats.verifiees, 2);
 });
+
+test("garde-fou : un vrai rond (même caméra vue sous d'autres orientations) est confirmé, de fausses détections incohérentes non", () => {
+  const rand = TA.rnd(17), mk = (q, psi, th) => {
+    const Hn = TA.poseH([-q[0], 0, q[1], psi, th, 0.01], 91), pts = [];
+    for (let i = 0; i < 160; i++) { const a = 2 * Math.PI * i / 160, p = TA.versPixel(Hn, 3 * Math.cos(a), 3 * Math.sin(a)); if (p && p[0] > 0 && p[0] < 480 && p[1] > 0 && p[1] < 270) pts.push([p[0], p[1]]); }
+    return pts.length >= 60 ? TA.detecterEllipse(pts.map((p) => [p[0] + (rand() - 0.5) * 0.4, p[1] + (rand() - 0.5) * 0.4]), { seed: 2 }) : null;
+  };
+  const vrais = []; for (let i = 0; i < 14; i++) vrais.push(mk([11.55, 3.88], 0.2 + 0.05 * i, 0.45 + 0.01 * i));
+  const bons = vrais.filter(Boolean); assert.ok(bons.length >= 10, "assez d'ellipses synthétiques : " + bons.length);
+  const jRef = vrais.findIndex(Boolean), poseRef = TA.poseDepuisEllipse(vrais[jRef].e, 91, { essais: 60, seed: 1 });
+  assert.ok(TA.confirmerCamera(vrais, jRef, poseRef, 91) >= 8, "caméra fixe : au moins 8 images concordantes");
+  const faux = []; for (let i = 0; i < 14; i++) faux.push(mk([6 + 3.3 * i, 1.8 + 0.4 * i], 0.3 + 0.03 * i, 0.3 + 0.03 * i));
+  const jF = faux.findIndex(Boolean), poseF = TA.poseDepuisEllipse(faux[jF].e, 91, { essais: 60, seed: 1 });
+  assert.ok(TA.confirmerCamera(faux, jF, poseF, 91) < 8, "détections de caméras différentes : refusées");
+});
