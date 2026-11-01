@@ -265,7 +265,7 @@
       ech.forEach((e, j) => { if ((tour === 0 ? e.ring : e.confirme)) ancres[Math.floor(j / 20) % 2].push({ j, P: projecteur(Hn(j), e.c0 && tour === 0 ? e.c0 : e.c, e.dx, e.dy) }); });
       const cellules = ancres.map((x) => (x.length >= 30 ? batirMosaique(x, lms) : []));
       for (let j = 0; j < idx.length; j++) {
-        const e = ech[j], cs = cellules[1 - (Math.floor(j / 20) % 2)]; if (cs.length < 2000) { e.confirme = false; e.genre = "non"; e.c = null; e.dx = 0; e.dy = 0; continue; }
+        const e = ech[j], cs = cellules[1 - (Math.floor(j / 20) % 2)]; if (cs.length < 2000) { e.confirme = false; if (e.ring) { e.genre = "rond-seul"; e.c = e.c0; e.dx = 0; e.dy = 0; } else { e.genre = "non"; e.c = null; e.dx = 0; e.dy = 0; } continue; }
         let meilleur = null;
         for (const c of (e.c0 ? [e.c0, null] : [null])) {
           const P0 = projecteur(Hn(j), c, 0, 0), s0 = scoreMosaique(lms[j], P0, cs, 0, 0);
@@ -347,7 +347,7 @@
     return n >= 4 ? s / n : null;
   }
   const NIVEAU_VERIFIE = { rond: 1, "rond-corr": 1, "mos-suivi": 1, "mos-recale": 1, pont: 1 };
-  const niveau = (genre, ro) => (NIVEAU_VERIFIE[genre] ? "verifie" : genre === "mos-direct" ? (ro ? "verifie" : "probable") : genre === "probable" ? (ro ? "verifie" : "probable") : "non");
+  const niveau = (genre, ro) => (NIVEAU_VERIFIE[genre] ? "verifie" : genre === "mos-direct" ? (ro ? "verifie" : "probable") : genre === "probable" || genre === "rond-seul" ? (ro ? "verifie" : "probable") : "non");
   const verifie = (e) => niveau(e.genre, e.ringOk) === "verifie";
   function poserPonts(ech, Hn, maxLongueur, tolPx) {
     let ajoutes = 0, j = 0;
@@ -423,7 +423,7 @@
     // 2. promotion
     let n = 0;
     res.echantillons.forEach((e, j) => {
-      if (e.genre !== "probable" || e.ro || !(e.s >= 0.5)) return; const b = meilleurBut(j); if (!b) return;
+      if ((e.genre !== "probable" && e.genre !== "rond-seul") || e.ro || !(e.s >= 0.5)) return; const b = meilleurBut(j); if (!b) return;
       const pr = projectionImage(res, G, e.k); if (!pr) return;
       if (Math.min(erreur(pr.P, b, hp), erreur(pr.P, b, -hm)) <= tol) { e.ro = true; e.preuveBut = true; n++; }
     });

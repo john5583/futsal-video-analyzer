@@ -89,6 +89,8 @@ test("niveaux : vérifié seulement avec deux preuves ; une localisation directe
   assert.strictEqual(TA.niveau("mos-direct", true), "verifie");
   assert.strictEqual(TA.niveau("probable"), "probable");
   assert.strictEqual(TA.niveau("non"), "non");
+  assert.strictEqual(TA.niveau("rond-seul"), "probable", "vidéo trop courte pour la mosaïque : le rond seul reste probable");
+  assert.strictEqual(TA.niveau("rond-seul", true), "verifie", "promu par le but détecté");
 });
 
 test("ponts : une brève série non vérifiée entre deux images dont les corrections s'accordent est reliée, sinon elle reste non analysée", () => {
