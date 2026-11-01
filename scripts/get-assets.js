@@ -11,6 +11,8 @@ const ASSETS = [
   { file: "models/yolox_s.onnx", url: "https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_s.onnx", sha256: "c5c2d13e59ae883e6af3b45daea64af4833a4951c92d116ec270d9ddbe998063", model: true },
   // modèle plus précis (ballon), utilisé seulement sur carte graphique
   { file: "models/yolox_m.onnx", url: "https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_m.onnx", sha256: "21ff6cfdeb53b013bac2249599e55f00bff3cfdfdab37ed7a4620818c1d15b3f", model: true },
+  // détecteur de buts entraîné sur les images du coach (YOLOX-m, 1 objet) : fichier de la version 1.13.2 du dépôt
+  { file: "models/but.onnx", url: "https://github.com/john5583/futsal-video-analyzer/releases/download/v1.13.2/modele-buts-1.onnx", sha256: "90c8eeea34b6ecec27341f8474b7e629db2a8e82c5d97847601c5d60b080c4fc" },
   { file: "models/mobile_sam_encoder.onnx", url: "https://huggingface.co/Acly/MobileSAM/resolve/main/mobile_sam_image_encoder.onnx", sha256: "580f5fb648ea1062c0aabc26217aed56921985f03f0cbbd852bba81d760cc749", model: true },
   { file: "models/mobile_sam_decoder.onnx", url: "https://huggingface.co/Acly/MobileSAM/resolve/main/sam_mask_decoder_single.onnx", sha256: "93915fc7c993ab9d59ab8c9ccd3bce37f7509c81ab4150a74abd4d2abbd8570d", model: true },
   { file: "tests/fixtures/bus.jpg", url: "https://raw.githubusercontent.com/ultralytics/yolov5/master/data/images/bus.jpg", sha256: "33b198a1d2839bb9ac4c65d61f9e852196793cae9a0781360859425f6022b69c", model: false }
