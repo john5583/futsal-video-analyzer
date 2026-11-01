@@ -2189,6 +2189,14 @@
       $("ai-d1").open = true; $("ai-d1").scrollIntoView({ block: "nearest" });
       App.toast("Placez les repères du terrain sur cette image, puis « Valider le calibrage ».");
     });
+    /* Bouton toujours visible : pause à l'instant affiché, puis placement des repères du terrain à cet instant (n'importe où dans la vidéo). */
+    const bRep = $("c-repere");
+    if (bRep) bRep.addEventListener("click", () => {
+      if (!App.isVideoReady()) { App.toast("Ouvrez d'abord une vidéo."); return; }
+      video.pause();
+      $("ai-d1").open = true; $("ai-d1").scrollIntoView({ block: "nearest" });
+      App.toast("Vidéo en pause à " + App.fmt(video.currentTime || 0) + " : choisissez le repère dans la liste, cliquez « Placer sur l'image » puis sur l'image (molette : zoom). Avec au moins 4 repères : « Valider le calibrage ».");
+    });
     $("ai-camera").addEventListener("change", () => planSuivi(500));
     video.addEventListener("loadedmetadata", () => {
       planSuivi(1500);
