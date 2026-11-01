@@ -1971,7 +1971,8 @@
     const v2 = isV2(), fps = v2 ? 3 : Number($("ai-fps").value), tiles = v2 ? 3 : Number($("ai-tiles").value);      // v2 : 3 images/s, zoom automatique
     /* Étape 1 sur 2 : LE TERRAIN D'ABORD. Lancer l'analyse des joueurs interrompait le calcul du terrain et la remplaçait par l'ancien suivi de la caméra (traits faux) ;
        maintenant le suivi du sol et l'identification par le rond se terminent d'abord, puis l'analyse des joueurs s'appuie sur ce terrain vérifié. */
-    if ((a.camera || $("ai-camera").value) === "mobile" && !(a.camSuivi && a.camSuivi.global && a.camSuivi.terrain) && !(opts && opts.sansTerrain) && P.suiviSolGlobal && window.fsal && window.fsal.solGlobalBegin && a.lineColor) {
+    /* Pas d'étape 1 sur une vidéo courte : l'identification du terrain par le rond demande plusieurs minutes de vidéo (au moins 8 images concordantes) ; en dessous, l'analyse démarre tout de suite. */
+    if (video.duration >= 150 && (a.camera || $("ai-camera").value) === "mobile" && !(a.camSuivi && a.camSuivi.global && a.camSuivi.terrain) && !(opts && opts.sansTerrain) && P.suiviSolGlobal && window.fsal && window.fsal.solGlobalBegin && a.lineColor) {
       preparing = { annule: false }; const prep = preparing;
       $("ai-run").disabled = true; $("ai-cancel").hidden = false; $("ai-cancel").onclick = () => { prep.annule = true; if (suiviRun) suiviRun.ctrl.abort(); if (globalRun) globalRun.ctrl.abort(); };
       msg.textContent = "Étape 1 sur 2 : le terrain (suivi du sol puis identification par le rond, environ 45 minutes en arrière-plan). L'analyse des joueurs démarrera toute seule ensuite. Vous pouvez continuer à regarder la vidéo.";
