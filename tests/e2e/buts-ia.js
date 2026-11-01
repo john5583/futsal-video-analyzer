@@ -15,7 +15,9 @@ const must = (c, m) => { if (!c) { out("FAIL", m); process.exitCode = 1; } else 
   const b64 = fs.readFileSync(img).toString("base64");
   const gt = fs.readFileSync(lab, "utf8").trim().split(/\n/).filter(Boolean).map((l) => l.split(/\s+/).map(Number));
   const ud = fs.mkdtempSync(path.join(require("os").tmpdir(), "fsal-buts-"));   // dossier de données à part : n'entre pas en conflit avec une autre instance ouverte
-  const app = await electron.launch({ args: [APP, "--user-data-dir=" + ud] });
+  const app = process.env.EXE
+    ? await electron.launch({ executablePath: process.env.EXE, args: ["--user-data-dir=" + ud] })          // application fabriquée (dist\win-unpacked)
+    : await electron.launch({ args: [APP, "--user-data-dir=" + ud] });
   const win = await app.firstWindow();
   await win.waitForLoadState("domcontentloaded");
   const dispo = await win.evaluate(() => window.fsal.aiGoalsDispo());
