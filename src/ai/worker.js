@@ -6,6 +6,7 @@ const Y = require("./yolox");
 const SAM = require("./sam");
 const SIL = require("./silhouette");
 const Backend = require("./backend");
+const But = require("./but-ia");
 
 let ort = null;
 let engine = null;
@@ -58,7 +59,31 @@ async function onSegment(msg) {
   }
 }
 
+/* Buts : détecteur entraîné (YOLOX-m, un seul objet), chargé à la première demande, sur le processeur (fiable partout). */
+let butSession = null;
+async function getBut() {
+  if (!butSession) {
+    if (!workerData.butModelPath) throw new Error("Détecteur de buts introuvable");
+    butSession = ort.InferenceSession.create(workerData.butModelPath, { executionProviders: ["cpu"], graphOptimizationLevel: "all", intraOpNumThreads: Math.max(1, Math.min(8, workerData.threads || 4)) });
+    butSession.catch(() => { butSession = null; });
+  }
+  return butSession;
+}
+async function onGoals(msg) {
+  try {
+    await ready;
+    const s = await getBut();
+    const rgba = new Uint8ClampedArray(msg.buffer);
+    const runner = async (t) => { const r = await s.run({ [s.inputNames[0]]: new ort.Tensor("float32", t, [1, 3, But.IH, But.IW]) }); return r[s.outputNames[0]].data; };
+    const boxes = await But.detecter(runner, rgba, msg.width, msg.height, { seuil: msg.seuil });
+    parentPort.postMessage({ type: "result", id: msg.id, boxes });
+  } catch (e) {
+    parentPort.postMessage({ type: "result", id: msg.id, error: String(e && e.message || e) });
+  }
+}
+
 parentPort.on("message", async (msg) => {
+  if (msg && msg.type === "goals") return onGoals(msg);
   if (msg && msg.type === "segment") return onSegment(msg);
   if (!msg || msg.type !== "detect") return;
   try {

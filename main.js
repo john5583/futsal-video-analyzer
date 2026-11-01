@@ -88,6 +88,12 @@ function gpuModelPath() {
   return fs.existsSync(p) ? p : null;
 }
 
+/* Détecteur de buts entraîné (facultatif : sans ce fichier, l'assistant garde sa recherche d'avant). */
+function butModelPath() {
+  const p = app.isPackaged ? path.join(process.resourcesPath, "models", "but.onnx") : path.join(__dirname, "models", "but.onnx");
+  return fs.existsSync(p) ? p : null;
+}
+
 function samPaths() {
   const dir = app.isPackaged ? path.join(process.resourcesPath, "models") : path.join(__dirname, "models");
   return { enc: path.join(dir, "mobile_sam_encoder.onnx"), dec: path.join(dir, "mobile_sam_decoder.onnx") };
@@ -122,7 +128,7 @@ function aiStart() {
     let signature = app.getVersion();
     try { signature += ":" + fs.statSync(file).size; } catch (_e) { /* taille inconnue */ }
     const w = new Worker(workerFile, { workerData: {
-      modelPath: file, gpuModelPath: gpuModelPath(), samEncPath: samPaths().enc, samDecPath: samPaths().dec, threads: Math.max(1, os.cpus().length - 1),
+      modelPath: file, gpuModelPath: gpuModelPath(), samEncPath: samPaths().enc, samDecPath: samPaths().dec, butModelPath: butModelPath(), threads: Math.max(1, os.cpus().length - 1),
       prefer: aiDevicePref(), backendFile: path.join(app.getPath("userData"), "ai-backend.json"), signature
     } });
     ai.worker = w;
@@ -134,7 +140,7 @@ function aiStart() {
         const p = ai.pending.get(m.id);
         if (!p) return;
         ai.pending.delete(m.id);
-        if (m.error) p.reject(new Error(m.error)); else p.resolve(m.masks !== undefined ? m.masks : m.dets);
+        if (m.error) p.reject(new Error(m.error)); else p.resolve(m.boxes !== undefined ? m.boxes : (m.masks !== undefined ? m.masks : m.dets));
       }
     });
     w.on("error", (e) => { reject(e); aiStop(); });
@@ -151,6 +157,18 @@ async function aiDetect(buffer, opts) {
     ai.pending.set(id, { resolve, reject });
     const ab = buffer instanceof ArrayBuffer ? buffer : (buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength));
     ai.worker.postMessage({ type: "detect", id, buffer: ab, minPerson: opts && opts.minPerson, minBall: opts && opts.minBall }, [ab]);
+  });
+}
+
+/* Buts : { buffer (RGBA), width, height, seuil } -> cadres [{ x0, y0, x1, y1, score }] dans les pixels de l'image. */
+async function aiGoals(req) {
+  if (!butModelPath()) throw new Error("Détecteur de buts absent");
+  await aiStart();
+  return new Promise((resolve, reject) => {
+    const id = ai.nextId++;
+    ai.pending.set(id, { resolve, reject });
+    const ab = req.buffer instanceof ArrayBuffer ? req.buffer : req.buffer.buffer.slice(req.buffer.byteOffset, req.buffer.byteOffset + req.buffer.byteLength);
+    ai.worker.postMessage({ type: "goals", id, buffer: ab, width: req.width, height: req.height, seuil: req.seuil }, [ab]);
   });
 }
 
@@ -342,6 +360,13 @@ function registerIpc() {
   ipcMain.handle("ai:detect", async (_e, buffer, opts) => {
     try { return { dets: await aiDetect(buffer, opts || {}) }; }
     catch (err) { return { error: String(err && err.message || err) }; }
+  });
+  ipcMain.handle("ai:goalsDispo", () => !!butModelPath());
+  ipcMain.handle("ai:goals", async (_e, req) => {
+    try {
+      if (!req || !(req.width > 0) || !(req.height > 0) || !req.buffer) throw new Error("Requête de détection de buts invalide");
+      return { boxes: await aiGoals(req) };
+    } catch (err) { return { error: String(err && err.message || err) }; }
   });
   ipcMain.handle("ai:segment", async (_e, req) => {
     try {

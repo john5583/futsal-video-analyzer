@@ -2,7 +2,7 @@
    Étapes : choix des vidéos → terrain → silhouettes (mon équipe, adversaires, gardiens, arbitre) → analyse → résultats. */
 (function () {
   "use strict";
-  const App = window.FSApp, AI = window.FSAI, K = window.FutsalKit, HG = window.FutsalHomography, CF = window.FutsalCourtFit, GL = window.FutsalGoal, QL = window.FutsalQuality, EXM = window.FutsalExemples;
+  const App = window.FSApp, AI = window.FSAI, K = window.FutsalKit, HG = window.FutsalHomography, CF = window.FutsalCourtFit, GL = window.FutsalGoal, IAB = window.FutsalButIA, QL = window.FutsalQuality, EXM = window.FutsalExemples;
   const $ = (id) => document.getElementById(id);
   const esc = App.esc, api = App.api, video = App.video;
 
@@ -94,13 +94,20 @@
     if (T.phase === "scan") return head + "<p class=\"wiz-busy\">⏳ " + esc(T.text || "Recherche d'un but dans la vidéo…") + "</p>" + cancel;
     if (T.phase === "nogoal") {
       return head + "<p>Je n'ai pas repéré de but dans la vidéo (je cherche des poteaux à bandes de couleur, ou d'une couleur que vous m'avez déjà montrée). Avancez la vidéo jusqu'à une image où <b>un but est bien visible</b>, puis cliquez :</p>" +
-        "<div class=\"wiz-btns\"><button class=\"primary\" data-act=\"retryGoal\">🔍 Chercher le but sur cette image</button><button data-act=\"showGoal\">Je montre le but moi-même (3 clics)</button><button data-act=\"manualMode\">Placer les repères moi-même</button></div>" +
+        "<div class=\"wiz-btns\"><button class=\"primary\" data-act=\"retryGoal\">🔍 Chercher le but sur cette image</button><button data-act=\"drawGoal\">Je dessine le but à la souris</button><button data-act=\"showGoal\">Je montre le but en 3 clics</button><button data-act=\"manualMode\">Placer les repères moi-même</button></div>" +
         (T.msg ? "<p class=\"wiz-err\">" + esc(T.msg) + "</p>" : "") + cancel;
     }
     if (T.phase === "confirmGoal") {
-      return head + "<p class=\"wiz-now\">Je crois voir un but (cadre clair, sans bandes de couleur), entouré en orange. Est-ce bien un but ?</p>" +
+      return head + "<p class=\"wiz-now\">Je crois voir un but " + (T.cand && T.cand.ia ? "(détecteur entraîné sur vos images)" : "(cadre clair, sans bandes de couleur)") + ", entouré en orange. Est-ce bien un but ?</p>" +
         "<p class=\"muted\">Je ne le retiens pas sans votre accord : des poteaux clairs peuvent aussi être une fenêtre, un panier ou des vêtements.</p>" +
-        "<div class=\"wiz-btns\"><button class=\"primary\" data-act=\"confirmGoal\">Oui, c'est le but</button><button data-act=\"showGoal\">Non, je le montre moi-même (3 clics)</button><button data-act=\"retryGoal\">Chercher sur une autre image</button></div>" + cancel;
+        "<div class=\"wiz-btns\"><button class=\"primary\" data-act=\"confirmGoal\">Oui, c'est le but</button><button data-act=\"drawGoal\">Non, je dessine le but à la souris</button><button data-act=\"showGoal\">Je le montre en 3 clics</button><button data-act=\"retryGoal\">Chercher sur une autre image</button></div>" + cancel;
+    }
+    if (T.phase === "dgoal") {
+      const n = (T.dg || []).length;
+      return head + "<p class=\"wiz-now\">Dessinez le but : cliquez sur " + (n === 0 ? "le <b>coin en haut à gauche</b>" : n === 1 ? "le <b>coin en bas à droite</b>" : "« Confirmer ce but » (ou recommencez)") + " du but, même s'il n'est visible qu'en partie.</p>" +
+        "<p class=\"muted\">Molette : zoom ; mettez la vidéo en pause pour être précis. Entourez les poteaux, la barre et le filet visibles.</p>" +
+        (T.msg ? "<p class=\"wiz-err\">" + esc(T.msg) + "</p>" : "") +
+        "<div class=\"wiz-btns\">" + (n >= 2 ? "<button class=\"primary\" data-act=\"confirmDraw\">Confirmer ce but</button>" : "") + (n ? "<button data-act=\"redoDraw\">Recommencer</button>" : "") + "<button data-act=\"retryGoal\">Chercher à nouveau automatiquement</button></div>" + cancel;
     }
     if (T.phase === "mgoal") {
       const n = (T.mg || []).length, what = ["le <b>pied du poteau gauche</b>", "le <b>pied du poteau droit</b>", "le <b>haut d'un des deux poteaux</b>"][n] || "";
@@ -249,7 +256,17 @@
     },
     async retryGoal() { await prepareFrame(); },
     showGoal() { startShowGoal(); },
-    confirmGoal() { const T = W.T; if (!T || !T.cand) return; const g = T.cand; T.cand = null; acceptGoal(g); },
+    confirmGoal() { const T = W.T; if (!T || !T.cand) return; const g = T.cand; T.cand = null; retenirBut(g, g.ia ? "détecteur" : "cadre clair"); acceptGoal(g); },
+    drawGoal() { startDrawGoal(); },
+    redoDraw() { const T = W.T; if (T) { T.dg = []; T.msg = ""; render(); AI.redraw(); } },
+    confirmDraw() {
+      const T = W.T; if (!T || !T.dg || T.dg.length < 2) return;
+      const [a, b] = T.dg, x0 = Math.min(a.u, b.u), x1 = Math.max(a.u, b.u), y0 = Math.min(a.v, b.v), y1 = Math.max(a.v, b.v);
+      if (x1 - x0 < 8 || y1 - y0 < 8) { T.dg = []; T.msg = "Ce cadre est trop petit : recommencez."; render(); AI.redraw(); return; }
+      const post = (u) => ({ u, v0: y0, v1: y1, width: 4, score: y1 - y0 });
+      const goal = { left: post(x0), right: post(x1), score: y1 - y0, palette: "dessiné" };
+      T.dg = null; retenirBut(goal, "dessiné"); acceptGoal(goal);
+    },
     undoGoalClick() { const T = W.T; if (T && T.mg) T.mg.pop(); render(); AI.redraw(); },
     manualMode() { const T = W.T; if (T) T.cancel = true; W.T = Object.assign(T || {}, { phase: "manual" }); AI.setPointer(null); AI.clearPoints(); W.lmIdx = 0; W.terrainT = null; W.msg = ""; render(); beginLandmark(); AI.redraw(); },
     async autoMode() { AI.cancelPlacing(); AI.clearPoints(); await startTerrain(); },
@@ -343,6 +360,34 @@
   /* Couleurs de but apprises dans ce projet (voir « Je montre le but moi-même »). */
   const goalOpts = () => ({ palettes: AI.memory().goalPalettes });
 
+  /* Détecteur de buts entraîné sur les images du coach : il PROPOSE des cadres, jamais retenus sans l'accord du coach (Oui / Non).
+     Renvoie des « buts » au format de l'assistant (coordonnées de l'image de travail wk), du plus sûr au moins sûr ; [] s'il est absent ou en échec. */
+  let iaDispo = null;
+  async function butsIA(wk) {
+    if (!IAB || !window.fsal || !window.fsal.aiGoals) return [];
+    if (iaDispo === null) { try { iaDispo = !!(await window.fsal.aiGoalsDispo()); } catch (_e) { iaDispo = false; } }
+    if (!iaDispo) return [];
+    try {
+      const vw = video.videoWidth, vh = video.videoHeight, k = Math.min(1, 1920 / Math.max(vw, vh));
+      const w = Math.max(2, Math.round(vw * k)), h = Math.max(2, Math.round(vh * k));
+      const c = document.createElement("canvas"); c.width = w; c.height = h;
+      const ctx = c.getContext("2d", { willReadFrequently: true }); ctx.drawImage(video, 0, 0, w, h);
+      const d = ctx.getImageData(0, 0, w, h);
+      const r = await window.fsal.aiGoals({ buffer: d.data.buffer.slice(0), width: w, height: h, seuil: IAB.SEUIL });
+      if (!r || r.error || !Array.isArray(r.boxes)) return [];
+      const sc = wk.w / w;
+      return r.boxes.filter((b) => b.score >= IAB.SEUIL).map((b) => IAB.versBut(b, sc)).sort((a, b) => b.score - a.score);
+    } catch (_e) { return []; }
+  }
+  /* Un but confirmé par le coach (ou dessiné par lui) est gardé dans la mémoire du projet : cadre en fractions de l'image, instant, origine. */
+  function retenirBut(goal, source) {
+    try {
+      const T = W.T, wk = T && T.work; if (!wk || !T.frame) return;
+      const mem = AI.memory(); mem.butsConfirmes = (Array.isArray(mem.butsConfirmes) ? mem.butsConfirmes : []).concat([{ t: T.frame.t, source, x0: goal.left.u / wk.w, x1: goal.right.u / wk.w, y0: Math.min(goal.left.v0, goal.right.v0) / wk.h, y1: Math.max(goal.left.v1, goal.right.v1) / wk.h }]).slice(-300);
+      App.changed();
+    } catch (_e) { /* la mémoire est un plus : jamais bloquant */ }
+  }
+
   function nextTarget() {
     const T = W.T;
     if (!T) return null;
@@ -415,9 +460,11 @@
         await tick();
         await seekVideo(dur * fr[i]);
         const g = AI.grabSam(), wk = CF.prepare(g.img, 640), goal = GL.detect(wk, goalOpts()).goals[0];
-        const cand = goal ? null : GL.candidates(wk)[0];
+        const ia = goal ? null : (await butsIA(wk))[0] || null;
+        const cand = goal || ia ? null : GL.candidates(wk)[0];
         if (cand) T.cands.push({ t: g.t, score: cand.score });
         if (goal) T.results.push({ t: g.t, h: Math.min(goal.left.v1 - goal.left.v0, goal.right.v1 - goal.right.v0) });
+        else if (ia) T.results.push({ t: g.t, h: ia.left.v1 - ia.left.v0 });
       }
     } catch (e) { T.msg = "Recherche impossible : " + e.message; }
     if (T.cancel) return;
@@ -452,6 +499,8 @@
     T.frame = { t: g.t, w: g.w, h: g.h, k: g.k }; T.work = wk; T.goal = goal; T.clicks = []; T.skipped = new Set(); T.pose = null; T.msg = "";
     followReset();
     if (!goal) {
+      const ia = (await butsIA(wk))[0] || null;
+      if (ia) { T.cand = ia; T.phase = "confirmGoal"; T.msg = ""; T.busy = false; render(); AI.redraw(); return false; }
       const cand = GL.candidates(wk)[0] || null;
       if (cand) { T.cand = cand; T.phase = "confirmGoal"; T.msg = ""; T.busy = false; render(); AI.redraw(); return false; }
       T.phase = "nogoal"; T.msg = "Aucun but repéré sur cette image."; T.busy = false; render(); AI.redraw(); return false;
@@ -480,6 +529,25 @@
     const g = AI.grabSam(), wk = CF.prepare(g.img, 640);
     T.frame = { t: g.t, w: g.w, h: g.h, k: g.k }; T.work = wk; T.goal = null; T.clicks = []; T.skipped = new Set(); T.pose = null; T.msg = ""; T.mg = []; T.phase = "mgoal"; T.busy = false;
     followReset();
+    render(); AI.redraw();
+  }
+  /* Le coach dessine le but : deux clics (coin haut-gauche, coin bas-droit), puis « Confirmer ce but ». Le suivi de la caméra garde les coins sur la bonne image. */
+  function startDrawGoal() {
+    const T = W.T;
+    if (!T || !App.isVideoReady()) return;
+    video.pause();
+    const g = AI.grabSam(), wk = CF.prepare(g.img, 640);
+    T.frame = { t: g.t, w: g.w, h: g.h, k: g.k }; T.work = wk; T.goal = null; T.cand = null; T.clicks = []; T.skipped = new Set(); T.pose = null; T.msg = ""; T.dg = []; T.phase = "dgoal"; T.busy = false;
+    followReset();
+    render(); AI.redraw();
+  }
+  function onDrawClick(ix, iy, ok) {
+    const T = W.T;
+    if (!ok || !T || T.phase !== "dgoal" || T.busy) return;
+    const kk = T.work.w / AI.videoSize().w, rp = refPoint(ix, iy);
+    if (!rp) { T.msg = "Le suivi du terrain n'est pas sûr à cet instant : revenez à " + App.fmt(T.frame.t) + " ou attendez une image plus nette."; render(); return; }
+    if (T.dg.length >= 2) T.dg = [];
+    T.dg.push({ u: rp[0] * kk, v: rp[1] * kk }); T.msg = "";
     render(); AI.redraw();
   }
   function onGoalClick(ix, iy, ok) {
@@ -559,7 +627,7 @@
     solveNow();
     render(); AI.redraw();
   }
-  const terrainPointer = { click: (ix, iy, ok, e) => (W.T && W.T.phase === "mgoal" ? onGoalClick(ix, iy, ok) : onTerrainClick(ix, iy, ok, e)) };
+  const terrainPointer = { click: (ix, iy, ok, e) => (W.T && W.T.phase === "mgoal" ? onGoalClick(ix, iy, ok) : W.T && W.T.phase === "dgoal" ? onDrawClick(ix, iy, ok) : onTerrainClick(ix, iy, ok, e)) };
 
   function finishTerrain(side) {
     const T = W.T;
@@ -608,6 +676,16 @@
       const a = V(T.goal.left.u, T.goal.left.v0), b = V(T.goal.right.u, T.goal.right.v0);
       ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
       ctx.fillStyle = "#22c55e"; ctx.font = "600 12px 'Segoe UI',Arial,sans-serif"; ctx.fillText("But", a[0] + 4, a[1] - 6);
+    }
+    if (T.phase === "dgoal") {
+      const d = T.dg || [];
+      ctx.strokeStyle = "#22c55e"; ctx.lineWidth = 3;
+      d.forEach((c) => { const v = V(c.u, c.v); ctx.beginPath(); ctx.arc(v[0], v[1], 6, 0, Math.PI * 2); ctx.stroke(); });
+      if (d.length >= 2) { const a = V(Math.min(d[0].u, d[1].u), Math.min(d[0].v, d[1].v)), b = V(Math.max(d[0].u, d[1].u), Math.max(d[0].v, d[1].v)); ctx.strokeRect(a[0], a[1], b[0] - a[0], b[1] - a[1]); }
+      ctx.fillStyle = "rgba(11,18,32,.85)"; ctx.fillRect(8, 8, 560, 26);
+      ctx.fillStyle = "#fff"; ctx.font = "600 13px 'Segoe UI',Arial,sans-serif";
+      ctx.fillText(d.length === 0 ? "Cliquez sur le coin en haut à gauche du but" : d.length === 1 ? "Cliquez sur le coin en bas à droite du but" : "Cadre dessiné : cliquez sur « Confirmer ce but » dans le panneau", 16, 26);
+      return;
     }
     if (T.phase === "mgoal") {
       (T.mg || []).forEach((c) => {

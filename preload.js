@@ -14,6 +14,8 @@ contextBridge.exposeInMainWorld("fsal", {
   aiDetect: (buffer, opts) => ipcRenderer.invoke("ai:detect", buffer, opts || {}),
   aiSegment: (req) => ipcRenderer.invoke("ai:segment", req),
   aiStop: () => ipcRenderer.invoke("ai:stop"),
+  aiGoals: (req) => ipcRenderer.invoke("ai:goals", req),
+  aiGoalsDispo: () => ipcRenderer.invoke("ai:goalsDispo"),
   solGlobalBegin: (n) => ipcRenderer.invoke("solglobal:begin", n),
   solGlobalFrame: (id, k, buf) => ipcRenderer.invoke("solglobal:frame", id, k, buf),
   solGlobalRun: (id) => ipcRenderer.invoke("solglobal:run", id),

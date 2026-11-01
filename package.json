@@ -55,6 +55,10 @@
         "to": "models/yolox_m.onnx"
       },
       {
+        "from": "models/but.onnx",
+        "to": "models/but.onnx"
+      },
+      {
         "from": "models/mobile_sam_encoder.onnx",
         "to": "models/mobile_sam_encoder.onnx"
       },
