@@ -40,12 +40,12 @@ function close(id) {
 }
 
 /* Lance le calcul ; onProgress({ etape, f }) ; rend { G, verdict, score, stats }. */
-function run(id, workerFile, onProgress) {
+function run(id, workerFile, onProgress, extra) {
   const s = sessions.get(id);
   if (!s) return Promise.reject(new Error("Session inconnue"));
   if (s.recues < s.n) return Promise.reject(new Error("Il manque des images (" + s.recues + " sur " + s.n + ")"));
   return new Promise((resolve, reject) => {
-    const w = new Worker(workerFile, { workerData: { file: s.file, n: s.n } });
+    const w = new Worker(workerFile, { workerData: { file: s.file, n: s.n, extra: extra || null } });
     s.worker = w;
     w.on("message", (m) => {
       if (m.type === "progress") { if (onProgress) onProgress({ etape: m.etape, f: m.f }); }

@@ -18,7 +18,7 @@ contextBridge.exposeInMainWorld("fsal", {
   aiGoalsDispo: () => ipcRenderer.invoke("ai:goalsDispo"),
   solGlobalBegin: (n) => ipcRenderer.invoke("solglobal:begin", n),
   solGlobalFrame: (id, k, buf) => ipcRenderer.invoke("solglobal:frame", id, k, buf),
-  solGlobalRun: (id) => ipcRenderer.invoke("solglobal:run", id),
+  solGlobalRun: (id, extra) => ipcRenderer.invoke("solglobal:run", id, extra),
   solGlobalCancel: (id) => ipcRenderer.invoke("solglobal:cancel", id),
   onSolGlobalProgress: (cb) => {
     const handler = (_e, id, p) => cb(id, p);

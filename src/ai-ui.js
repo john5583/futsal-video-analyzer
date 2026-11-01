@@ -568,6 +568,10 @@
   }
   /* Phrase de bilan du suivi (part de la vidéo où la caméra est suivie, passages perdus). */
   function suiviBilan(s) {
+    if (s.global && s.terrain) {
+      const pc = (x) => String(Math.round(1000 * x) / 10).replace(".", ",");
+      return "Terrain identifié par le rond central en " + fmtDur(s.seconds || 0) + " : " + pc(s.terrain.verifie) + " % de la vidéo VÉRIFIÉ (le rond ET les lignes du sol confirment), " + pc(s.terrain.probable) + " % PROBABLE (tracé à confirmer : « Oui, le tracé est juste » ou ajoutez un calibrage à cet endroit), " + pc(s.terrain.non) + " % non analysé (rien n'est tracé : jamais de tracé inventé).";
+    }
     if (s.global) {
       const span = Math.max(0.1, s.t1 - s.t0), part = typeof s.globalPart === "number" ? s.globalPart : 0;
       return "Suivi précis du sol terminé en " + fmtDur(s.seconds || 0) + " : terrain tracé et vérifié sur " + String(Math.round(1000 * part) / 10).replace(".", ",") +
@@ -635,7 +639,7 @@
     suiviMsg("Suivi de la caméra en cours (en arrière-plan, vous pouvez continuer)…", 0);
     try {
       const r = await P.suiviCamera({
-        url: App.getVideoUrl(), calibrations: a.calibrations.map((c) => ({ t: c.t, H: c.H })), signal: ctrl.signal,
+        url: App.getVideoUrl(), calibrations: a.calibrations.map((c) => ({ t: c.t, H: c.H, points: c.points })), L: Number(a.L) || 40, W: Number(a.W) || 20, signal: ctrl.signal,
         seuils: (window.FutsalJournal && journalSeuils) || null, lineColor: a.lineColor || null, lineProfile: a.lineColor === "custom" ? a.lineProfile : null, couleursMediane: a.couleursMediane || null, L: L(), W: W(), prio: prioLignes(a),
         onProgress: (p) => {
           run.pct = Math.round((100 * p.done) / p.total); run.t = p.t;
@@ -677,7 +681,7 @@
       });
       if (globalRun !== run || !a.camSuivi || a.camSuivi.cle !== cle) return;
       globalRun = null;
-      const g = r.frames.map((q) => [q.t, q.h, q.q === 1 ? 1 : 2]), gt = r.frames.map((q) => q.t);
+      const g = r.frames.map((q) => [q.t, q.h, q.q === 0 ? 0 : q.q === 1 ? 1 : 2]), gt = r.frames.map((q) => q.t);
       const gardes = (a.camSuivi.frames || []).filter((c) => c[2] === 2 && !gt.some((t) => Math.abs(t - c[0]) < 0.3));
       a.camSuivi.frames = g.concat(gardes).sort((x, y) => x[0] - y[0]);
       a.camSuivi.lost = r.lost.map((x) => [Math.round(x[0] * 100) / 100, Math.round(x[1] * 100) / 100]);
@@ -685,6 +689,7 @@
       a.camSuivi.global = true; a.camSuivi.seconds = r.seconds; a.camSuivi.t0 = r.t0; a.camSuivi.t1 = r.t1;
       a.camSuivi.globalPart = r.stats && typeof r.stats.partOk === "number" ? r.stats.partOk : 0;
       a.camSuivi.globalPont = r.stats && typeof r.stats.partPont === "number" ? r.stats.partPont : 0;
+      a.camSuivi.terrain = r.terrain || null;
       chargeSuivi(); suiviMsg(suiviBilan(a.camSuivi)); renderSuiviQ(); App.changed(); refreshLive();
     } catch (e) {
       if (globalRun === run) { globalRun = null; suiviMsg(ctrl.signal.aborted ? "" : "Suivi précis du sol interrompu : le suivi de la caméra reste utilisé ; il sera repris au prochain chargement."); }
