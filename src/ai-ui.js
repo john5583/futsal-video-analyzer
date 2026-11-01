@@ -672,7 +672,7 @@
     if (!a || !a.camSuivi || a.camSuivi.global || globalRun || !P.suiviSolGlobal || !window.fsal || !window.fsal.solGlobalBegin) return;
     if (running || suiviRun) { planSolGlobal(5000); return; }
     const cle = a.camSuivi.cle, ctrl = new AbortController(), run = { ctrl }; globalRun = run;
-    const etapes = { images: "lecture de la vidéo", suivi: "suivi image par image", cles: "images clés", aveugle: "liens entre images éloignées", ajuste: "ajustement", filtre: "filtrage", verdict: "vérification" };
+    const etapes = { images: "lecture de la vidéo", suivi: "suivi image par image", cles: "images clés", aveugle: "liens entre images éloignées", ajuste: "ajustement", filtre: "filtrage", verdict: "vérification", "terrain-cartes": "lecture des lignes du sol", "terrain-rond": "recherche du rond central", "terrain-mosaique": "contrôle par les lignes du sol", buts: "contrôle par les buts" };
     suiviMsg("Suivi précis du sol en cours (en arrière-plan, vous pouvez continuer)…", 0);
     try {
       const r = await P.suiviSolGlobal({

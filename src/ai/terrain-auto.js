@@ -311,7 +311,7 @@
         }
         // 2) zoom différent : champ de vision cherché (60-80°), niveau « probable » seulement
         let bst = null; for (const f of [55, 59, 63, 67, 71, 75, 80]) { const c = meilleur(f, 0.04, -1.7, 1.7, 0.1, 1.0); if (c.length && (!bst || c[0][0] > bst.s)) bst = { s: c[0][0], fov: f, psi: c[0][1], th: c[0][2] }; }
-        if (bst) { const r = raffiner(bst.fov, bst.psi, bst.th); if (r.s >= 0.55) cand[j] = { genre: "probable", s: r.s, fov: r.fov, ori: r.ori, ok: false }; }
+        if (bst) { const r = raffiner(bst.fov, bst.psi, bst.th); if (r.s >= 0.5) cand[j] = { genre: "probable", s: r.s, fov: r.fov, ori: r.ori, ok: false }; }
       }
     }
     Object.keys(cand).forEach((js) => { const j = +js, c = cand[j]; if (c.ok) { Object.assign(ech[j], { genre: "mos-direct", c: null, dx: 0, dy: 0, s: c.s, ori: c.ori, fov: c.fov }); } });
@@ -323,6 +323,17 @@
       i = e + 1;
     }
     ech.forEach((e, j) => { if (e.genre === "mos-direct") { const a = appui(dts[j], rondProjete(HnSample(j)).pts, null, 0, 0, 0, 0); e.ringOk = a.n >= 30 && a.hit / a.n >= 0.45; } });
+    // Contrôle final : toute image vérifiée est re-contrôlée contre la mosaïque bâtie sur les images FINALES (autres blocs de 20 s) ; en dessous de 0,60 elle redevient « non analysée »
+    {
+      const anc = [[], []]; ech.forEach((e, j) => { if (verifie(e)) anc[Math.floor(j / 20) % 2].push({ j, P: projSample(j) }); });
+      const cel = anc.map((x) => (x.length >= 30 ? batirMosaique(x, lms) : []));
+      for (let j = 0; j < idx.length; j++) {
+        const e = ech[j]; if (!verifie(e)) continue;
+        const cs = cel[1 - (Math.floor(j / 20) % 2)], sc = cs.length >= 2000 ? scoreMosaique(lms[j], projSample(j), cs, 0, 0) : null;
+        e.sFinal = sc;
+        if (sc === null || sc < 0.6) { e.genre = "non"; e.c = null; e.dx = 0; e.dy = 0; e.ori = null; e.fov = null; e.ringOk = false; }
+      }
+    }
     poserPonts(ech, Hn, 4, 4);
     const cnt = {}; ech.forEach((e) => { cnt[e.genre] = (cnt[e.genre] || 0) + 1; });
     return { ok: true, fov, q: pose.q, residuRef: pose.residu, kref, Hr, pas, d0, h0, echantillons: ech.map((e) => ({ k: e.k, genre: e.genre, c: e.c, dx: e.dx, dy: e.dy, s: e.s, ori: e.ori || null, fov: e.fov || null, ro: !!e.ringOk })), stats: { total: ech.length, genres: cnt, verifiees: ech.filter((e) => niveau(e.genre, e.ringOk) === "verifie").length, probables: ech.filter((e) => niveau(e.genre, e.ringOk) === "probable").length, non: cnt.non || 0 } };
@@ -336,7 +347,7 @@
     return n >= 4 ? s / n : null;
   }
   const NIVEAU_VERIFIE = { rond: 1, "rond-corr": 1, "mos-suivi": 1, "mos-recale": 1, pont: 1 };
-  const niveau = (genre, ro) => (NIVEAU_VERIFIE[genre] ? "verifie" : genre === "mos-direct" ? (ro ? "verifie" : "probable") : genre === "probable" ? "probable" : "non");
+  const niveau = (genre, ro) => (NIVEAU_VERIFIE[genre] ? "verifie" : genre === "mos-direct" ? (ro ? "verifie" : "probable") : genre === "probable" ? (ro ? "verifie" : "probable") : "non");
   const verifie = (e) => niveau(e.genre, e.ringOk) === "verifie";
   function poserPonts(ech, Hn, maxLongueur, tolPx) {
     let ajoutes = 0, j = 0;
@@ -396,6 +407,38 @@
     try { const h = inv(terrainVersPixel); return h.every(Number.isFinite) ? h : null; } catch (_e) { return null; }
   }
 
+  /* ---------- troisième preuve : le but détecté ---------- */
+  /* Une image « probable » (localisation directe, autre zoom) devient VÉRIFIÉE si le but détecté dans cette image tombe là où la pose le place (pieds du but à moins de tolPx
+     pixels sur 1920) et si sa mosaïque atteint 0,50. detections : { [indice d'échantillon] : [{ x0, x1, y1, score }] } en pixels 480×270. La longueur est celle MESURÉE sur les images
+     déjà vérifiées qui montrent un but (même convention de cadre), à défaut la demi-longueur donnée. Rend le nombre d'images promues. */
+  function promouvoirParButs(res, G, detections, o) {
+    o = o || {}; if (!res || !res.ok) return 0;
+    const tol = (o.tolPx || 60) / 4, dflt = o.demiLongueur || 20, bas = (b) => b.y1;
+    const erreur = (P, b, v) => { const p = P(-1.5, v), q = P(1.5, v); if (!p || !q) return 1e9; return Math.min((Math.hypot(p[0] - b.x0, p[1] - bas(b)) + Math.hypot(q[0] - b.x1, q[1] - bas(b))) / 2, (Math.hypot(p[0] - b.x1, p[1] - bas(b)) + Math.hypot(q[0] - b.x0, q[1] - bas(b))) / 2); };
+    const meilleurBut = (j) => { const l = (detections[j] || []).filter((b) => (b.score == null || b.score >= 0.5)).sort((a, b) => (b.score || 0) - (a.score || 0)); return l[0] || null; };
+    // 1. demi-longueurs mesurées (une par côté) sur les images vérifiées
+    const lignes = []; res.echantillons.forEach((e, j) => { const b = meilleurBut(j); if (!b) return; const pr = projectionImage(res, G, e.k); if (pr && pr.niveau === "verifie") lignes.push({ P: pr.P, b }); });
+    const cherche = (sgn) => { let best = null; for (let h = 17; h <= 25; h += 0.25) { const es = lignes.map((r) => erreur(r.P, r.b, sgn * h)); const bons = es.filter((x) => x < 12); if (bons.length >= 3 && (!best || bons.length > best.n || (bons.length === best.n && h < best.h))) best = { h, n: bons.length }; } return best ? best.h : dflt; };
+    const hp = lignes.length >= 6 ? cherche(1) : dflt, hm = lignes.length >= 6 ? cherche(-1) : dflt;
+    // 2. promotion
+    let n = 0;
+    res.echantillons.forEach((e, j) => {
+      if (e.genre !== "probable" || e.ro || !(e.s >= 0.5)) return; const b = meilleurBut(j); if (!b) return;
+      const pr = projectionImage(res, G, e.k); if (!pr) return;
+      if (Math.min(erreur(pr.P, b, hp), erreur(pr.P, b, -hm)) <= tol) { e.ro = true; e.preuveBut = true; n++; }
+    });
+    // 3. veto : une image vérifiée où le but détecté tombe loin de l'endroit prévu (plus de 70 px sur 1920, + 20 % de la largeur du cadre) redevient « non analysée »
+    let veto = 0;
+    res.echantillons.forEach((e, j) => {
+      if (e.genre === "non" || e.genre === "pont" || niveau(e.genre, e.ro) !== "verifie" || e.preuveBut) return; const bt = meilleurBut(j); if (!bt) return;
+      const pr = projectionImage(res, G, e.k); if (!pr) return;
+      const largeur = Math.abs(bt.x1 - bt.x0) * 4, tolVeto = (o.vetoPx || 70) + 0.2 * largeur, er = Math.min(erreur(pr.P, bt, hp), erreur(pr.P, bt, -hm)) * 4;
+      if (er > tolVeto) { e.genre = "non"; e.c = null; e.dx = 0; e.dy = 0; e.ori = null; e.fov = null; e.ro = false; veto++; }
+    });
+    res.stats.verifiees = res.echantillons.filter((e) => niveau(e.genre, e.ro) === "verifie").length; res.stats.probables = res.echantillons.filter((e) => niveau(e.genre, e.ro) === "probable").length; res.stats.non = res.echantillons.filter((e) => e.genre === "non").length; res.stats.veto = veto;
+    res.butsMesures = { hp, hm, images: lignes.length };
+    return n;
+  }
   /* projection terrain (u, v) -> pixel 480×270 de l'image k du suivi global, ou null si cette image n'est pas vérifiée */
   function projectionImage(res, G, k) {
     if (!res || !res.ok) return null;
@@ -406,5 +449,5 @@
     return { Hn, c: e.c, dx: e.dx, dy: e.dy, genre: e.genre, niveau: niveau(e.genre, e.ro), probable: niveau(e.genre, e.ro) === "probable", P: projecteur(Hn, e.c, e.dx, e.dy) };
   }
 
-  return { W, H, FOV_DEFAUT, RAYON_ROND, poseH, poseDepuisRond, versPixel, pointsRond, ajusterConique, conique2ellipse, detecterEllipse, distEllipse, poseDepuisEllipse, residuRond, carteNoire, carteLignes8, ajusterRond, batirMosaique, scoreMosaique, projecteur, analyser, projectionImage, niveau, orienterCalibrage, homographieProgramme, ecartProjecteurs, poserPonts, D4, nelderMead, setF480: (v) => { F480 = v; }, getF480: () => F480, rnd, mul, inv };
+  return { W, H, FOV_DEFAUT, RAYON_ROND, poseH, poseDepuisRond, versPixel, pointsRond, ajusterConique, conique2ellipse, detecterEllipse, distEllipse, poseDepuisEllipse, residuRond, carteNoire, carteLignes8, ajusterRond, batirMosaique, scoreMosaique, projecteur, analyser, projectionImage, promouvoirParButs, niveau, orienterCalibrage, homographieProgramme, ecartProjecteurs, poserPonts, D4, nelderMead, setF480: (v) => { F480 = v; }, getF480: () => F480, rnd, mul, inv };
 });

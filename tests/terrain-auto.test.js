@@ -111,3 +111,31 @@ test("projection : une image non analysée ne donne aucune projection (rien n'es
   assert.strictEqual(TA.projectionImage(res, G, 4), null, "image non analysée : aucune projection");
   assert.strictEqual(TA.projectionImage({ ok: false }, G, 0), null, "terrain non identifié : aucune projection");
 });
+
+test("troisième preuve : un but détecté là où la pose le place promeut une image probable en vérifiée, un but décalé de 40 px non", () => {
+  const G = []; for (let i = 0; i < 12; i++) G.push([1, 0, 0, 0, 1, 0, 0, 0, 1]);
+  const Hr = TA.poseDepuisRond(Q, 91), mk = (k, genre, s) => ({ k, genre, c: null, dx: 0, dy: 0, s, ori: null, fov: null, ro: false });
+  const res = { ok: true, pas: 4, kref: 0, d0: Q[0], h0: Q[1], Hr, stats: { verifiees: 1, probables: 2, non: 0, total: 3 }, echantillons: [mk(0, "rond", 0.8), mk(4, "probable", 0.6), mk(8, "probable", 0.6)] };
+  const P0 = TA.projectionImage(res, G, 0).P, hl = 20.5;
+  const boite = (P, dx) => { const a = P(-1.5, hl), b = P(1.5, hl); return [{ x0: Math.min(a[0], b[0]) + dx, x1: Math.max(a[0], b[0]) + dx, y1: Math.max(a[1], b[1]) + dx, score: 0.9 }]; };
+  const detections = { 0: boite(P0, 0), 1: boite(TA.projectionImage(res, G, 4).P, 0), 2: boite(TA.projectionImage(res, G, 8).P, 40) };
+  const n = TA.promouvoirParButs(res, G, detections, { demiLongueur: hl });
+  assert.strictEqual(n, 1, "une seule image promue");
+  assert.strictEqual(TA.projectionImage(res, G, 4).niveau, "verifie");
+  assert.strictEqual(TA.projectionImage(res, G, 8).niveau, "probable", "but décalé de 40 px : reste probable");
+  assert.strictEqual(res.stats.verifiees, 2);
+  assert.strictEqual(res.stats.probables, 1);
+});
+
+test("veto du but : une image vérifiée où le but détecté est très loin de l'endroit prévu redevient non analysée", () => {
+  const G = []; for (let i = 0; i < 12; i++) G.push([1, 0, 0, 0, 1, 0, 0, 0, 1]);
+  const Hr = TA.poseDepuisRond(Q, 91), mk = (k, genre) => ({ k, genre, c: null, dx: 0, dy: 0, s: 0.8, ori: null, fov: null, ro: false });
+  const res = { ok: true, pas: 4, kref: 0, d0: Q[0], h0: Q[1], Hr, stats: { verifiees: 3, probables: 0, non: 0, total: 3 }, echantillons: [mk(0, "rond"), mk(4, "rond"), mk(8, "rond")] };
+  const hl = 20.5, boite = (k, dx) => { const P = TA.projectionImage(res, G, k).P, a = P(-1.5, hl), b = P(1.5, hl); return [{ x0: Math.min(a[0], b[0]) + dx, x1: Math.max(a[0], b[0]) + dx, y1: Math.max(a[1], b[1]) + dx, score: 0.9 }]; };
+  TA.promouvoirParButs(res, G, { 0: boite(0, 0), 1: boite(4, 0), 2: boite(8, 60) }, { demiLongueur: hl });
+  assert.strictEqual(TA.projectionImage(res, G, 0) !== null, true, "but conforme : gardée");
+  assert.strictEqual(TA.projectionImage(res, G, 4) !== null, true, "but conforme : gardée");
+  assert.strictEqual(TA.projectionImage(res, G, 8), null, "but décalé de 60 px sur 480 : vérifiée -> non analysée");
+  assert.strictEqual(res.stats.veto, 1);
+  assert.strictEqual(res.stats.verifiees, 2);
+});

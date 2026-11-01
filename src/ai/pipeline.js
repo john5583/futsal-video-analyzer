@@ -911,6 +911,25 @@
       const kc = calibs.map((c) => { let b = 0; times.forEach((t, k) => { if (Math.abs(t - c.t) < Math.abs(times[b] - c.t)) b = k; }); return b; });
       const TAm = (typeof require === "function" ? (() => { try { return require("./terrain-auto"); } catch (_e) { return null; } })() : null) || (typeof self !== "undefined" ? self.FutsalTerrainAuto : null);
       const ter = r.terrain && r.terrain.ok && r.terrain.orientation && r.terrain.orientation.ok && TAm ? r.terrain : null;
+      /* Troisième preuve pour les images « probables » : le but détecté (détecteur entraîné) doit tomber là où la pose le place. Un plus : jamais d'erreur affichée. */
+      if (ter && ter.stats && ter.stats.probables > 0 && api.aiGoals && api.aiGoalsDispo && TAm.promouvoirParButs) {
+        try {
+          if (await api.aiGoalsDispo()) {
+            const sc = Math.min(1, 1920 / Math.max(vw, vh)), gw = Math.max(2, Math.round(vw * sc)), gh = Math.max(2, Math.round(vh * sc));
+            const cvb = document.createElement("canvas"); cvb.width = gw; cvb.height = gh; const cxb = cvb.getContext("2d", { willReadFrequently: true });
+            const det = {}, choisis = []; ter.echantillons.forEach((e, j) => { if (e.genre === "probable" || (e.genre !== "non" && j % 8 === 0)) choisis.push(j); });
+            for (const j of choisis) {
+              if (opts.signal && opts.signal.aborted) throw new Error("Suivi interrompu");
+              await seekTo(video, times[Math.min(n - 1, ter.echantillons[j].k)]);
+              cxb.drawImage(video, 0, 0, gw, gh); const d = cxb.getImageData(0, 0, gw, gh);
+              const rb = await api.aiGoals({ buffer: d.data.buffer.slice(0), width: gw, height: gh, seuil: 0.3 });
+              if (rb && !rb.error && Array.isArray(rb.boxes)) det[j] = rb.boxes.filter((b) => b.score >= 0.5).map((b) => ({ x0: b.x0 * 480 / gw, x1: b.x1 * 480 / gw, y1: b.y1 * 270 / gh, score: b.score }));
+              if (opts.onProgress && choisis.indexOf(j) % 10 === 0) opts.onProgress({ etape: "buts", f: choisis.indexOf(j) / choisis.length });
+            }
+            TAm.promouvoirParButs(ter, r.G, det);
+          }
+        } catch (e3) { if (opts.signal && opts.signal.aborted) throw e3; }
+      }
       const frames = [], lost = []; let lostStart = null, nOk = 0;
       if (ter) {
         /* terrain identifié par le rond central (voir terrain-auto.js) : 2 = vérifié par le rond ET les lignes du sol, 1 = relié entre deux images vérifiées, 0 = probable (à confirmer) ; sinon rien n'est tracé */
