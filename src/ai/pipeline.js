@@ -168,7 +168,10 @@
   }
   /* suivi : images du suivi de la caméra seul (voir suiviCamera), utilisées quand l'analyse n'a pas d'image à cet instant. */
   function courtH(frames, calibs, camera, t, vw, vh, suivi) {
-    const lists = [[frames, ""], [suivi, "-suivi"]];
+    /* Un suivi VÉRIFIÉ (q = 2 ou 1 : le rond ET les lignes du sol le confirment, voir terrain-auto.js) passe avant les projections enregistrées avec une ancienne analyse,
+       qui peuvent être fausses (projet enregistré avant le nouveau suivi) ; sinon l'ordre habituel est conservé. */
+    const sf = suivi && suivi.length ? frameNear(suivi, t, 0.3) : null, sur = !!(sf && sf.v === 1 && (sf.q === 2 || sf.q === 1) && goodH(sf));
+    const lists = sur ? [[suivi, "-suivi"], [frames, ""]] : [[frames, ""], [suivi, "-suivi"]];
     for (const [fr, tag] of lists) {
       if (fr && fr.length > 1 && vw > 0 && vh > 0) {
         try { const H = courtHBetween(fr, t, vw, vh); if (H) return { H, source: "image-interpolee" + tag }; } catch (_e) { /* retour à l'image la plus proche */ }
