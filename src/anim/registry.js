@@ -1,9 +1,9 @@
 /* Registre des animations : une scène par erreur du catalogue, une par exercice, et séquences (vidéo complète). */
 (function (root, factory) {
   if (typeof module === "object" && module.exports) {
-    module.exports = factory(require("./engine.js"), require("./scenarios-errors.js"), require("./scenarios-drills.js"));
+    module.exports = factory(require("./engine.js"), require("./scenarios-errors.js"), Object.assign({}, require("./scenarios-drills.js"), require("./scenarios-drills-plan.js"), require("./scenarios-drills-plan2.js")));
   } else {
-    root.FutsalScenes = factory(root.FutsalAnim, root.FutsalScenesErrors, root.FutsalScenesDrills);
+    root.FutsalScenes = factory(root.FutsalAnim, root.FutsalScenesErrors, Object.assign({}, root.FutsalScenesDrills, root.FutsalScenesDrillsPlan, root.FutsalScenesDrillsPlan2));
   }
 })(typeof self !== "undefined" ? self : this, function (E, ERR, DRL) {
   "use strict";

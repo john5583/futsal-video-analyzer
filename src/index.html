@@ -274,6 +274,13 @@
         <label class="plan-notes-l"><b>Mes autres consignes</b> <span class="muted">(sortie de balle, coups de pied arrêtés, rôles… notées dans cette page, non vérifiées par le programme)</span>
           <textarea id="plan-notes" rows="3" placeholder="Ex. : sortie courte depuis le gardien, corner à deux joueurs…"></textarea></label>
         <div class="plan-actions"><button id="plan-reset" class="ghost">Revenir aux valeurs conseillées pour ce système</button></div>
+        <div class="plan-train" id="plan-train">
+          <h2>Mes entraînements</h2>
+          <p class="muted">Les réponses ci-dessus et ces précisions servent à composer une séance d'entraînement avec les exercices adaptés au jeu que tu veux jouer au prochain match. Le programme ne peut pas vérifier ces précisions sur la vidéo : elles servent seulement à choisir les exercices.</p>
+          <div id="plan-train-q"></div>
+          <div class="plan-actions"><label>Durée de la séance <select id="plan-train-dur"><option value="45">45 min</option><option value="60">60 min</option><option value="75" selected>75 min</option><option value="90">90 min</option><option value="120">120 min</option></select></label> <button id="plan-train-go" class="primary">Proposer une séance</button></div>
+          <div id="plan-train-res"></div>
+        </div>
       </div>
       <div class="plan-col">
         <h2>Mon match face à mon plan</h2>
@@ -467,12 +474,16 @@
 <script src="knowledge/drills.js"></script>
 <script src="knowledge/errors.js"></script>
 <script src="knowledge/plan.js"></script>
+<script src="knowledge/seance-drills.js"></script>
+<script src="knowledge/seance.js"></script>
 <script src="engine/analyzer.js"></script>
 <script src="engine/quality.js"></script>
 <script src="anim/engine.js"></script>
 <script src="anim/builder.js"></script>
 <script src="anim/scenarios-errors.js"></script>
 <script src="anim/scenarios-drills.js"></script>
+<script src="anim/scenarios-drills-plan.js"></script>
+<script src="anim/scenarios-drills-plan2.js"></script>
 <script src="anim/registry.js"></script>
 <script src="vendor/mp4-muxer.js"></script>
 <script src="vendor/webm-muxer.js"></script>

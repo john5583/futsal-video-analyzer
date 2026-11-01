@@ -14,6 +14,7 @@
     if (!p.plan || typeof p.plan !== "object") p.plan = { answers: KB.planDefaults(p.defaultSystem), notes: "" };
     p.plan.answers = Object.assign(KB.planDefaults(p.plan.answers && p.plan.answers.system ? p.plan.answers.system : p.defaultSystem), p.plan.answers || {});
     if (typeof p.plan.notes !== "string") p.plan.notes = "";
+    p.plan.training = Object.assign(KB.trainingDefaults(), p.plan.training || {});
     return p.plan;
   }
   function choose(q, value) {
@@ -137,10 +138,49 @@
 
   /* ---------- affichage ---------- */
   function later() { clearTimeout(timer); timer = setTimeout(renderResult, 250); }
-  function render() { renderQuestions(); renderResult(); }
+  /* ---------- mes entraînements : séance proposée d'après le plan ---------- */
+  function renderTrainQ() {
+    const box = $("plan-train-q"); if (!box || !KB.TRAINING_QUESTIONS) return;
+    const tr = plan().training; box.innerHTML = "";
+    KB.TRAINING_QUESTIONS.forEach((q) => {
+      const fs = document.createElement("fieldset"); fs.className = "plan-q";
+      const lg = document.createElement("legend"); lg.textContent = q.label; fs.appendChild(lg);
+      const help = document.createElement("p"); help.className = "muted"; help.textContent = q.help; fs.appendChild(help);
+      q.options.forEach((o) => {
+        const lab = document.createElement("label"); lab.className = "plan-opt";
+        const r = document.createElement("input"); r.type = "radio"; r.name = "train-" + q.id; r.value = o.id; r.checked = tr[q.id] === o.id;
+        r.addEventListener("change", () => { plan().training[q.id] = o.id; App.changed(); });
+        const sp = document.createElement("span"), b = document.createElement("b"); b.textContent = o.label; sp.appendChild(b);
+        if (o.desc) { const d = document.createElement("small"); d.className = "muted"; d.textContent = " — " + o.desc; sp.appendChild(d); }
+        lab.appendChild(r); lab.appendChild(sp); fs.appendChild(lab);
+      });
+      box.appendChild(fs);
+    });
+  }
+  function renderSeance() {
+    const out = $("plan-train-res"); if (!out || !KB.proposerSeance) return;
+    const el = (tag, txt, cls) => { const e = document.createElement(tag); if (txt != null) e.textContent = txt; if (cls) e.className = cls; return e; };
+    const r = KB.proposerSeance(plan().answers, { duree: Number($("plan-train-dur").value) || 75, training: plan().training });
+    out.innerHTML = "";
+    out.appendChild(el("h3", "Séance proposée : " + r.total + " min sur " + r.duree));
+    out.appendChild(el("p", r.resume, "muted"));
+    r.blocs.forEach((b) => {
+      const d = b.drill, card = el("div", null, "card");
+      card.appendChild(el("h3", b.ordre + ". " + b.phase + " — " + d.name + " (" + b.minutes + " min)"));
+      card.appendChild(el("p", "Joueurs : " + d.players + " · Objectif : " + d.goal));
+      card.appendChild(el("p", d.description));
+      const why = el("p"); why.appendChild(el("strong", "Pourquoi : ")); why.appendChild(document.createTextNode(b.pourquoi.join(" ; ") + ".")); card.appendChild(why);
+      const cr = el("p"); cr.appendChild(el("strong", "Critères de réussite : ")); cr.appendChild(document.createTextNode(d.criteria.join(" · "))); card.appendChild(cr);
+      out.appendChild(card);
+    });
+    if (r.sansExercice.length) out.appendChild(el("p", "Sans exercice ciblé : " + r.sansExercice.join(" ; ") + ".", "muted"));
+    out.appendChild(el("p", "Les animations de chaque exercice sont dans l'onglet « Corrections animées », rubrique Exercices. Durées et critères : repères d'entraîneur à adapter ; l'efficacité des exercices n'est pas mesurée par le programme.", "muted"));
+  }
+  function render() { renderQuestions(); renderTrainQ(); renderResult(); }
 
   function bind() {
     $("plan-notes").addEventListener("input", () => { plan().notes = $("plan-notes").value; App.changed(); later(); });
+    $("plan-train-go").addEventListener("click", renderSeance);
     $("plan-reset").addEventListener("click", () => {
       const p = App.state.project;
       p.plan = { answers: KB.planDefaults(p.plan && p.plan.answers ? p.plan.answers.system : p.defaultSystem), notes: plan().notes };
