@@ -868,6 +868,68 @@
     } finally { video.removeAttribute("src"); video.load(); }
   }
 
+  /* Suivi global du sol (voir sol-global.js) : toute la vidéo est lue à 4 images/s, le calcul se fait dans le processus principal, et le résultat
+     reprend la forme du suivi de la caméra ({ frames [{ t, h, q }], lost, ... }) pour que le reste du programme n'ait rien à changer.
+     Les images au verdict « ok » (lignes retrouvées dans au moins 2 images éloignées) donnent un tracé vérifié (q = 2) ; les images « pont » (position reliée par le suivi entre deux images vérifiées, accord contrôlé) un tracé moins précis (q = 1) ; ailleurs rien n'est tracé.
+     opts : { url, calibrations [{ t, H }], signal, api (preload), onProgress({ etape, f, t }), lineColor } */
+  const SOLG_PAS = 0.25;
+  async function suiviSolGlobal(opts) {
+    const calibs = (opts.calibrations || []).slice().sort((a, b) => a.t - b.t);
+    const api = opts.api;
+    if (!calibs.length) throw new Error("Aucun calibrage du terrain");
+    if (!api || !api.solGlobalBegin) throw new Error("Suivi global indisponible");
+    const video = document.createElement("video");
+    video.muted = true; video.preload = "auto"; video.crossOrigin = "anonymous"; video.src = opts.url;
+    let id = null, off = null; const started = Date.now();
+    try {
+      await new Promise((res, rej) => { video.onloadedmetadata = res; video.onerror = () => rej(new Error("Vidéo illisible")); });
+      const vw = video.videoWidth, vh = video.videoHeight, GW = 480, GH = 270;
+      const tStart = 0, tEnd = video.duration - 0.05;
+      const grid = new Set(); for (let t = tStart; t <= tEnd + 1e-6; t += SOLG_PAS) grid.add(Math.round(t * 1000) / 1000);
+      calibs.forEach((c) => { if (c.t >= tStart && c.t <= tEnd) grid.add(Math.round(c.t * 1000) / 1000); });
+      const times = Array.from(grid).sort((a, b) => a - b), n = times.length;
+      if (n < 8) throw new Error("Vidéo trop courte pour le suivi global");
+      const cv = document.createElement("canvas"); cv.width = GW; cv.height = GH;
+      const cx = cv.getContext("2d", { willReadFrequently: true });
+      id = await api.solGlobalBegin(n);
+      off = api.onSolGlobalProgress ? api.onSolGlobalProgress((i, p) => { if (i === id && opts.onProgress) opts.onProgress({ etape: p.etape, f: p.f }); }) : null;
+      for (let k = 0; k < n; k++) {
+        if (opts.signal && opts.signal.aborted) throw new Error("Suivi interrompu");
+        await seekTo(video, times[k]);
+        cx.drawImage(video, 0, 0, GW, GH);
+        const d = cx.getImageData(0, 0, GW, GH).data;
+        await api.solGlobalFrame(id, k, d.buffer.slice(0));
+        if (opts.onProgress && k % 20 === 0) opts.onProgress({ etape: "images", f: k / n, t: times[k] });
+      }
+      const run = api.solGlobalRun(id);
+      if (opts.signal) opts.signal.addEventListener("abort", () => { try { api.solGlobalCancel(id); } catch (_e) { /* déjà fini */ } }, { once: true });
+      const r = await run; id = null;
+      if (!r || !r.ok) throw new Error((r && r.error) || "Suivi global impossible");
+      const Nm = r.Nm, Ni = HG.invert(Nm), sx = GW / vw, sy = GH / vh, S = [sx, 0, 0, 0, sy, 0, 0, 0, 1], Si = [1 / sx, 0, 0, 0, 1 / sy, 0, 0, 0, 1];
+      // image de la grille la plus proche de chaque calibrage
+      const kc = calibs.map((c) => { let b = 0; times.forEach((t, k) => { if (Math.abs(t - c.t) < Math.abs(times[b] - c.t)) b = k; }); return b; });
+      const frames = [], lost = []; let lostStart = null, nOk = 0;
+      for (let k = 0; k < n; k++) {
+        let ci = 0; calibs.forEach((c, i) => { if (Math.abs(c.t - times[k]) < Math.abs(calibs[ci].t - times[k])) ci = i; });
+        let h = null;
+        if (r.verdict[k] === "ok" || r.verdict[k] === "pont") {
+          const Gc = r.G[kc[ci]], Gk = r.G[k];
+          const Hs = HG.mul3(Ni, HG.mul3(HG.mul3(Gc, HG.invert(Gk)), Nm));        // pixels réduits de l'image k → pixels réduits de l'image du calibrage
+          h = normalizedProjection(HG.mul3(calibs[ci].H, HG.mul3(Si, HG.mul3(Hs, S))), vw, vh);
+        }
+        if (h) { frames.push({ t: Math.round(times[k] * 100) / 100, h, q: r.verdict[k] === "ok" ? 2 : 1 }); nOk++; if (lostStart != null) { lost.push([lostStart, times[k]]); lostStart = null; } }
+        else if (lostStart == null) lostStart = times[k];
+      }
+      if (lostStart != null) lost.push([lostStart, times[n - 1]]);
+      return { frames, lost, t0: times[0], t1: times[n - 1], seconds: Math.round((Date.now() - started) / 100) / 10, orb: 0, vw, vh, global: true, stats: r.stats,
+        lignes: { couleur: opts.lineColor || null, mode: "global", essais: n, acceptes: nOk, confusion: null } };
+    } finally {
+      if (off) off();
+      if (id != null && api.solGlobalCancel) { try { api.solGlobalCancel(id); } catch (_e) { /* déjà fermé */ } }
+      video.removeAttribute("src"); video.load();
+    }
+  }
+
   /* Bancs reconnus, fiches des personnes au banc, entrées de remplaçants (voir bancs.js) ; null si rien n'est lisible. */
   function analyseBancs(frames, opts) {
     try { return BC ? BC.analyser(frames, { L: opts.L, W: opts.W, decisions: opts.bancsDecisions, anciennes: opts.fiches }) : null; } catch (_e) { return null; }
@@ -1371,5 +1433,5 @@
     return { dets, scale, img: ctx.getImageData(0, 0, cw, ch), width: cw, height: ch };
   }
 
-  return { isFloorMark, courtH, cibleCalibrage, suiviCamera, qualiteSuivi, svIncertain, passagesDouteux, cleSuivi, driftAt, conseilCalibrage, trackDrift, inBenchZone, shiftedZones, followBenches, tileRects, courtRegion, zoomRects, tileToFrame, mergeTiles, isFloorMark, dropFloorMarks, calibrationAt, processDetections, finalizeFrames, compactFrames, expandFrames, frameNear, sampleTimes, startTime, estimateDuration, learnFactor, FACTOR_MIN, FACTOR_MAX, analyseVideo, analyseVideoContinuous, stepGap, avgStep, lerpM, detectAt, detectCanvas, captureFrames, TEAM_CODE };
+  return { isFloorMark, courtH, cibleCalibrage, suiviCamera, suiviSolGlobal, qualiteSuivi, svIncertain, passagesDouteux, cleSuivi, driftAt, conseilCalibrage, trackDrift, inBenchZone, shiftedZones, followBenches, tileRects, courtRegion, zoomRects, tileToFrame, mergeTiles, isFloorMark, dropFloorMarks, calibrationAt, processDetections, finalizeFrames, compactFrames, expandFrames, frameNear, sampleTimes, startTime, estimateDuration, learnFactor, FACTOR_MIN, FACTOR_MAX, analyseVideo, analyseVideoContinuous, stepGap, avgStep, lerpM, detectAt, detectCanvas, captureFrames, TEAM_CODE };
 });
