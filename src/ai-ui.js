@@ -589,7 +589,8 @@
   }
   function chargeSuivi() {
     const s = ai() && ai().camSuivi;
-    suiviFr = s && Array.isArray(s.frames) ? s.frames.filter((c) => Array.isArray(c) && Array.isArray(c[1]) && c[1].length === 9).map((c) => ({ t: c[0], h: c[1], q: c[2] })) : [];
+    const nouveau = !!(s && s.global && s.terrain);      // suivi issu de l'identification par le rond (vérifié par le rond ET les lignes du sol) : prioritaire sur les anciennes projections
+    suiviFr = s && Array.isArray(s.frames) ? s.frames.filter((c) => Array.isArray(c) && Array.isArray(c[1]) && c[1].length === 9).map((c) => (nouveau ? { t: c[0], h: c[1], q: c[2], v: 1 } : { t: c[0], h: c[1], q: c[2] })) : [];
   }
   /* Phrase de bilan du suivi (part de la vidéo où la caméra est suivie, passages perdus). */
   function suiviBilan(s) {

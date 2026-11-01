@@ -233,3 +233,17 @@ test("suivi incertain : svIncertain repère les instants « recalage incertain �
   assert.equal(unc(40), false, "loin de toute position : pas incertain (la position est simplement inconnue)");
   assert.equal(P.svIncertain(sv.map((f) => ({ t: f.t, h: f.h })))(9), false, "ancien suivi sans qualité : jamais incertain");
 });
+
+test("tracé : un suivi vérifié passe avant l'ancienne projection enregistrée dans le projet ; un suivi probable ou sans verdict ne la remplace pas", () => {
+  const P2 = require("../src/ai/pipeline");
+  const ancien = [0.05, 0, 1, 0, 0.05, 2, 0, 0, 1], nouveau = [0.05, 0, 9, 0, 0.05, 7, 0, 0, 1];
+  const frames = [{ t: 10, players: [], h: ancien }, { t: 10.3, players: [], h: ancien }];
+  const suivi = (q, v) => [{ t: 10, h: nouveau, q, v }, { t: 10.25, h: nouveau, q, v }];
+  const v = P2.courtH(frames, [], "mobile", 10.1, 1000, 1000, suivi(2, 1));
+  assert.strictEqual(v.source.endsWith("-suivi"), true, "suivi vérifié par le rond (q = 2) : prioritaire");
+  assert.ok(Math.abs(v.H[2] - 9) < 1e-9, "c'est bien la projection du nouveau suivi (translation 9, pas celle de l'ancien : 1)");
+  assert.strictEqual(P2.courtH(frames, [], "mobile", 10.1, 1000, 1000, suivi(1, 1)).source.endsWith("-suivi"), true, "relié (q = 1) : prioritaire aussi");
+  assert.strictEqual(P2.courtH(frames, [], "mobile", 10.1, 1000, 1000, suivi(2)).source.endsWith("-suivi"), false, "ancien suivi q = 2 non issu du rond : l'ordre habituel est conservé");
+  assert.strictEqual(P2.courtH(frames, [], "mobile", 10.1, 1000, 1000, suivi(0, 1)).source.endsWith("-suivi"), false, "probable (q = 0) : l'ordre habituel est conservé");
+  assert.strictEqual(P2.courtH(frames, [], "mobile", 10.1, 1000, 1000, [{ t: 10, h: nouveau }, { t: 10.25, h: nouveau }]).source.endsWith("-suivi"), false, "ancien suivi sans verdict : l'ordre habituel est conservé");
+});
