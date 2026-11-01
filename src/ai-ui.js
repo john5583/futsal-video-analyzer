@@ -25,6 +25,7 @@
   let frames = [];           // trajectoires (format d'analyse)
   let abort = null;
   let running = false;
+  let preparing = null;      // étape 1 de l'analyse (le terrain) en cours : { annule }
   let live = null;           // image affichée pendant l'analyse
   let numCache = { frames: null, n: -1, parPiste: {} };      // numéro d'affichage par piste (une personne = un numéro, gardien = 1)
   let focus = null;          // erreur choisie dans la liste : { t, label, ids } (joueurs concernés mis en évidence, le reste atténué)
@@ -1959,7 +1960,7 @@
   async function runAnalysis(opts) {
     const a = ai(), msg = $("ai-run-msg");
     let okRun = false;
-    if (running) return false;
+    if (running || preparing) return false;
     if (!App.isVideoReady()) { msg.textContent = "Chargez d'abord une vidéo."; return false; }
     if (!a.calibrations.length) { msg.textContent = "Calibrez d'abord le terrain (étape 1)."; return false; }
     const r = refs();
@@ -1968,6 +1969,18 @@
     if (!range) { msg.textContent = "Plage de temps invalide."; return false; }
     if (frames.length && !(opts && opts.noConfirm) && !confirm("Une analyse existe déjà : la remplacer ?")) return false;
     const v2 = isV2(), fps = v2 ? 3 : Number($("ai-fps").value), tiles = v2 ? 3 : Number($("ai-tiles").value);      // v2 : 3 images/s, zoom automatique
+    /* Étape 1 sur 2 : LE TERRAIN D'ABORD. Lancer l'analyse des joueurs interrompait le calcul du terrain et la remplaçait par l'ancien suivi de la caméra (traits faux) ;
+       maintenant le suivi du sol et l'identification par le rond se terminent d'abord, puis l'analyse des joueurs s'appuie sur ce terrain vérifié. */
+    if ((a.camera || $("ai-camera").value) === "mobile" && !(a.camSuivi && a.camSuivi.global && a.camSuivi.terrain) && !(opts && opts.sansTerrain) && P.suiviSolGlobal && window.fsal && window.fsal.solGlobalBegin && a.lineColor) {
+      preparing = { annule: false }; const prep = preparing;
+      $("ai-run").disabled = true; $("ai-cancel").hidden = false; $("ai-cancel").onclick = () => { prep.annule = true; if (suiviRun) suiviRun.ctrl.abort(); if (globalRun) globalRun.ctrl.abort(); };
+      msg.textContent = "Étape 1 sur 2 : le terrain (suivi du sol puis identification par le rond, environ 45 minutes en arrière-plan). L'analyse des joueurs démarrera toute seule ensuite. Vous pouvez continuer à regarder la vidéo.";
+      try { await lanceSuivi(); if (!prep.annule) await lanceSolGlobal(); } catch (_e) { /* le terrain est un plus : en cas d'échec l'analyse continue avec le suivi qu'elle fait elle-même */ }
+      while ((suiviRun || globalRun) && !prep.annule) await new Promise((res) => setTimeout(res, 2000));      // un calcul du terrain déjà lancé : on l'attend
+      preparing = null; $("ai-cancel").hidden = true; $("ai-cancel").onclick = null; $("ai-run").disabled = false;
+      if (prep.annule) { msg.textContent = "Préparation du terrain annulée."; return false; }
+      msg.textContent = "Étape 2 sur 2 : analyse des joueurs…";
+    }
     running = true; abort = new AbortController(); live = null;
     if (suiviRun) { suiviRun.ctrl.abort(); suiviRun = null; suiviMsg("Suivi de la caméra interrompu : l'analyse complète suit la caméra elle-même."); }       // pas deux lectures de la vidéo en même temps
     const startedAt = Date.now();
