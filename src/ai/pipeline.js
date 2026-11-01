@@ -901,14 +901,51 @@
         await api.solGlobalFrame(id, k, d.buffer.slice(0));
         if (opts.onProgress && k % 20 === 0) opts.onProgress({ etape: "images", f: k / n, t: times[k] });
       }
-      const run = api.solGlobalRun(id);
+      const cal0 = calibs.find((c) => Array.isArray(c.points) && c.points.length >= 4) || null;
+      const run = api.solGlobalRun(id, { points: cal0 ? cal0.points.map((p) => ({ id: p.id, ix: p.ix, iy: p.iy })) : null, vw: video.videoWidth, L: opts.L || 40, W: opts.W || 20 });
       if (opts.signal) opts.signal.addEventListener("abort", () => { try { api.solGlobalCancel(id); } catch (_e) { /* déjà fini */ } }, { once: true });
       const r = await run; id = null;
       if (!r || !r.ok) throw new Error((r && r.error) || "Suivi global impossible");
       const Nm = r.Nm, Ni = HG.invert(Nm), sx = GW / vw, sy = GH / vh, S = [sx, 0, 0, 0, sy, 0, 0, 0, 1], Si = [1 / sx, 0, 0, 0, 1 / sy, 0, 0, 0, 1];
       // image de la grille la plus proche de chaque calibrage
       const kc = calibs.map((c) => { let b = 0; times.forEach((t, k) => { if (Math.abs(t - c.t) < Math.abs(times[b] - c.t)) b = k; }); return b; });
+      const TAm = (typeof require === "function" ? (() => { try { return require("./terrain-auto"); } catch (_e) { return null; } })() : null) || (typeof self !== "undefined" ? self.FutsalTerrainAuto : null);
+      const ter = r.terrain && r.terrain.ok && r.terrain.orientation && r.terrain.orientation.ok && TAm ? r.terrain : null;
+      /* Troisième preuve pour les images « probables » : le but détecté (détecteur entraîné) doit tomber là où la pose le place. Un plus : jamais d'erreur affichée. */
+      if (ter && ter.stats && ter.stats.probables > 0 && api.aiGoals && api.aiGoalsDispo && TAm.promouvoirParButs) {
+        try {
+          if (await api.aiGoalsDispo()) {
+            const sc = Math.min(1, 1920 / Math.max(vw, vh)), gw = Math.max(2, Math.round(vw * sc)), gh = Math.max(2, Math.round(vh * sc));
+            const cvb = document.createElement("canvas"); cvb.width = gw; cvb.height = gh; const cxb = cvb.getContext("2d", { willReadFrequently: true });
+            const det = {}, choisis = []; ter.echantillons.forEach((e, j) => { if (e.genre === "probable" || (e.genre !== "non" && j % 8 === 0)) choisis.push(j); });
+            for (const j of choisis) {
+              if (opts.signal && opts.signal.aborted) throw new Error("Suivi interrompu");
+              await seekTo(video, times[Math.min(n - 1, ter.echantillons[j].k)]);
+              cxb.drawImage(video, 0, 0, gw, gh); const d = cxb.getImageData(0, 0, gw, gh);
+              const rb = await api.aiGoals({ buffer: d.data.buffer.slice(0), width: gw, height: gh, seuil: 0.3 });
+              if (rb && !rb.error && Array.isArray(rb.boxes)) det[j] = rb.boxes.filter((b) => b.score >= 0.5).map((b) => ({ x0: b.x0 * 480 / gw, x1: b.x1 * 480 / gw, y1: b.y1 * 270 / gh, score: b.score }));
+              if (opts.onProgress && choisis.indexOf(j) % 10 === 0) opts.onProgress({ etape: "buts", f: choisis.indexOf(j) / choisis.length });
+            }
+            TAm.promouvoirParButs(ter, r.G, det);
+          }
+        } catch (e3) { if (opts.signal && opts.signal.aborted) throw e3; }
+      }
       const frames = [], lost = []; let lostStart = null, nOk = 0;
+      if (ter) {
+        /* terrain identifié par le rond central (voir terrain-auto.js) : 2 = vérifié par le rond ET les lignes du sol, 1 = relié entre deux images vérifiées, 0 = probable (à confirmer) ; sinon rien n'est tracé */
+        const Lm = opts.L || 40, Wm = opts.W || 20;
+        for (let k = 0; k < n; k++) {
+          const pr = TAm.projectionImage(ter, r.G, k); let h = null;
+          if (pr) { const hp = TAm.homographieProgramme(pr, ter.orientation.M, Lm, Wm, vw, vh); h = hp ? normalizedProjection(hp, vw, vh) : null; }
+          if (h) { frames.push({ t: Math.round(times[k] * 100) / 100, h, q: pr.niveau === "probable" ? 0 : pr.genre === "pont" ? 1 : 2 }); if (pr.niveau !== "probable") nOk++; if (lostStart != null) { lost.push([lostStart, times[k]]); lostStart = null; } }
+          else if (lostStart == null) lostStart = times[k];
+        }
+        if (lostStart != null) lost.push([lostStart, times[n - 1]]);
+        const st = ter.stats || {}, tot = Math.max(1, st.total || 1);
+        return { frames, lost, t0: times[0], t1: times[n - 1], seconds: Math.round((Date.now() - started) / 100) / 10, orb: 0, vw, vh, global: true, stats: r.stats,
+          terrain: { verifie: (st.verifiees || 0) / tot, probable: (st.probables || 0) / tot, non: (st.non || 0) / tot, total: st.total || 0, fov: ter.fov, orientationErreur: ter.orientation.erreur },
+          lignes: { couleur: opts.lineColor || null, mode: "terrain", essais: n, acceptes: nOk, confusion: null } };
+      }
       for (let k = 0; k < n; k++) {
         let ci = 0; calibs.forEach((c, i) => { if (Math.abs(c.t - times[k]) < Math.abs(calibs[ci].t - times[k])) ci = i; });
         let h = null;

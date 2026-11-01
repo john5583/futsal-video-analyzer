@@ -1,5 +1,8 @@
 # Suivi global du sol (`src/ai/sol-global.js`)
 
+> **Correction (2026-11-01)** : le « 95,6 % » ci-dessous reposait sur un rond de référence réajusté sur le suivi lui-même, et le suivi marquait « ok » des images fausses (audit par le rond : ≈ 12 à 14 % des secondes décalées ; 480–496 s : rond à x ≈ 400 au lieu de 117). Le suivi global est désormais CONTRÔLÉ par l’identification du terrain (`src/ai/terrain-auto.js`, voir `docs/terrain-complet-mesures.md`) : vérifié 90,9 % des secondes, probable 0,5 %, non analysé 8,6 % sur la vidéo d’essai ; le champ de vision change vers 66 s (≈ 62° avant, 91° après), ce qui cassait la première minute.
+
+
 **Pourquoi** : le suivi image par image dérive, et le suivi « en direct » perd le terrain après un balayage rapide ou un long passage sans lignes. Ici toute la vidéo est traitée hors ligne (4 images/s, 480×270) : les images clés sont raccordées entre elles sur les lignes du sol et par des liens ORB cherchés sans prédiction, chaque lien n'étant gardé que si les lignes d'une image retombent sur celles de l'autre.
 
 **La couleur choisie prime** : la carte de lignes donne trois fois plus de poids à la couleur choisie (rare, non répétitive) qu'aux autres lignes (nombreuses et parallèles : un décalage de plusieurs lignes « paraît bon »). Un lien ou une position est refusé si, quand la couleur choisie est assez visible dans les deux images, elle ne retombe pas sur elle-même.

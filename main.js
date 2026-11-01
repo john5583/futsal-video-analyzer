@@ -379,11 +379,12 @@ function registerIpc() {
   const SOL = require("./solGlobalFs");
   ipcMain.handle("solglobal:begin", (_e, n) => SOL.begin(n, app.getPath("temp")));
   ipcMain.handle("solglobal:frame", (_e, id, k, buf) => SOL.frame(id, k, buf));
-  ipcMain.handle("solglobal:run", async (e, id) => {
+  ipcMain.handle("solglobal:run", async (e, id, extra) => {
     const workerFile = path.join(__dirname, "src", "ai", "sol-global-worker.js").replace("app.asar" + path.sep, "app.asar.unpacked" + path.sep);
     try {
-      const r = await SOL.run(id, workerFile, (p) => { try { e.sender.send("solglobal:progress", id, p); } catch (_x) { /* fenêtre fermée */ } });
-      return { ok: true, G: r.G, verdict: r.verdict, score: r.score, stats: r.stats, Nm: r.Nm };
+      const ex = extra && typeof extra === "object" ? { points: Array.isArray(extra.points) ? extra.points.slice(0, 60).map((p) => ({ id: String(p.id), ix: Number(p.ix), iy: Number(p.iy) })) : null, vw: Number(extra.vw) || 0, L: Number(extra.L) || 40, W: Number(extra.W) || 20 } : null;
+      const r = await SOL.run(id, workerFile, (p) => { try { e.sender.send("solglobal:progress", id, p); } catch (_x) { /* fenêtre fermée */ } }, ex);
+      return { ok: true, G: r.G, verdict: r.verdict, score: r.score, stats: r.stats, Nm: r.Nm, terrain: r.terrain || null };
     } catch (err) { return { ok: false, error: String((err && err.message) || err) }; }
     finally { SOL.close(id); }
   });
