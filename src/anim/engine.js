@@ -284,10 +284,12 @@
       if (tr.length < 2) return;
       ops.push({ k: "poly", pts: tr, stroke: tr.team === "B" ? COLORS.B : COLORS.A, lw: 0.14, alpha: 0.45 });
     });
+    /* opts.numero(p) : numéro d'affichage de la personne (null = pas de numéro) ; opts.focus : ensemble d'identifiants de pistes à mettre en évidence (les autres sont atténuées). */
     ((frame && frame.players) || []).forEach((p) => {
       const col = p.team === "A" ? COLORS.A : p.team === "B" ? COLORS.B : p.team === "GKA" ? COLORS.GKA : COLORS.GKB;
-      ops.push({ k: "circle", x: p.x, y: p.y, r: 0.72, fill: col, stroke: "#ffffff", lw: 0.12 });
-      if (opts.showIds && p.id != null) ops.push({ k: "text", x: p.x, y: p.y + 0.26, s: String(p.id), size: 0.74, color: p.team === "GKA" || p.team === "GKB" ? "#1a1400" : "#ffffff", bold: true, anchor: "middle" });
+      const f = opts.focus || null, vise = !!(f && f.has(p.id)), dim = !!(f && !vise), num = opts.numero ? opts.numero(p) : p.id;
+      ops.push({ k: "circle", x: p.x, y: p.y, r: vise ? 0.95 : 0.72, fill: col, stroke: vise ? "#f97316" : "#ffffff", lw: vise ? 0.3 : 0.12, alpha: dim ? 0.25 : 1, strokeAlpha: dim ? 0.25 : undefined });
+      if (opts.showIds && num != null && !dim) ops.push({ k: "text", x: p.x, y: p.y + 0.26, s: String(num), size: 0.74, color: p.team === "GKA" || p.team === "GKB" ? "#1a1400" : "#ffffff", bold: true, anchor: "middle" });
     });
     if (frame && frame.ball) {
       ops.push({ k: "circle", x: frame.ball.x, y: frame.ball.y, r: 0.38, fill: COLORS.ball, stroke: "#111", lw: 0.1 });

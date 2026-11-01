@@ -26,6 +26,8 @@
   let abort = null;
   let running = false;
   let live = null;           // image affichée pendant l'analyse
+  let numCache = { frames: null, n: -1, parPiste: {} };      // numéro d'affichage par piste (une personne = un numéro, gardien = 1)
+  let focus = null;          // erreur choisie dans la liste : { t, label, ids } (joueurs concernés mis en évidence, le reste atténué)
   let pip = null;            // pipette en cours : { role, parts: { shirt, shorts, socks, trim }, part, points }
   let preview = null;        // aperçu de la reconnaissance sur l'image en pause
   let lastTest = null;       // dernière détection (pour re-classer quand la tolérance change)
@@ -210,6 +212,21 @@
   }
   /* Cercle au sol d'une personne (jamais de cadre) : projeté avec le terrain de cette image quand il est cohérent avec ses pieds, sinon petite ellipse sous les pieds. */
   const groundInverse = (f) => { try { return f && Array.isArray(f.h) && f.h.length === 9 ? HG.invert(f.h) : null; } catch (_e) { return null; } };
+  /* Numéro d'affichage d'une piste : celui de la FICHE de la personne (registre), identique partout ; null si la personne n'est pas identifiée. */
+  function numeroDe(id) {
+    const RG2 = window.FutsalRegistre, NU = window.FutsalNumeros; if (!RG2 || !NU || !frames.length) return null;
+    if (numCache.frames !== frames || numCache.n !== frames.length) {
+      let pp = {}, refus = {}; try { const a = state.project && state.project.ai, na = NU.attribuer(RG2.construire(frames, { L: (a && a.L) || 40, W: (a && a.W) || 20 }).personnes); pp = na.parPiste; refus = na.refus; } catch (_e) { pp = {}; }
+      numCache = { frames, n: frames.length, parPiste: pp, refus };
+    }
+    const v = numCache.parPiste[id]; return v == null ? null : v;
+  }
+  const activeFocus = () => (focus && Math.abs((video.currentTime || 0) - focus.t) < 6 ? focus.ids : null);
+  function setFocus(e) {
+    focus = null;
+    try { if (O && frames.length) { const o = O.buildOverlay(e, frames, { L: L(), W: W(), dirAt }); if (o && o.involved && o.involved.length) focus = { t: e.t, label: App.labelOf(e.type), ids: new Set(o.involved) }; } } catch (_e) { focus = null; }
+    refreshLive();
+  }
   function drawGround(ctx, p, col, hInv, r, lw) {
     const pts = SIL.groundCircle(p, r.vw, r.vh, hInv, (Hi, x, y) => { const q = HG.apply(Hi, x, y); return [q[0] * r.vw, q[1] * r.vh]; });
     if (!pts) return;
@@ -322,22 +339,30 @@
       const ceGen = still ? contoursReady(f) : null;
       if (ceGen) drawContours(ctx, f); else if (still) scheduleContours(f);
       const sil = new Set(ceGen ? ceGen.items.map((it) => it.id) : []), hInv = groundInverse(f);
+      const act = activeFocus();
       f.players.forEach((p) => {
         if (!p.b || p.b.length < 4) return;
         const x1 = (p.b[0] / 1000) * r.vw, y1 = (p.b[1] / 1000) * r.vh, x2 = (p.b[2] / 1000) * r.vw, y2 = (p.b[3] / 1000) * r.vh;
         const a1 = toView(x1, y1), a2 = toView(x2, y2);
         const col = TEAM_COLOR[p.team] || TEAM_COLOR.UNK;
         const w = a2[0] - a1[0], h = a2[1] - a1[1];
-        if (!sil.has(p.id)) drawGround(ctx, p, col, hInv, r, 2);
-        if ($("ov-ids").checked) {
-          const label = p.team === "UNK" ? "non reconnu" : p.team === "REF" ? "arbitre" : (p.team === "A" ? "" : p.team === "B" ? "Adv. " : p.team === "GKA" ? "GB " : "GB adv. ") + (p.id != null ? "#" + p.id : (p.team === "A" ? "Mon équipe" : ""));
-          ctx.font = "600 12px 'Segoe UI',Arial,sans-serif";
-          const tw = ctx.measureText(label).width + 8;
-          ctx.fillStyle = col; ctx.fillRect(a1[0], a1[1] - 16, tw, 16);
-          ctx.fillStyle = "#fff"; ctx.fillText(label, a1[0] + 4, a1[1] - 4);
+        if (!sil.has(p.id)) { ctx.save(); if (act && !act.has(p.id)) ctx.globalAlpha = 0.25; drawGround(ctx, p, act && act.has(p.id) ? "#f97316" : col, hInv, r, act && act.has(p.id) ? 4 : 2); ctx.restore(); }
+        if ($("ov-ids").checked && !(act && !act.has(p.id))) {
+          const num = numeroDe(p.id);      // un seul chiffre, dans la couleur de l'équipe, comme sur la vue du dessus ; rien si la personne n'est pas identifiée
+          if (num != null) {
+            const big = !!(act && act.has(p.id)), cx = (a1[0] + a2[0]) / 2, cy = a1[1] - 11, rr = big ? 13 : 10;
+            ctx.beginPath(); ctx.arc(cx, cy, rr, 0, Math.PI * 2); ctx.fillStyle = col; ctx.fill();
+            ctx.lineWidth = big ? 3 : 1.5; ctx.strokeStyle = big ? "#f97316" : "#ffffff"; ctx.stroke();
+            ctx.fillStyle = p.team === "GKA" || p.team === "GKB" ? "#1a1400" : "#fff"; ctx.font = "700 " + (big ? 14 : 12) + "px 'Segoe UI',Arial,sans-serif";
+            ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(String(num), cx, cy + 0.5); ctx.textAlign = "start"; ctx.textBaseline = "alphabetic";
+          }
         }
       });
     }
+    { const act2 = activeFocus(); if (act2 && f && $("ov-boxes").checked) {
+      const hh = (boxSize().h || 200) - 34; ctx.fillStyle = "rgba(11,18,32,.88)"; ctx.fillRect(8, hh, Math.min(560, boxSize().w - 16), 26);
+      ctx.fillStyle = "#f97316"; ctx.font = "600 13px 'Segoe UI',Arial,sans-serif"; ctx.fillText("Erreur : " + (focus.label || "") + " — joueurs concernés en orange (Échap : tout réafficher)", 16, hh + 18);
+    } }
     // personne d'une question du programme : cadre orange sur l'image exacte de la question
     if (qHighlight && Math.abs((video.currentTime || 0) - qHighlight.t) < 0.4 && Array.isArray(qHighlight.polys)) {
       ctx.strokeStyle = "#f97316"; ctx.lineWidth = 3; ctx.setLineDash([8, 5]);
@@ -436,7 +461,7 @@
     const canvas = $("minimap"), ctx = canvas.getContext("2d");
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     const heat = $("ov-heat").checked && a && a.stats ? a.stats.heat : null;
-    E.drawOps(ctx, E.liveOps(f ? orient(f) : null, { showIds: $("ov-ids").checked, trails, heat }), canvas.width / E.COURT_VIEW.w, E.COURT_VIEW);
+    E.drawOps(ctx, E.liveOps(f ? orient(f) : null, { showIds: $("ov-ids").checked, trails, heat, numero: (p) => numeroDe(p.id), focus: activeFocus() }), canvas.width / E.COURT_VIEW.w, E.COURT_VIEW);
   }
 
   function refreshLive() {
@@ -1037,6 +1062,7 @@
     det.hidden = false;
     const c = r.resume;
     $("ai-pers-sum").textContent = c.total + " personne(s) : " + c.sures + " sûre(s), " + c.probables + " probable(s), " + c.nonIdentifiees + " non identifiée(s)";
+    { const nu = window.FutsalNumeros ? window.FutsalNumeros.attribuer(r.personnes) : null; if (nu && (nu.refus.A || nu.refus.B)) $("ai-pers-sum").textContent += " — numéros non affichés : la même personne est découpée en trop de fiches (" + [nu.refus.A ? "mon équipe " + nu.refus.A : "", nu.refus.B ? "adversaires " + nu.refus.B : ""].filter(Boolean).join(", ") + " fiches pour " + window.FutsalNumeros.MAX_PAR_EQUIPE + " au plus attendues) : jamais de faux numéro."; }
     r.personnes.slice(0, 80).forEach((p) => {
       const row = document.createElement("div"); row.className = "ev";
       const mn = (t) => App.fmt(t);
@@ -1125,7 +1151,7 @@
     items.forEach((e) => {
       const row = document.createElement("div"); row.className = "ev";
       row.innerHTML = "<button class=\"t\">" + App.fmt(e.t) + "</button><div><div class=\"lbl\">" + esc(EVM_NOM[e.type] || e.type) + (e.equipe ? (e.equipe === "A" ? " — pour mon équipe" : " — pour l'adversaire") : "") + (e.statut === "ok" ? " ✔ validé" : e.statut === "non" ? " ✖ écarté" : "") + "</div><div class=\"chips\">" + esc(e.note || "") + "</div></div><div class=\"btns\"><button data-a=\"ok\" title=\"Oui, c'est juste\">✔</button><button data-a=\"no\" title=\"Non, ce n'est pas juste\">✖</button></div>";
-      row.querySelector(".t").addEventListener("click", () => App.seek(Math.max(0, e.t - 3)));
+      row.querySelector(".t").addEventListener("click", () => { App.seek(Math.max(0, e.t - 3)); setFocus(e); });
       ["ok", "no"].forEach((k) => row.querySelector("[data-a=" + k + "]").addEventListener("click", () => { e.statut = k === "ok" ? "ok" : "non"; renderEvenementsMatch(); App.changed(); }));
       box.appendChild(row);
     });
@@ -2180,7 +2206,7 @@
     });
     document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeMenu(); });
     document.addEventListener("mousedown", (e) => { if (menuEl && !menuEl.contains(e.target)) closeMenu(); });
-    document.addEventListener("keydown", (e) => { if (e.key === "Escape" && linePick) { stopLinePick(); return; } if (e.key === "Escape" && benchMark) { benchMark = null; updateOverlayMode(); return; } if (e.key === "Escape" && (placing || pickRole || pip)) { if (more) { cancelMore(true); return; } placing = null; pickRole = null; if (pip) cancelPipette(); else updateOverlayMode(); } });
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape" && focus) { focus = null; refreshLive(); } if (e.key === "Escape" && linePick) { stopLinePick(); return; } if (e.key === "Escape" && benchMark) { benchMark = null; updateOverlayMode(); return; } if (e.key === "Escape" && (placing || pickRole || pip)) { if (more) { cancelMore(true); return; } placing = null; pickRole = null; if (pip) cancelPipette(); else updateOverlayMode(); } });
     ["loadedmetadata", "seeked", "pause", "timeupdate", "emptied"].forEach((ev) => video.addEventListener(ev, () => {
       if (ev === "emptied") { setZoom({ k: 1, tx: 0, ty: 0 }); contours.clear(); if (shadow) { shadow.removeAttribute("src"); shadow.load(); shadow = null; shadowUrl = ""; } }
       if (preview && ev === "seeked" && lastTest && Math.abs(video.currentTime - preview.t) > 0.2) { preview = null; lastTest = null; $("ai-test-msg").textContent = ""; }
