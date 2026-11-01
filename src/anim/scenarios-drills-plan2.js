@@ -203,5 +203,14 @@
     return steps(s, "Match 4 contre 4 avec gardiens : le thème de la séance est récompensé par des points bonus.", "Jeu libre, mais chaque action qui respecte le thème (sortie courte, pressing déclenché, appel du pivot) rapporte un point.", "Le coach compte les points du thème ; arrêt du jeu pour corriger une erreur répétée ; terminer par un match libre.");
   };
 
+  D.bloc_median_zones = () => {
+    const s = mk("bloc_median_zones", "Défendre en bloc médian : deux zones centrales");
+    s.gka(2, 10).a(5, 16, 10).a(2, 15, 5).a(3, 15, 15).a(4, 10, 10).b(9, 22, 10).b(7, 24, 5).b(8, 24, 15).b(6, 30, 10).gkb(38, 10);
+    s.zone("target", [10, 0, 20, 20], 0.5, 12, "Les défenseurs restent dans les deux zones centrales");
+    s.ball(0.3, 22.4, 10).pass("pass", "B9", "B7", 0.6, 1.4, "Le ballon progresse").go("A2", [1.4, 15, 5], [2.6, 22, 6]).go("A5", [1.4, 16, 10], [2.6, 22.6, 9.4]).go("A3", [1.4, 15, 15], [2.6, 20, 13.6]).go("A4", [1.4, 10, 10], [2.6, 17, 10]).arrow("press", "A2", "B7", 1.5, 2.6, "Presser le porteur côté extérieur");
+    s.pass("pass", "B7", "B6", 3.4, 4.2, "Passe vers l'avant").go("A5", [3.4, 22.6, 9.4], [4.4, 28, 10]).arrow("press", "A5", "B6", 3.5, 4.4, "Presser le receveur quand la passe part").go("A4", [3.4, 17, 10], [4.4, 24, 10]).mark("check", 28, 10, 4.4, 9);
+    return steps(s, "Cinq contre cinq sur le terrain entier : les défenseurs sont limités aux deux zones centrales.", "Marquage individuel : presser le porteur côté extérieur, puis le receveur au moment où la passe part.", "Anticiper le sens du jeu ; ne reculer que si le ballon passe dans notre moitié ; presser ensemble.");
+  };
+
   return D;
 });

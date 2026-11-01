@@ -33,9 +33,9 @@ test("systèmes et rôles ne référencent que des erreurs existantes", () => {
 });
 
 test("chaque exercice est utilisé et décrit", () => {
-  const used = new Set(KB.ERRORS.flatMap((e) => e.drills));
+  const used = new Set(KB.ERRORS.flatMap((e) => e.drills));      // recommandé par une erreur du catalogue, ou rattaché au plan de jeu (séance proposée, voir knowledge/seance.js)
   for (const d of KB.DRILLS) {
-    assert.ok(used.has(d.id), "exercice jamais recommandé : " + d.id);
+    assert.ok(used.has(d.id) || (KB.SEANCE_TAGS && KB.SEANCE_TAGS[d.id]), "exercice jamais recommandé ni rattaché au plan : " + d.id);
     assert.ok(d.description && d.criteria.length && d.duration > 0);
   }
 });
