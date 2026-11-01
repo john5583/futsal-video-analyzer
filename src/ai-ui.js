@@ -1955,7 +1955,13 @@
           $("ai-bar").style.width = Math.round((p.done / p.total) * 100) + "%";
           msg.textContent = "Image " + p.done + " / " + p.total + " — reste environ " + fmtEta(p.eta) + (p.lost ? " (caméra perdue sur cette image)" : "");
           if (FSAI.hooks.progress) FSAI.hooks.progress(p.done / p.total, msg.textContent);
-          if (p.frame && p.done % 3 === 0) { live = p.frame; drawMinimap(); }
+          /* La vidéo et la vue du dessus avancent ENSEMBLE, à chaque image analysée (jamais une vue du dessus qui saute pendant que la vidéo reste fixe). */
+          if (p.frame) {
+            live = p.frame;
+            if (!video.paused) video.pause();
+            if (video.readyState >= 1 && isFinite(p.frame.t) && Math.abs((video.currentTime || 0) - p.frame.t) > 0.04) { try { video.currentTime = p.frame.t; } catch (_e) { /* vidéo pas prête : la vue du dessus suit seule */ } }
+            refreshLive();
+          }
         }
       });
       live = null; preview = null;
