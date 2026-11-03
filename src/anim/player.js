@@ -41,13 +41,21 @@
   /* Vue 3D : mode "2d" (de dessus) ou "3d" ; ballon affiché ou non ; préréglage de caméra (cote, but, haut) ; rotation et zoom à la souris. */
   ScenePlayer.prototype.setMode = function (mode) { this.mode = mode === "3d" && V3 ? "3d" : "2d"; this.render(); };
   ScenePlayer.prototype.setBall = function (on) { this.showBall = !!on; this.render(); };
-  ScenePlayer.prototype.setPreset = function (name) { if (V3) { this.cam = V3.newCamera(name); this.render(); } };
+  ScenePlayer.prototype.setPreset = function (name) { if (V3) { this.preset = name; this.cam = V3.newCamera(name); this.render(); } };
   ScenePlayer.prototype.enableMouse = function () {
+    /* Clic droit maintenu : tourner autour du terrain dans tous les sens (360° et de presque à plat à vue de dessus) ; clic gauche maintenu : déplacer la vue ; molette : zoomer ; double clic : revenir à la caméra de départ. */
     const c = this.canvas, me = this; let drag = null;
-    c.addEventListener("pointerdown", (e) => { if (me.mode !== "3d") return; drag = { x: e.clientX, y: e.clientY }; try { c.setPointerCapture(e.pointerId); } catch (_e) { /* pas grave */ } });
-    c.addEventListener("pointermove", (e) => { if (!drag || me.mode !== "3d") return; me.cam.yaw -= (e.clientX - drag.x) * 0.4; me.cam.pitch += (e.clientY - drag.y) * 0.3; V3.limitCamera(me.cam); drag = { x: e.clientX, y: e.clientY }; me.render(); });
+    c.addEventListener("contextmenu", (e) => e.preventDefault());
+    c.addEventListener("pointerdown", (e) => { if (me.mode !== "3d") return; drag = { x: e.clientX, y: e.clientY, orbit: e.button === 2 }; try { c.setPointerCapture(e.pointerId); } catch (_e) { /* pas grave */ } });
+    c.addEventListener("pointermove", (e) => {
+      if (!drag || me.mode !== "3d") return;
+      const dx = e.clientX - drag.x, dy = e.clientY - drag.y, r = c.getBoundingClientRect(), k = c.width / (r.width || c.width);
+      if (drag.orbit) { me.cam.yaw -= dx * 0.4; me.cam.pitch += dy * 0.3; V3.limitCamera(me.cam); } else V3.pan(me.cam, dx * k, dy * k, c.width, c.height);
+      drag.x = e.clientX; drag.y = e.clientY; me.render();
+    });
     const end = () => { drag = null; };
     c.addEventListener("pointerup", end); c.addEventListener("pointercancel", end);
+    c.addEventListener("dblclick", () => { if (me.mode === "3d") me.setPreset(me.preset || "cote"); });
     c.addEventListener("wheel", (e) => { if (me.mode !== "3d") return; e.preventDefault(); me.cam.dist *= e.deltaY > 0 ? 1.08 : 0.92; V3.limitCamera(me.cam); me.render(); }, { passive: false });
   };
   ScenePlayer.prototype._tick = function (now) {

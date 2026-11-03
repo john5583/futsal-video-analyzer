@@ -34,8 +34,19 @@ test("projection : le centre du terrain est au milieu de l'image, x croissant va
 
 test("caméra : limites respectées, préréglages valides", () => {
   const cam = V.limitCamera({ yaw: -30, pitch: 200, dist: 1 });
-  assert.ok(cam.yaw >= 0 && cam.yaw < 360 && cam.pitch <= 84 && cam.dist >= 16);
+  assert.ok(cam.yaw >= 0 && cam.yaw < 360 && cam.pitch <= 88 && cam.dist >= 12);
   Object.keys(V.PRESETS).forEach((n) => { const c = V.newCamera(n); assert.ok(V.project(V.basis(c), [20, 10, 0], 1280, 800), n); });
+});
+
+test("déplacement de la vue : le terrain suit la souris, sous tous les angles, et reste borné", () => {
+  [0, 90, 200].forEach((yaw) => {
+    const c = V.newCamera("cote"); c.yaw = yaw;
+    const p0 = V.project(V.basis(c), [20, 10, 0], 1280, 800); V.pan(c, 100, 0, 1280, 800);
+    const p1 = V.project(V.basis(c), [20, 10, 0], 1280, 800); assert.ok(Math.abs(p1.x - p0.x - 100) < 3 && Math.abs(p1.y - p0.y) < 3, "glisser à droite, yaw " + yaw);
+    const d = V.newCamera("cote"); d.yaw = yaw; V.pan(d, 0, 60, 1280, 800);
+    const p2 = V.project(V.basis(d), [20, 10, 0], 1280, 800); assert.ok(p2.y > p0.y + 40 && Math.abs(p2.x - p0.x) < 3, "glisser vers le bas, yaw " + yaw);
+  });
+  const e = V.newCamera("cote"); V.pan(e, 1e6, 1e6, 1280, 800); assert.ok(Math.abs(e.tx) <= 26 && Math.abs(e.ty) <= 16);
 });
 
 test("ballon : au sol sur une passe courte, en l'air sur une longue passe, de retour au sol à l'arrivée", () => {

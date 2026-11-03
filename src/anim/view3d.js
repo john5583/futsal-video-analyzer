@@ -21,14 +21,15 @@
   const norm = (a) => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0] / l, a[1] / l, a[2] / l]; };
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
-  function newCamera(name) { const p = PRESETS[name] || PRESETS.cote; return { yaw: p.yaw, pitch: p.pitch, dist: p.dist }; }
-  function limitCamera(cam) { cam.pitch = clamp(cam.pitch, 8, 84); cam.dist = clamp(cam.dist, 16, 70); cam.yaw = ((cam.yaw % 360) + 360) % 360; return cam; }
+  function newCamera(name) { const p = PRESETS[name] || PRESETS.cote; return { yaw: p.yaw, pitch: p.pitch, dist: p.dist, tx: 0, ty: 0 }; }
+  function limitCamera(cam) { cam.pitch = clamp(cam.pitch, 6, 88); cam.dist = clamp(cam.dist, 12, 70); cam.yaw = ((cam.yaw % 360) + 360) % 360; cam.tx = clamp(cam.tx || 0, -26, 26); cam.ty = clamp(cam.ty || 0, -16, 16); return cam; }
 
   /* Base de la caméra : position, avant, droite, haut. */
   function basis(cam) {
-    const yaw = (cam.yaw * Math.PI) / 180, pit = (clamp(cam.pitch, 8, 84) * Math.PI) / 180;
-    const pos = [TARGET[0] + cam.dist * Math.cos(pit) * Math.sin(yaw), TARGET[1] + cam.dist * Math.cos(pit) * Math.cos(yaw), cam.dist * Math.sin(pit)];
-    const f = norm([TARGET[0] - pos[0], TARGET[1] - pos[1], TARGET[2] - pos[2]]);
+    const yaw = (cam.yaw * Math.PI) / 180, pit = (clamp(cam.pitch, 6, 88) * Math.PI) / 180;
+    const tg = [TARGET[0] + (cam.tx || 0), TARGET[1] + (cam.ty || 0), 0];   // point regardé : le centre du terrain, déplaçable (clic gauche maintenu)
+    const pos = [tg[0] + cam.dist * Math.cos(pit) * Math.sin(yaw), tg[1] + cam.dist * Math.cos(pit) * Math.cos(yaw), cam.dist * Math.sin(pit)];
+    const f = norm([tg[0] - pos[0], tg[1] - pos[1], tg[2] - pos[2]]);
     const r = norm(cross([0, 0, 1], f)), u = cross(f, r);
     return { pos, f, r, u };
   }
@@ -249,5 +250,13 @@
     }
   }
 
-  return { PRESETS, FOV, newCamera, limitCamera, basis, project, render, ballState };
+  /* Déplace le point regardé de (dx, dy) pixels d'écran : le terrain suit la souris. */
+  function pan(cam, dx, dy, w, h) {
+    const focal = (h / 2) / Math.tan((FOV * Math.PI) / 360), m = cam.dist / focal, yaw = (cam.yaw * Math.PI) / 180, pit = (clamp(cam.pitch, 6, 88) * Math.PI) / 180;
+    const rx = Math.cos(yaw), ry = -Math.sin(yaw), fx = -Math.sin(yaw), fy = -Math.cos(yaw), k = m / Math.max(0.2, Math.sin(pit));
+    cam.tx = (cam.tx || 0) - dx * m * rx + dy * k * fx; cam.ty = (cam.ty || 0) - dx * m * ry + dy * k * fy;
+    return limitCamera(cam);
+  }
+
+  return { PRESETS, FOV, newCamera, limitCamera, pan, basis, project, render, ballState };
 });
