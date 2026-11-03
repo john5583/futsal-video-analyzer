@@ -85,3 +85,24 @@ test("nouveaux choix du plan : chaque option est défendue par au moins un exerc
   const a = KB.proposerSeance({ system: "3-1" }, { duree: 75, training: { transition: "contre" } }), b = KB.proposerSeance({ system: "3-1" }, { duree: 75, training: { transition: "poser" } });
   assert.notDeepStrictEqual(a.blocs.map((x) => x.drill.id), b.blocs.map((x) => x.drill.id));
 });
+
+test("bibliothèque agrandie : plus de 100 exercices animés, au moins 25 phases arrêtées, chaque système a ses exercices", () => {
+  const SC = require("../src/anim/registry"), E = require("../src/anim/engine");
+  assert.ok(KB.DRILLS.length >= 100, "exercices : " + KB.DRILLS.length);
+  assert.ok(KB.DRILLS.filter((d) => TAGS[d.id].cp).length >= 25, "phases arrêtées : " + KB.DRILLS.filter((d) => TAGS[d.id].cp).length);
+  KB.DRILLS.forEach((d) => { const s = SC.forDrill(d.id); assert.ok(s, "animation manquante : " + d.id); assert.deepStrictEqual(E.validate(s), [], d.id); });
+  SYSTEMS.forEach((sys) => assert.ok(KB.DRILLS.filter((d) => (TAGS[d.id].sys || []).indexOf(sys) >= 0).length >= 3, "moins de 3 exercices pour le système " + sys));
+  ["corner", "rentree", "coup_franc", "penalty", "sixieme_faute", "coup_envoi", "remise_gardien"].forEach((p) => assert.ok(KB.DRILLS.some((d) => d.id.indexOf(p) === 0), "aucune phase arrêtée « " + p + " »"));
+  assert.ok(KB.DRILLS.some((d) => TAGS[d.id].cf && TAGS[d.id].cf.indexOf("off") >= 0) && KB.DRILLS.some((d) => TAGS[d.id].cf && TAGS[d.id].cf.indexOf("def") >= 0), "phases arrêtées offensives et défensives");
+});
+
+test("séance « coups de pied arrêtés » : plusieurs familles différentes (corner, coup franc, rentrée…), jamais seulement des rentrées", () => {
+  for (const system of SYSTEMS) {
+    const r = KB.proposerSeancesPretes({ system, flyingGK: "jamais" }, { cpa: "non" }).find((x) => x.id === "cpa60");
+    const fam = new Set(r.seance.blocs.filter((b) => TAGS[b.drill.id].cp).map((b) => b.drill.id.split("_")[0]));
+    assert.ok(r.seance.blocs.filter((b) => TAGS[b.drill.id].cp).length >= 3, system + " : moins de 3 phases arrêtées");
+    assert.ok(fam.size >= 3, system + " : familles " + [...fam]);
+  }
+  const long = KB.proposerSeance({ system: "3-1" }, { duree: 90, training: { cpa: "oui", insister: "cpa" }, focus: 6 });
+  assert.ok(long.blocs.filter((b) => TAGS[b.drill.id].cp).length >= 4);
+});

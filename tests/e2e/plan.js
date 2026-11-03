@@ -108,6 +108,10 @@ function makeFrames() {
   must(await waitFor(win, () => { const l = document.querySelectorAll("#plan-pretes-res details"); return l.length >= 2 && [...l].every((x) => / — 60 min/.test(x.querySelector("summary").textContent)); }, 8000), "filtre par durée");
   must(await win.evaluate(() => { const d = document.querySelector("#plan-pretes-res details"); d.open = true; return /Pourquoi/.test(d.textContent) && /Critères de réussite/.test(d.textContent); }), "une séance prête montre ses exercices, leurs raisons et leurs critères");
 
+  // 9. les exercices agrandis (plus de 100) ont tous leur animation dans la page, y compris les phases arrêtées
+  must(await win.evaluate(() => window.FutsalKB.DRILLS.length >= 100 && window.FutsalKB.DRILLS.every((d) => { const s = window.FutsalScenes.forDrill(d.id); return s && window.FutsalAnim.validate(s).length === 0; })), "plus de cent exercices, tous animés et valides dans la page");
+  must(await win.evaluate(() => window.FutsalKB.DRILLS.filter((d) => window.FutsalKB.SEANCE_TAGS[d.id].cp).length >= 25), "au moins 25 exercices de phases arrêtées dans la page");
+
   must(errors.length === 0, "aucune erreur dans l'interface " + JSON.stringify(errors));
   await app.close();
   fs.rmSync(dir, { recursive: true, force: true });

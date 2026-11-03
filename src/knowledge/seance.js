@@ -6,6 +6,7 @@
   const base = typeof module === "object" && module.exports ? require("./drills.js").DRILLS : target.DRILLS;
   const planBase = typeof module === "object" && module.exports ? require("./plan.js") : target;
   const plan2 = typeof module === "object" && module.exports ? require("./seance-drills.js").DRILLS_PLAN2 : target.DRILLS_PLAN2;
+  const plan3 = typeof module === "object" && module.exports ? require("./seance-drills2.js") : target;
   const D = (id, name, goal, players, duration, description, criteria) => ({ id, name, goal, players, duration, description, criteria });
 
   const NOUVEAUX = [
@@ -40,7 +41,7 @@
       "À la perte du ballon, l'équipe a trois secondes pour se replacer devant son but : le plus proche retarde le porteur sans se faire éliminer, les autres reviennent vers l'axe et ferment les lignes de passe.",
       ["Porteur ralenti dès la première seconde", "Deux défenseurs dans l'axe avant la 3e seconde", "Pas de faute"])
   ];
-  target.DRILLS = base.concat(NOUVEAUX.concat(plan2).filter((n) => !base.some((b) => b.id === n.id)));
+  target.DRILLS = base.concat(NOUVEAUX.concat(plan2, plan3.DRILLS_PLAN3).filter((n) => !base.some((b) => b.id === n.id)));
 
   /* Rattachement des exercices aux choix du plan.
      Plan tactique : sys = systèmes, def = hauteurs de défense, cmp = compacités, pr = pressing, nl = pas de perte en zone, gj = gardien-joueur.
@@ -159,6 +160,7 @@
     finition: ["finition_1v1_gardien", "finition_cadence", "superiorite_2v1", "pivot_remise_tir", "transition_off", "contre_attaque_2v1_3v2", "jeu_reduit_3v3_gb", "trois_un_combinaison"],
     gj: ["gj_5v4", "gj_perte_retour", "gj_construction_3_2", "def_5v4", "def_gj_pressing_5v4"]
   };
+  Object.keys(plan3.TAGS_PLAN3).forEach((id) => { target.SEANCE_TAGS[id] = plan3.TAGS_PLAN3[id]; });
   Object.keys(INS_PLUS).forEach((k) => INS_PLUS[k].forEach((id) => { if (!target.SEANCE_TAGS[id]) throw new Error("exercice inconnu : " + id); const t = target.SEANCE_TAGS[id]; t.ins = (t.ins || []).concat(k); }));
   Object.keys(PLUS).forEach((id) => { if (!target.SEANCE_TAGS[id]) throw new Error("exercice inconnu : " + id); Object.assign(target.SEANCE_TAGS[id], PLUS[id]); });
 
@@ -194,8 +196,9 @@
       return { pts, why, dims };
     };
     const usure = (opts && opts.usure) || {};   // exercices déjà proposés dans d'autres séances : un peu moins prioritaires, pour varier les séances prêtes
-    const notes = drills.map((d) => { const e = evaluer(d); return Object.assign({ d }, e, { adj: e.pts - (((tags[d.id] || {}).role) ? Math.min(9, 3 * (usure[d.id] || 0)) : Math.min(4, 1.2 * (usure[d.id] || 0))) }); });
-    const ordre = (a, b) => b.adj - a.adj || a.d.duration - b.d.duration || a.d.id.localeCompare(b.d.id);
+    const notes = drills.map((d) => { const e = evaluer(d); return Object.assign({ d }, e, { adj: e.pts - ((tr.insister === "cpa" && (tags[d.id] || {}).cp) ? 0 : ((tags[d.id] || {}).role) ? Math.min(9, 3 * (usure[d.id] || 0)) : Math.min(4, 1.2 * (usure[d.id] || 0))) }); });
+    const rang = (n) => (/^(corner|coup_franc|rentree|kick_in|marquage_cpa|cpa_off|cpa_gj)/.test(n.d.id) ? 0 : 1);   // à égalité, les grandes phases arrêtées (corner, coup franc, rentrée) avant penalty, coup d'envoi, remise du gardien
+    const ordre = (a, b) => b.adj - a.adj || rang(a) - rang(b) || a.d.duration - b.d.duration || a.d.id.localeCompare(b.d.id);
     const choisis = [], pris = new Set(); let total = 0;
     const prendre = (n, phase, pourquoiPar) => { if (!n || pris.has(n.d.id) || total + n.d.duration > duree) return false; pris.add(n.d.id); total += n.d.duration; choisis.push({ phase, drill: n.d, minutes: n.d.duration, pourquoi: n.why.length ? n.why : [pourquoiPar] }); return true; };
     const role = (n) => (tags[n.d.id] || {}).role;
@@ -203,20 +206,27 @@
     const ech = notes.filter((n) => role(n) === "ech" && n.pts >= 0).sort(ordre)[0];
     if (ech) prendre(ech, "Échauffement", "échauffement technique commun à tous les plans");
     // 2. thèmes du plan : les mieux notés, jusqu'à 5, en gardant de la place pour la finition
-    const reserveFin = duree >= 60 ? 12 : 0, reserveCpa = tr.cpa === "oui" && duree >= 45 ? (tr.insister === "cpa" && duree >= 75 ? 25 : 12) : 0, maxThemes = duree >= 90 ? 6 : duree >= 60 ? 5 : 3;
+    const reserveFin = duree >= 60 ? 12 : 0, reserveCpa = tr.cpa === "oui" && duree >= 45 ? (tr.insister === "cpa" ? (duree >= 90 ? 40 : duree >= 60 ? 30 : 12) : 12) : 0, maxThemes = duree >= 90 ? 6 : duree >= 60 ? 5 : 3;
+    const horsTheme = (n) => tr.cpa === "oui" && !!(tags[n.d.id] || {}).cp;   // les phases arrêtées voulues ont leur propre étape, plus bas
     const couverts = new Set(), themes = () => choisis.filter((c) => c.phase === "Thème du plan").length;
     ["ins", "sys", "gj", "def", "dt", "at", "so", "tr", "pd", "oc", "fi", "pr", "cmp", "nl"].forEach((dim) => {
       if (couverts.has(dim) || themes() >= maxThemes) return;
-      const n = notes.filter((x) => x.dims.indexOf(dim) >= 0 && x.pts >= 3 && role(x) !== "ech" && role(x) !== "fin" && !pris.has(x.d.id) && total + x.d.duration <= duree - reserveFin - reserveCpa).sort(ordre)[0];
+      const n = notes.filter((x) => x.dims.indexOf(dim) >= 0 && x.pts >= 3 && role(x) !== "ech" && role(x) !== "fin" && !horsTheme(x) && !pris.has(x.d.id) && total + x.d.duration <= duree - reserveFin - reserveCpa).sort(ordre)[0];
       if (n && prendre(n, "Thème du plan", "")) n.dims.forEach((x) => couverts.add(x));
     });
-    notes.filter((n) => n.pts >= 3 && role(n) !== "ech" && role(n) !== "fin").sort(ordre).forEach((n) => {
+    notes.filter((n) => n.pts >= 3 && role(n) !== "ech" && role(n) !== "fin" && !horsTheme(n)).sort(ordre).forEach((n) => {
       if (choisis.filter((c) => c.phase === "Thème du plan").length >= maxThemes) return;
       if (total + n.d.duration > duree - reserveFin - reserveCpa) return;
       prendre(n, "Thème du plan", "");
     });
     // 2 bis. coups de pied arrêtés, si l'entraîneur les veut (deux exercices s'il insiste dessus)
-    if (tr.cpa === "oui") notes.filter((n) => (tags[n.d.id] || {}).cp && n.pts >= 0).sort(ordre).slice(0, tr.insister === "cpa" ? 2 : 1).forEach((n) => prendre(n, "Coups de pied arrêtés", "coups de pied arrêtés demandés"));
+    if (tr.cpa === "oui") {
+      const nbCpa = tr.insister === "cpa" ? (duree >= 90 ? 4 : duree >= 60 ? 3 : 2) : 1, cps = notes.filter((n) => (tags[n.d.id] || {}).cp && n.pts >= 0).sort(ordre);
+      const famille = (n) => { const m = n.d.id.match(/^(corner|coup_franc|rentree|kick_in|penalty|sixieme|coup_envoi|remise|cpa|marquage)/); return m ? ({ kick_in: "rentree", sixieme: "penalty", coup_envoi: "remise", marquage: "cpa" }[m[1]] || m[1]) : n.d.id; }, vues = new Set(), choix = [];   // d'abord des phases arrêtées de familles différentes (corner, rentrée, coup franc…)
+      ["corner", "coup_franc", "rentree", "penalty", "remise", "cpa"].forEach((fam) => { const n = cps.find((x) => famille(x) === fam); if (n && choix.length < nbCpa && !vues.has(fam)) { choix.push(n); vues.add(fam); } });
+      cps.forEach((n) => { if (choix.length < nbCpa && choix.indexOf(n) < 0) choix.push(n); });
+      choix.forEach((n) => prendre(n, "Coups de pied arrêtés", "coups de pied arrêtés demandés"));
+    }
     // 3. finition : mise en application en jeu
     const fin = notes.filter((n) => role(n) === "fin" && n.pts >= 0).sort(ordre)[0];
     if (fin) prendre(fin, "Finition", "mise en application : finir l'action ou jouer le thème en match");

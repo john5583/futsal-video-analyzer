@@ -302,7 +302,13 @@
       const ch = P.courtH(frames, a.calibrations, a.camera || $("ai-camera").value, t, video.videoWidth, video.videoHeight, suiviFr);
       calibGo(t, !!(ch && ch.H));
       const qb = $("ai-trace-q"), qa = ch && ch.H ? qualiteAt(a, t) : null;
-      if (qb) { qb.hidden = qa !== 0; if (qa === 0) qb.textContent = "Recalage incertain : le tracé vient du suivi seul ici (lignes non retrouvées)"; }
+      /* Caméra mobile : seul un tracé VÉRIFIÉ par le nouveau suivi (rond et lignes du sol concordent) est sûr. Un tracé enregistré avec une ancienne analyse peut être faux (zoom, caméra qui bouge) : on le dit, on ne le laisse pas passer pour juste. */
+      const sv = suiviFr.length ? P.frameNear(suiviFr, t, 0.3) : null, verifie = !!(sv && sv.v === 1 && (sv.q === 1 || sv.q === 2)), mobile = (a.camera || $("ai-camera").value) === "mobile";
+      if (qb) {
+        if (qa === 0) { qb.hidden = false; qb.textContent = "Recalage incertain : le tracé vient du suivi seul ici (lignes non retrouvées)"; }
+        else if (ch && ch.H && mobile && !verifie) { qb.hidden = false; qb.textContent = "Tracé NON vérifié (ancienne analyse ou terrain pas encore calculé) : il peut être faux. Lance l'analyse : l'étape 1 recalcule le terrain."; }
+        else qb.hidden = true;
+      }
       if (ch && ch.H) {
         const Hi = HG.invert(ch.H), o = toView(0, 0), e = toView(r.vw, r.vh), far = 4;
         ctx.save(); ctx.beginPath(); ctx.rect(o[0], o[1], e[0] - o[0], e[1] - o[1]); ctx.clip();
