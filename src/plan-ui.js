@@ -163,6 +163,9 @@
     const r = KB.proposerSeance(plan().answers, { duree: Number($("plan-train-dur").value) || 75, training: plan().training });
     out.innerHTML = "";
     out.appendChild(el("h3", "Séance proposée : " + r.total + " min sur " + r.duree));
+    drawSeance(out, r, el);
+  }
+  function drawSeance(out, r, el) {
     out.appendChild(el("p", r.resume, "muted"));
     r.blocs.forEach((b) => {
       const d = b.drill, card = el("div", null, "card");
@@ -176,11 +179,29 @@
     if (r.sansExercice.length) out.appendChild(el("p", "Sans exercice ciblé : " + r.sansExercice.join(" ; ") + ".", "muted"));
     out.appendChild(el("p", "Les animations de chaque exercice sont dans l'onglet « Corrections animées », rubrique Exercices. Durées et critères : repères d'entraîneur à adapter ; l'efficacité des exercices n'est pas mesurée par le programme.", "muted"));
   }
+  /* séances prêtes : quinze séances thématiques de 45 à 120 min, composées avec le plan et les choix de l'entraîneur */
+  function renderPretes() {
+    const out = $("plan-pretes-res"); if (!out || !KB.proposerSeancesPretes) return;
+    const el = (tag, txt, cls) => { const e = document.createElement(tag); if (txt != null) e.textContent = txt; if (cls) e.className = cls; return e; };
+    const liste = KB.proposerSeancesPretes(plan().answers, plan().training, { duree: Number($("plan-pretes-dur").value) || 0 });
+    out.innerHTML = "";
+    out.appendChild(el("p", liste.length + " séance(s) pour ton plan. Clique sur une séance pour voir ses exercices.", "muted"));
+    liste.forEach((x) => {
+      const det = el("details", null, "card"), sum = el("summary", x.titre + " — " + x.duree + " min (" + x.seance.total + " min d'exercices, " + x.seance.blocs.length + " exercices)");
+      sum.style.cursor = "pointer"; sum.style.fontWeight = "600"; det.appendChild(sum);
+      det.appendChild(el("p", "Quand : " + x.quand));
+      det.appendChild(el("p", "Objectif : " + x.objectif));
+      drawSeance(det, x.seance, el);
+      out.appendChild(det);
+    });
+  }
   function render() { renderQuestions(); renderTrainQ(); renderResult(); }
 
   function bind() {
     $("plan-notes").addEventListener("input", () => { plan().notes = $("plan-notes").value; App.changed(); later(); });
     $("plan-train-go").addEventListener("click", renderSeance);
+    $("plan-pretes-go").addEventListener("click", renderPretes);
+    $("plan-pretes-dur").addEventListener("change", renderPretes);
     $("plan-reset").addEventListener("click", () => {
       const p = App.state.project;
       p.plan = { answers: KB.planDefaults(p.plan && p.plan.answers ? p.plan.answers.system : p.defaultSystem), notes: plan().notes };

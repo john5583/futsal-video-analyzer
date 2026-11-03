@@ -278,8 +278,12 @@
           <h2>Mes entraînements</h2>
           <p class="muted">Les réponses ci-dessus et ces précisions servent à composer une séance d'entraînement avec les exercices adaptés au jeu que tu veux jouer au prochain match. Le programme ne peut pas vérifier ces précisions sur la vidéo : elles servent seulement à choisir les exercices.</p>
           <div id="plan-train-q"></div>
-          <div class="plan-actions"><label>Durée de la séance <select id="plan-train-dur"><option value="45">45 min</option><option value="60">60 min</option><option value="75" selected>75 min</option><option value="90">90 min</option><option value="120">120 min</option></select></label> <button id="plan-train-go" class="primary">Proposer une séance</button></div>
+          <div class="plan-actions"><label>Durée de la séance <select id="plan-train-dur"><option value="45">45 min</option><option value="60">60 min</option><option value="75" selected>75 min</option><option value="90">90 min</option><option value="105">105 min</option><option value="120">120 min</option></select></label> <button id="plan-train-go" class="primary">Proposer une séance</button></div>
           <div id="plan-train-res"></div>
+          <h2>Séances prêtes pour mon plan</h2>
+          <p class="muted">Quinze séances de 45 à 120 minutes, chacune sur un thème (défense, attaque, transitions, pressing, sortie de balle, finition, coups de pied arrêtés, gardien-joueur…). Elles sont composées avec ton plan et tes choix ci-dessus : change-les, puis affiche-les de nouveau. Durées et critères : repères d'entraîneur à adapter.</p>
+          <div class="plan-actions"><label>Durée <select id="plan-pretes-dur"><option value="0" selected>Toutes</option><option value="45">45 min</option><option value="60">60 min</option><option value="75">75 min</option><option value="90">90 min</option><option value="105">105 min</option><option value="120">120 min</option></select></label> <button id="plan-pretes-go" class="primary">Voir les séances prêtes</button></div>
+          <div id="plan-pretes-res"></div>
         </div>
       </div>
       <div class="plan-col">
@@ -476,6 +480,7 @@
 <script src="knowledge/plan.js"></script>
 <script src="knowledge/seance-drills.js"></script>
 <script src="knowledge/seance.js"></script>
+<script src="knowledge/seance-pretes.js"></script>
 <script src="engine/analyzer.js"></script>
 <script src="engine/quality.js"></script>
 <script src="anim/engine.js"></script>
