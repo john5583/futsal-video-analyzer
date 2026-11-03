@@ -178,6 +178,7 @@
           b.variantes.forEach((x) => { const o = el("option", x.label); o.value = x.id; if (x.id === id) o.selected = true; sel.appendChild(o); });
           sel.addEventListener("change", () => draw(sel.value)); lab.appendChild(sel); card.appendChild(lab);
         }
+        const ba = el("button", "▶ Voir l'animation"); ba.className = "btn-anim"; ba.title = "Ouvre l'animation de cet exercice (vue 3D ou de dessus)"; ba.addEventListener("click", () => { if (window.FSTraining) window.FSTraining.open(id); }); card.appendChild(ba);
         card.appendChild(el("p", "Joueurs : " + d.players + " · Objectif : " + d.goal));
         card.appendChild(el("p", d.description));
         const why = el("p"); why.appendChild(el("strong", "Pourquoi : "));
@@ -188,7 +189,7 @@
       draw(b.drill.id);
     });
     if (r.sansExercice.length) out.appendChild(el("p", "Sans exercice ciblé : " + r.sansExercice.join(" ; ") + ".", "muted"));
-    out.appendChild(el("p", "Les animations de chaque exercice sont dans l'onglet « Corrections animées », rubrique Exercices. Durées et critères : repères d'entraîneur à adapter ; l'efficacité des exercices n'est pas mesurée par le programme.", "muted"));
+    out.appendChild(el("p", "Clique sur « Voir l'animation » pour voir un exercice (vue 3D ou de dessus). Durées et critères : repères d'entraîneur à adapter ; l'efficacité des exercices n'est pas mesurée par le programme.", "muted"));
   }
   /* séances prêtes : quinze séances thématiques de 45 à 120 min, composées avec le plan et les choix de l'entraîneur */
   function renderPretes() {
@@ -223,6 +224,8 @@
   const prevLoad = App.hooks.onLoad;
   App.hooks.onLoad = function () { if (prevLoad) prevLoad.apply(this, arguments); if (view) view.close(); const r = $("plan-real"); if (r) r.hidden = true; const t = $("plan-view-text"); if (t) t.hidden = true; shown = null; };
   App.hooks.onPlan = render;
+  const prevTraining = App.hooks.onTraining;
+  App.hooks.onTraining = function () { if (prevTraining) prevTraining.apply(this, arguments); renderTrainQ(); };   // l'onglet « Entraînement » affiche les questions d'entraînement
   bind();
   window.FSPlan = { render, plan };
 })();

@@ -14,6 +14,7 @@
     <button data-tab="analyse" class="active">Analyse vidéo</button>
     <button data-tab="rapport">Rapport &amp; solutions</button>
     <button data-tab="plan">Mon plan tactique</button>
+    <button data-tab="entrainement">Entraînement</button>
     <button data-tab="corrections">Corrections animées</button>
     <button data-tab="kb">Base de connaissances</button>
     <button data-tab="aide">Guide</button>
@@ -274,16 +275,10 @@
         <label class="plan-notes-l"><b>Mes autres consignes</b> <span class="muted">(sortie de balle, coups de pied arrêtés, rôles… notées dans cette page, non vérifiées par le programme)</span>
           <textarea id="plan-notes" rows="3" placeholder="Ex. : sortie courte depuis le gardien, corner à deux joueurs…"></textarea></label>
         <div class="plan-actions"><button id="plan-reset" class="ghost">Revenir aux valeurs conseillées pour ce système</button></div>
-        <div class="plan-train" id="plan-train">
+        <div class="plan-train" id="plan-train-lien">
           <h2>Mes entraînements</h2>
-          <p class="muted">Les réponses ci-dessus et ces précisions servent à composer une séance d'entraînement avec les exercices adaptés au jeu que tu veux jouer au prochain match. Le programme ne peut pas vérifier ces précisions sur la vidéo : elles servent seulement à choisir les exercices.</p>
-          <div id="plan-train-q"></div>
-          <div class="plan-actions"><label>Durée de la séance <select id="plan-train-dur"><option value="45">45 min</option><option value="60">60 min</option><option value="75" selected>75 min</option><option value="90">90 min</option><option value="105">105 min</option><option value="120">120 min</option></select></label> <button id="plan-train-go" class="primary">Proposer une séance</button></div>
-          <div id="plan-train-res"></div>
-          <h2>Séances prêtes pour mon plan</h2>
-          <p class="muted">Quinze séances de 45 à 120 minutes, chacune sur un thème (défense, attaque, transitions, pressing, sortie de balle, finition, coups de pied arrêtés, gardien-joueur…). Elles sont composées avec ton plan et tes choix ci-dessus : change-les, puis affiche-les de nouveau. Durées et critères : repères d'entraîneur à adapter.</p>
-          <div class="plan-actions"><label>Durée <select id="plan-pretes-dur"><option value="0" selected>Toutes</option><option value="45">45 min</option><option value="60">60 min</option><option value="75">75 min</option><option value="90">90 min</option><option value="105">105 min</option><option value="120">120 min</option></select></label> <button id="plan-pretes-go" class="primary">Voir les séances prêtes</button></div>
-          <div id="plan-pretes-res"></div>
+          <p class="muted">Tes séances d'entraînement, les séances prêtes et tous les exercices (avec leur animation en 3D) sont maintenant dans l'onglet « Entraînement ». Les réponses ci-dessus servent à les composer.</p>
+          <div class="plan-actions"><button id="plan-go-train" class="primary">Aller à l'onglet Entraînement</button></div>
         </div>
       </div>
       <div class="plan-col">
@@ -301,6 +296,53 @@
   </section>
 
   <!-- CORRECTIONS ANIMÉES -->
+  <!-- Entraînement : séance proposée, séances prêtes, bibliothèque d'exercices, animation (vue 3D ou de dessus) -->
+  <section id="tab-entrainement" class="tab">
+    <div class="train-layout">
+      <div class="train-col">
+        <h2>Entraînement</h2>
+        <p class="muted">Compose ta séance d'après ton plan de jeu (onglet « Mon plan tactique ») et tes choix ci-dessous, ouvre les séances prêtes, ou parcours tous les exercices. Clique sur « Voir l'animation » pour voir un exercice jouer, à droite.</p>
+        <nav class="train-sub" id="train-sub"><button data-pane="seance" class="active">Ma séance</button><button data-pane="pretes">Séances prêtes</button><button data-pane="exos">Tous les exercices</button></nav>
+        <div class="plan-train" id="train-pane-seance">
+          <h2>Mes entraînements</h2>
+          <p class="muted">Les réponses ci-dessus et ces précisions servent à composer une séance d'entraînement avec les exercices adaptés au jeu que tu veux jouer au prochain match. Le programme ne peut pas vérifier ces précisions sur la vidéo : elles servent seulement à choisir les exercices.</p>
+          <div id="plan-train-q"></div>
+          <div class="plan-actions"><label>Durée de la séance <select id="plan-train-dur"><option value="45">45 min</option><option value="60">60 min</option><option value="75" selected>75 min</option><option value="90">90 min</option><option value="105">105 min</option><option value="120">120 min</option></select></label> <button id="plan-train-go" class="primary">Proposer une séance</button></div>
+          <div id="plan-train-res"></div>
+        </div>
+        <div class="plan-train" id="train-pane-pretes" hidden>
+          <h2>Séances prêtes pour mon plan</h2>
+          <p class="muted">Quinze séances de 45 à 120 minutes, chacune sur un thème (défense, attaque, transitions, pressing, sortie de balle, finition, coups de pied arrêtés, gardien-joueur…). Elles sont composées avec ton plan et tes choix ci-dessus : change-les, puis affiche-les de nouveau. Durées et critères : repères d'entraîneur à adapter.</p>
+          <div class="plan-actions"><label>Durée <select id="plan-pretes-dur"><option value="0" selected>Toutes</option><option value="45">45 min</option><option value="60">60 min</option><option value="75">75 min</option><option value="90">90 min</option><option value="105">105 min</option><option value="120">120 min</option></select></label> <button id="plan-pretes-go" class="primary">Voir les séances prêtes</button></div>
+          <div id="plan-pretes-res"></div>
+        </div>
+        <div class="plan-train" id="train-pane-exos" hidden>
+          <h2>Tous les exercices</h2>
+          <p class="muted">Les exercices sont rangés par thème. Cherche par mot (corner, mur, écran, pressing…), puis clique sur un exercice pour voir son animation.</p>
+          <input id="train-search" type="search" placeholder="Chercher un exercice (ex. corner, écran, feinte…)" aria-label="Chercher un exercice">
+          <div id="train-list"></div>
+        </div>
+      </div>
+      <aside class="train-stage" id="train-stage">
+        <div class="train-canvas-box"><canvas id="train-canvas" aria-label="Animation de l'exercice"></canvas><p id="train-empty" class="train-empty">Choisis un exercice et clique sur « Voir l'animation ».</p></div>
+        <div class="corr-controls">
+          <button id="tr-play" class="primary">▶ Lecture</button>
+          <button id="tr-restart">⏮ Début</button>
+          <select id="tr-rate" title="Vitesse"><option value="0.5">×0,5</option><option value="1" selected>×1</option><option value="1.5">×1,5</option><option value="2">×2</option></select>
+          <input id="tr-seek" type="range" min="0" max="1000" value="0" aria-label="Position de l'animation">
+          <span id="tr-time" class="time">00:00 / 00:00</span>
+        </div>
+        <div class="corr-controls train-view">
+          <button id="tr-mode" title="Passer de la vue 3D à la vue de dessus (schéma)">Vue 3D</button>
+          <button id="tr-ball" title="Montrer ou cacher le ballon">Ballon : oui</button>
+          <span class="muted" id="tr-cams"><button data-cam="cote">Côté</button> <button data-cam="but">Derrière le but</button> <button data-cam="haut">Haut</button></span>
+          <span class="muted">Clic droit maintenu + souris : tourner dans tous les sens. Clic gauche maintenu : déplacer la vue. Molette : zoomer. Double clic : revenir à la vue de départ.</span>
+        </div>
+        <div id="train-info" class="train-info"></div>
+      </aside>
+    </div>
+  </section>
+
   <section id="tab-corrections" class="tab">
     <div class="corr-layout">
       <aside class="corr-list">
@@ -486,6 +528,7 @@
 <script src="engine/analyzer.js"></script>
 <script src="engine/quality.js"></script>
 <script src="anim/engine.js"></script>
+<script src="anim/view3d.js"></script>
 <script src="anim/builder.js"></script>
 <script src="anim/scenarios-errors.js"></script>
 <script src="anim/scenarios-drills.js"></script>
@@ -541,6 +584,7 @@
 <script src="engine/compliance.js"></script>
 <script src="corrections-ui.js"></script>
 <script src="plan-ui.js"></script>
+<script src="training-ui.js"></script>
 <script src="ai/suiviBallon.js"></script>
 <script src="labelling-ui.js"></script>
 <script src="ai/journal.js"></script>

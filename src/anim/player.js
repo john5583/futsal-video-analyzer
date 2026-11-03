@@ -3,6 +3,7 @@
   "use strict";
   const E = root.FutsalAnim;
   const SC = root.FutsalScenes;
+  const V3 = root.FutsalView3D || null;
   const W = 1280, H = 800;
 
   /* ---- Lecteur ---- */
@@ -17,6 +18,7 @@
     this.raf = 0;
     this.last = 0;
     this.loop = false;
+    this.mode = "2d"; this.cam = V3 ? V3.newCamera("cote") : null; this.showBall = true;   // vue de dessus ou vue 3D (caméra qu'on tourne à la souris)
     canvas.width = W; canvas.height = H;
     this._tick = this._tick.bind(this);
   }
@@ -30,7 +32,31 @@
     const ctx = this.ctx;
     ctx.clearRect(0, 0, W, H);
     if (!this.seq) return;
+    if (this.mode === "3d" && V3) {
+      const seq = this.seq, T = Math.max(0, Math.min(seq.duration, this.T)), it = seq.items.find((i) => T >= i.start && T < i.end) || seq.items[seq.items.length - 1];
+      if (it.type === "scene") { V3.render(ctx, it.scene, Math.min(it.scene.duration, T - it.start), this.cam, W, H, { ball: this.showBall, subtitle: it.subtitle }); return; }
+    }
     E.drawOps(ctx, SC.sequenceOps(this.seq, this.T), W / E.VIEW.w);
+  };
+  /* Vue 3D : mode "2d" (de dessus) ou "3d" ; ballon affiché ou non ; préréglage de caméra (cote, but, haut) ; rotation et zoom à la souris. */
+  ScenePlayer.prototype.setMode = function (mode) { this.mode = mode === "3d" && V3 ? "3d" : "2d"; this.render(); };
+  ScenePlayer.prototype.setBall = function (on) { this.showBall = !!on; this.render(); };
+  ScenePlayer.prototype.setPreset = function (name) { if (V3) { this.preset = name; this.cam = V3.newCamera(name); this.render(); } };
+  ScenePlayer.prototype.enableMouse = function () {
+    /* Clic droit maintenu : tourner autour du terrain dans tous les sens (360° et de presque à plat à vue de dessus) ; clic gauche maintenu : déplacer la vue ; molette : zoomer ; double clic : revenir à la caméra de départ. */
+    const c = this.canvas, me = this; let drag = null;
+    c.addEventListener("contextmenu", (e) => e.preventDefault());
+    c.addEventListener("pointerdown", (e) => { if (me.mode !== "3d") return; drag = { x: e.clientX, y: e.clientY, orbit: e.button === 2 }; try { c.setPointerCapture(e.pointerId); } catch (_e) { /* pas grave */ } });
+    c.addEventListener("pointermove", (e) => {
+      if (!drag || me.mode !== "3d") return;
+      const dx = e.clientX - drag.x, dy = e.clientY - drag.y, r = c.getBoundingClientRect(), k = c.width / (r.width || c.width);
+      if (drag.orbit) { me.cam.yaw -= dx * 0.4; me.cam.pitch += dy * 0.3; V3.limitCamera(me.cam); } else V3.pan(me.cam, dx * k, dy * k, c.width, c.height);
+      drag.x = e.clientX; drag.y = e.clientY; me.render();
+    });
+    const end = () => { drag = null; };
+    c.addEventListener("pointerup", end); c.addEventListener("pointercancel", end);
+    c.addEventListener("dblclick", () => { if (me.mode === "3d") me.setPreset(me.preset || "cote"); });
+    c.addEventListener("wheel", (e) => { if (me.mode !== "3d") return; e.preventDefault(); me.cam.dist *= e.deltaY > 0 ? 1.08 : 0.92; V3.limitCamera(me.cam); me.render(); }, { passive: false });
   };
   ScenePlayer.prototype._tick = function (now) {
     if (!this.playing) return;
