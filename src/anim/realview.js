@@ -70,14 +70,16 @@
     if (o.url) await seek(v, s.ev.t);
     if (gen !== this.gen) return;
     // découpe du joueur fantôme (une fois par situation), avec message d'attente
-    if (!s.mapOnly && s.ov.correction && s.ov.correction.ghost && o.url && o.segment && root.FutsalMontageRun && o.montage !== false) await this.prepareMontage(s);
-    if (gen !== this.gen) return;
-    if (!s.mont && !s.mapOnly && s.ov.correction && s.ov.correction.ghost && o.segment) await this.prepareGhost(s);
+    // Le montage vidéo se prépare EN ARRIÈRE-PLAN (une à deux minutes la première fois) : la vraie vidéo et les dessins s'affichent tout de suite, le montage démarre dès qu'il est prêt.
+    const montOk = !s.mapOnly && s.ov.correction && s.ov.correction.ghost && o.url && o.segment && root.FutsalMontageRun && o.montage !== false;
+    if (montOk) { s.montDone = false; s.montP = this.prepareMontage(s); }
+    else if (!s.mapOnly && s.ov.correction && s.ov.correction.ghost && o.segment) await this.prepareGhost(s);
     if (gen !== this.gen) return;
     this.restart();
   };
 
   RealView.prototype.close = function () {
+    if (this.mctl) { try { this.mctl.abort(); } catch (_e) { /* déjà fini */ } this.mctl = null; }   // un montage en préparation est interrompu
     this.gen = (this.gen || 0) + 1;
     if (this.raf) cancelAnimationFrame(this.raf);
     this.raf = 0;
@@ -118,19 +120,24 @@
   /* Montage vidéo de la correction (voir anim/montage.js) : le joueur est effacé de la vraie vidéo et replacé là où il aurait dû être. Préparé une fois par situation (environ une minute),
      puis gardé en mémoire. Si le montage est impossible, la raison est dite et la correction garde le joueur fantôme vert. */
   RealView.prototype.prepareMontage = async function (s) {
-    const g = s.ov.correction.ghost, key = s.ev.t + ":" + g.id + ":" + (s.o.url || "");
+    const g = s.ov.correction.ghost, key = s.ev.t + ":" + g.id + ":" + (s.o.url || ""), gen = this.gen;
     if (!this.monts) this.monts = new Map();
-    if (this.monts.has(key)) { const m = this.monts.get(key); if (m.ok) s.mont = m; else s.montReason = m.text; this.montSetup(s); return; }
-    const gen = this.gen, ctl = this.mctl = new AbortController();
+    const repli = (texte) => { s.montReason = texte; s.note = "Montage vidéo indisponible : " + texte + ". La correction est montrée avec le joueur fantôme vert."; };
+    const fin = async (res) => {
+      if (gen !== this.gen || this.s !== s) return;
+      if (res.ok) { s.mont = res; s.note = null; this.montSetup(s); }
+      else { repli(res.text); if (s.o.segment && !s.ghost) await this.prepareGhost(s); }   // à défaut de montage : le joueur fantôme vert, comme avant
+      if (gen === this.gen && this.s === s) s.montDone = true;
+    };
+    if (this.monts.has(key)) { await fin(this.monts.get(key)); return; }
+    const ctl = this.mctl = new AbortController();
     let res;
     try {
-      res = await root.FutsalMontageRun.prepare({ url: s.o.url, frames: s.frames, pr: s.pr, ev: s.ev, ghost: g, segment: s.o.segment, signal: ctl.signal, onProgress: (p, t) => { if (gen === this.gen) this.message("Préparation du montage vidéo : " + t + " — " + Math.round(p * 100) + " % (environ une minute la première fois)"); } });
+      res = await root.FutsalMontageRun.prepare({ url: s.o.url, frames: s.frames, pr: s.pr, ev: s.ev, ghost: g, segment: s.o.segment, signal: ctl.signal, onProgress: (p, t) => { if (gen === this.gen && this.s === s) s.note = "Préparation du montage vidéo : " + t + " — " + Math.round(p * 100) + " %"; } });
     } catch (e) { res = { ok: false, reason: "video", text: /interrompu/.test(e.message) ? "préparation interrompue" : "erreur de lecture (" + e.message + ")" }; }
     if (gen !== this.gen) return;
     if (res.reason !== "video" || res.ok) this.monts.set(key, res);
-    if (res.ok) s.mont = res; else s.montReason = res.text;
-    this.montSetup(s);
-    this.message(res.ok ? null : "Montage vidéo indisponible : " + res.text + ". La correction est montrée avec le joueur fantôme vert.");
+    await fin(res);
   };
   RealView.prototype.montSetup = function (s) {
     if (!s.mont) return;
@@ -234,12 +241,15 @@
       tNow = v.currentTime;
       shown = s.ov.items.length;                     // les joueurs concernés sont suivis pendant tout l'extrait
       if (tNow >= s.win[1] || v.ended) {           // fin de l'extrait : montage (ou, à défaut, retour sur l'erreur et correction animée)
-        v.pause(); s.phase = s.mont ? "montage" : "correct"; s.start = now; this.notify();
+        v.pause(); s.phase = s.mont ? "montage" : s.montP && !s.montDone ? "mwait" : "correct"; s.start = now; this.notify();
         if (s.mont) this.enterMontage(s); else seek(v, s.ev.t);
       }
     } else if (s.phase === "reveal") {
       shown = Math.min(s.ov.items.length, Math.floor(el / STEP) + 1);
-      if (el >= s.ov.items.length * STEP + 1) { s.phase = s.mont ? "montage" : s.ov.correction ? "correct" : "done"; s.start = now; this.notify(); if (s.mont) this.enterMontage(s); }
+      if (el >= s.ov.items.length * STEP + 1) { s.phase = s.mont ? "montage" : s.montP && !s.montDone ? "mwait" : s.ov.correction ? "correct" : "done"; s.start = now; this.notify(); if (s.mont) this.enterMontage(s); }
+    } else if (s.phase === "mwait") {               // le montage se prépare encore : on garde l'image de l'erreur et ses dessins
+      shown = s.ov.items.length; tNow = s.ev.t;
+      if (s.montDone) { s.phase = s.mont ? "montage" : s.ov.correction ? "correct" : "done"; s.start = now; this.notify(); if (s.mont) this.enterMontage(s); }
     } else if (s.phase === "montage") {            // la vraie vidéo rejouée, le joueur corrigé à la place de l'original
       mont = true; shown = 0; tNow = s.mReady ? v.currentTime : s.mont.tl.t0 - MONT_LEAD;
       if (s.mReady && (tNow >= s.mont.tl.t1 || v.ended)) { v.pause(); s.phase = "mdone"; s.start = now; this.notify(); seek(v, s.mont.tl.t1); }
@@ -267,7 +277,7 @@
     if (s.mapOnly) return;
     const proj = s.pr.at(tNow);
     if (!proj.ok) { this.message(REASONS[proj.reason] + " (dessins masqués sur l'image)"); return; }
-    this.message(null);
+    this.message(s.note || null);
     const v = this.el.video, vw = v.videoWidth || 16, vh = v.videoHeight || 9;
     const k = Math.min(c.width / vw, c.height / vh), rw = vw * k, rh = vh * k, rx = (c.width - rw) / 2, ry = (c.height - rh) / 2;
     let mInfo = null;
@@ -557,7 +567,7 @@
       }
     } catch (_e) { s.ghostQuality = "repli"; }
     this.ghosts.set(key, s.ghost ? { canvas: s.ghost, box: s.ghostBox } : null);
-    if (this.s === s) this.message(null);
+    if (this.s === s) this.message(s.note || null);
   };
 
   /* Silhouette teintée en vert avec contour net ; refusée si elle est incomplète, trop petite ou floue. */
