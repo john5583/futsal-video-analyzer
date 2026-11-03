@@ -403,5 +403,10 @@
     return scene.steps.map((s) => Math.max(s.t0, s.t1 - 0.05));
   }
 
-  return { L, W, VIEW, COURT_VIEW, COLORS, liveOps, heatOps, ARROW_STYLES, BADGES, positionAt, actorPos, validate, buildOps, titleOps, drawOps, opsToSVG, keyTimes, wrap };
+  /* Pour la vue 3D (anim/view3d.js) : le terrain, les éléments posés au sol (zones, repères, flèches, textes) et le bandeau d'explication, sans les joueurs ni le ballon. */
+  function pitchOnly() { const ops = []; pitchOps(ops); return ops; }
+  function groundOps(scene, t) { const ops = []; t = Math.max(0, Math.min(scene.duration, t)); zoneOps(scene, t, ops); lineOps(scene, t, ops); arrowOps(scene, t, ops); labelOps(scene, t, ops); return ops; }
+  function captionOnly(scene, t, opts) { const ops = []; captionOps(scene, Math.max(0, Math.min(scene.duration, t)), ops, opts); return ops; }
+
+  return { L, W, VIEW, COURT_VIEW, COLORS, pitchOps: pitchOnly, groundOps, captionOnly, liveOps, heatOps, ARROW_STYLES, BADGES, positionAt, actorPos, validate, buildOps, titleOps, drawOps, opsToSVG, keyTimes, wrap };
 });
