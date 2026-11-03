@@ -99,6 +99,19 @@ function makeFrames() {
   await win.evaluate(() => { const t = document.getElementById("plan-notes"); t.value = "sortie courte depuis le gardien"; t.dispatchEvent(new Event("input", { bubbles: true })); });
   must(await waitFor(win, () => window.FSApp.state.project.plan.notes === "sortie courte depuis le gardien" && /Mes autres consignes/.test(document.getElementById("plan-result").textContent), 8000), "mes consignes sont notées (et dites non vérifiées)");
 
+  // 8. mes entraînements : séances prêtes (15 séances de 45 à 120 min) et nouveaux choix du plan
+  must(await win.evaluate(() => document.querySelectorAll("#plan-train-q fieldset").length >= 10), "au moins dix questions d'entraînement affichées");
+  await win.evaluate(() => document.getElementById("plan-pretes-go").click());
+  must(await waitFor(win, () => document.querySelectorAll("#plan-pretes-res details").length >= 12, 8000), "au moins douze séances prêtes affichées");
+  must(await win.evaluate(() => { const t = [...document.querySelectorAll("#plan-pretes-res summary")].map((x) => (x.textContent.match(/ — ([0-9]+) min/) || [])[1]); return t.includes("45") && t.includes("120"); }), "séances de 45 et de 120 minutes");
+  await win.evaluate(() => { const d = document.getElementById("plan-pretes-dur"); d.value = "60"; d.dispatchEvent(new Event("change", { bubbles: true })); });
+  must(await waitFor(win, () => { const l = document.querySelectorAll("#plan-pretes-res details"); return l.length >= 2 && [...l].every((x) => / — 60 min/.test(x.querySelector("summary").textContent)); }, 8000), "filtre par durée");
+  must(await win.evaluate(() => { const d = document.querySelector("#plan-pretes-res details"); d.open = true; return /Pourquoi/.test(d.textContent) && /Critères de réussite/.test(d.textContent); }), "une séance prête montre ses exercices, leurs raisons et leurs critères");
+
+  // 9. les exercices agrandis (plus de 100) ont tous leur animation dans la page, y compris les phases arrêtées
+  must(await win.evaluate(() => window.FutsalKB.DRILLS.length >= 100 && window.FutsalKB.DRILLS.every((d) => { const s = window.FutsalScenes.forDrill(d.id); return s && window.FutsalAnim.validate(s).length === 0; })), "plus de cent exercices, tous animés et valides dans la page");
+  must(await win.evaluate(() => window.FutsalKB.DRILLS.filter((d) => window.FutsalKB.SEANCE_TAGS[d.id].cp).length >= 25), "au moins 25 exercices de phases arrêtées dans la page");
+
   must(errors.length === 0, "aucune erreur dans l'interface " + JSON.stringify(errors));
   await app.close();
   fs.rmSync(dir, { recursive: true, force: true });
