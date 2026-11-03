@@ -7,6 +7,7 @@
   const planBase = typeof module === "object" && module.exports ? require("./plan.js") : target;
   const plan2 = typeof module === "object" && module.exports ? require("./seance-drills.js").DRILLS_PLAN2 : target.DRILLS_PLAN2;
   const plan3 = typeof module === "object" && module.exports ? require("./seance-drills2.js") : target;
+  const plan4 = typeof module === "object" && module.exports ? require("./seance-drills3.js") : target;
   const D = (id, name, goal, players, duration, description, criteria) => ({ id, name, goal, players, duration, description, criteria });
 
   const NOUVEAUX = [
@@ -41,7 +42,7 @@
       "À la perte du ballon, l'équipe a trois secondes pour se replacer devant son but : le plus proche retarde le porteur sans se faire éliminer, les autres reviennent vers l'axe et ferment les lignes de passe.",
       ["Porteur ralenti dès la première seconde", "Deux défenseurs dans l'axe avant la 3e seconde", "Pas de faute"])
   ];
-  target.DRILLS = base.concat(NOUVEAUX.concat(plan2, plan3.DRILLS_PLAN3).filter((n) => !base.some((b) => b.id === n.id)));
+  target.DRILLS = base.concat(NOUVEAUX.concat(plan2, plan3.DRILLS_PLAN3, plan4.DRILLS_PLAN4).filter((n) => !base.some((b) => b.id === n.id)));
 
   /* Rattachement des exercices aux choix du plan.
      Plan tactique : sys = systèmes, def = hauteurs de défense, cmp = compacités, pr = pressing, nl = pas de perte en zone, gj = gardien-joueur.
@@ -127,9 +128,17 @@
     { q: "pressDecl", k: "pd", lab: { relance: "presser la relance du gardien adverse", retrait: "presser sur une passe en retrait ou un mauvais contrôle", perte: "presser tout de suite après une perte de balle" } },
     { q: "occupation", k: "oc", lab: { large: "attaquer en largeur et en profondeur", triangles: "attaquer par l'axe, en triangles et en une-deux" } },
     { q: "finition", k: "fi", lab: { duel: "finir en duel face au gardien", collectif: "finir après une combinaison collective", vite: "finir vite, sous pression de temps" } },
-    { q: "cpaFocus", k: "cf", lab: { off: "travailler tes coups de pied arrêtés offensifs", def: "travailler la défense des coups de pied arrêtés" } }
+    { q: "cpaFocus", k: "cf", lab: { off: "travailler tes coups de pied arrêtés offensifs", def: "travailler la défense des coups de pied arrêtés" } },
+    { q: "geste", k: "ge", lab: { ecran: "travailler les écrans", feinte: "travailler les feintes de frappe" } },
+    { q: "sortiePress", k: "sp", lab: { gardien: "sortir sous pressing en passant par le gardien", sans: "sortir sous pressing sans le gardien", gj: "sortir sous pressing avec le gardien-joueur" } },
+    { q: "murType", k: "mu", lab: { deux: "défendre les coups francs avec un mur de deux", escalier: "défendre les coups francs avec un mur en escalier" } }
   ];
+  const SEULEMENT_CPA = { cpaFocus: true, murType: true };   // ces choix ne comptent que si l'entraîneur veut travailler les coups de pied arrêtés
   target.TRAINING_EXTRA = EXTRA;
+  /* Variantes : les exercices d'une même famille se remplacent (voir seance-drills3.js). voisins[id] = les autres exercices des familles qui contiennent id. */
+  const voisins = {};
+  plan4.VARIANTES.forEach((f) => f.forEach((id) => { if (!voisins[id]) voisins[id] = new Set(); f.forEach((o) => { if (o !== id) voisins[id].add(o); }); }));
+  target.variantesDe = (id) => (voisins[id] ? [id].concat([...voisins[id]]).map((x) => { const d = target.DRILLS.find((q) => q.id === x); return { id: x, label: plan4.LABELS_VARIANTE[x] || (d && d.name) || x, name: d ? d.name : x }; }) : []);
   target.TRAINING_QUESTIONS = target.TRAINING_QUESTIONS.concat([
     { id: "transition", label: "Quand tu récupères le ballon, que veux-tu faire ?", help: "La réaction juste après une récupération (le programme ne sait pas la vérifier sur la vidéo).",
       options: [{ id: "contre", label: "Contre-attaquer tout de suite", desc: "jouer vite vers l'avant avant que l'adversaire se replace" }, { id: "poser", label: "Poser le jeu", desc: "garder le ballon, ressortir proprement, construire" }, { id: "libre", label: "Pas de consigne" }] },
@@ -139,10 +148,16 @@
       options: [{ id: "large", label: "En largeur et en profondeur", desc: "étirer la défense, changer d'axe" }, { id: "triangles", label: "Par l'axe, en triangles", desc: "jeu court, une-deux, combinaisons proches" }, { id: "libre", label: "Pas de consigne" }] },
     { id: "finition", label: "Comment veux-tu finir tes actions ?", help: "Le geste final que tu veux travailler.",
       options: [{ id: "duel", label: "En duel face au gardien", desc: "1 contre 1, sang-froid" }, { id: "collectif", label: "Après une combinaison", desc: "supériorité, remise, tir" }, { id: "vite", label: "Vite, sous pression de temps", desc: "conclure en quelques secondes" }, { id: "libre", label: "Pas de consigne" }] },
+    { id: "geste", label: "Quels gestes veux-tu travailler ?", help: "Écrans (bloquer légalement un défenseur pour libérer un partenaire) et feintes de frappe.",
+      options: [{ id: "ecran", label: "Les écrans", desc: "libérer un tireur ou un receveur, et défendre contre un écran" }, { id: "feinte", label: "Les feintes de frappe", desc: "armer la frappe puis passer, dribbler ou conclure de l'autre côté" }, { id: "libre", label: "Pas de consigne" }] },
+    { id: "sortiePress", label: "Comment veux-tu sortir sous pressing ?", help: "La sortie de balle quand l'adversaire presse (le programme ne sait pas la vérifier sur la vidéo).",
+      options: [{ id: "gardien", label: "En passant par le gardien", desc: "retour au gardien puis changement d'aile" }, { id: "sans", label: "Sans le gardien", desc: "les joueurs de champ sortent seuls" }, { id: "gj", label: "Avec le gardien-joueur", desc: "à cinq, avec le surnombre (si tu l'utilises)" }, { id: "libre", label: "Pas de consigne" }] },
+    { id: "murType", label: "Comment défends-tu les coups francs ?", help: "Compte seulement si tu as répondu « Oui » aux coups de pied arrêtés.",
+      options: [{ id: "deux", label: "Mur de deux joueurs", desc: "mur classique à 5 mètres" }, { id: "escalier", label: "Mur en escalier", desc: "trois joueurs décalés en diagonale" }, { id: "libre", label: "Pas de consigne" }] },
     { id: "cpaFocus", label: "Quels coups de pied arrêtés veux-tu travailler ?", help: "Compte seulement si tu as répondu « Oui » à la question sur les coups de pied arrêtés.",
       options: [{ id: "off", label: "Les nôtres (attaque)", desc: "corners, rentrées de touche à nous" }, { id: "def", label: "Ceux de l'adversaire (défense)", desc: "organiser la défense" }, { id: "libre", label: "Les deux" }] }
   ]);
-  target.trainingDefaults = () => ({ defType: "libre", attaque: "libre", sortie: "libre", cpa: "non", insister: "equilibre", transition: "libre", pressDecl: "libre", occupation: "libre", finition: "libre", cpaFocus: "libre" });
+  target.trainingDefaults = () => ({ defType: "libre", attaque: "libre", sortie: "libre", cpa: "non", insister: "equilibre", transition: "libre", pressDecl: "libre", occupation: "libre", finition: "libre", cpaFocus: "libre", geste: "libre", sortiePress: "libre", murType: "libre" });
 
   /* Rattachement des exercices existants aux choix supplémentaires (aucun exercice n'est ajouté : seulement des étiquettes). */
   const PLUS = {
@@ -161,6 +176,8 @@
     gj: ["gj_5v4", "gj_perte_retour", "gj_construction_3_2", "def_5v4", "def_gj_pressing_5v4"]
   };
   Object.keys(plan3.TAGS_PLAN3).forEach((id) => { target.SEANCE_TAGS[id] = plan3.TAGS_PLAN3[id]; });
+  Object.keys(plan4.TAGS_PLAN4).forEach((id) => { target.SEANCE_TAGS[id] = plan4.TAGS_PLAN4[id]; });
+  Object.keys(plan4.TAGS_PLUS4).forEach((id) => { if (!target.SEANCE_TAGS[id]) throw new Error("exercice inconnu : " + id); Object.assign(target.SEANCE_TAGS[id], plan4.TAGS_PLUS4[id]); });
   Object.keys(INS_PLUS).forEach((k) => INS_PLUS[k].forEach((id) => { if (!target.SEANCE_TAGS[id]) throw new Error("exercice inconnu : " + id); const t = target.SEANCE_TAGS[id]; t.ins = (t.ins || []).concat(k); }));
   Object.keys(PLUS).forEach((id) => { if (!target.SEANCE_TAGS[id]) throw new Error("exercice inconnu : " + id); Object.assign(target.SEANCE_TAGS[id], PLUS[id]); });
 
@@ -190,7 +207,7 @@
       if (t.dt && t.dt.indexOf(tr.defType) >= 0 && DT_LABEL[tr.defType]) { pts += 4; dims.push("dt"); why.push("tu veux " + DT_LABEL[tr.defType] + " : " + t.th); }
       if (t.at && t.at.indexOf(tr.attaque) >= 0 && AT_LABEL[tr.attaque]) { pts += 4; dims.push("at"); why.push("tu veux " + AT_LABEL[tr.attaque] + " : " + t.th); }
       if (t.so && t.so.indexOf(tr.sortie) >= 0 && SO_LABEL[tr.sortie]) { pts += 4; dims.push("so"); why.push("tu veux " + SO_LABEL[tr.sortie] + " : " + t.th); }
-      EXTRA.forEach((e) => { const v = tr[e.q]; if (t[e.k] && t[e.k].indexOf(v) >= 0 && e.lab[v] && (e.q !== "cpaFocus" || tr.cpa === "oui")) { pts += 4; dims.push(e.k); why.push("tu veux " + e.lab[v] + " : " + t.th); } });
+      EXTRA.forEach((e) => { const v = tr[e.q]; if (t[e.k] && t[e.k].indexOf(v) >= 0 && e.lab[v] && (!SEULEMENT_CPA[e.q] || tr.cpa === "oui")) { pts += 4; dims.push(e.k); why.push("tu veux " + e.lab[v] + " : " + t.th); } });
       if (t.cp && tr.cpa === "oui") { pts += 3; why.push("tu veux travailler les coups de pied arrêtés : " + t.th); }
       if (t.ins && t.ins.indexOf(tr.insister) >= 0) { pts += focus; if (focus > 2) dims.push("ins"); why.push("tu insistes sur ce thème cette semaine : " + t.th); }
       return { pts, why, dims };
@@ -200,7 +217,8 @@
     const rang = (n) => (/^(corner|coup_franc|rentree|kick_in|marquage_cpa|cpa_off|cpa_gj)/.test(n.d.id) ? 0 : 1);   // à égalité, les grandes phases arrêtées (corner, coup franc, rentrée) avant penalty, coup d'envoi, remise du gardien
     const ordre = (a, b) => b.adj - a.adj || rang(a) - rang(b) || a.d.duration - b.d.duration || a.d.id.localeCompare(b.d.id);
     const choisis = [], pris = new Set(); let total = 0;
-    const prendre = (n, phase, pourquoiPar) => { if (!n || pris.has(n.d.id) || total + n.d.duration > duree) return false; pris.add(n.d.id); total += n.d.duration; choisis.push({ phase, drill: n.d, minutes: n.d.duration, pourquoi: n.why.length ? n.why : [pourquoiPar] }); return true; };
+    // un seul exercice par famille de variantes (voisins)
+    const prendre = (n, phase, pourquoiPar) => { if (!n || pris.has(n.d.id) || total + n.d.duration > duree || [...(voisins[n.d.id] || [])].some((o) => pris.has(o))) return false; pris.add(n.d.id); total += n.d.duration; choisis.push({ phase, drill: n.d, minutes: n.d.duration, pourquoi: n.why.length ? n.why : [pourquoiPar] }); return true; };
     const role = (n) => (tags[n.d.id] || {}).role;
     // 1. échauffement
     const ech = notes.filter((n) => role(n) === "ech" && n.pts >= 0).sort(ordre)[0];
@@ -234,14 +252,14 @@
     notes.filter((n) => n.pts >= 1 && role(n) !== "ech" && role(n) !== "fin").sort(ordre).forEach((n) => prendre(n, "Thème du plan", "complément du thème principal"));
     // 5. toujours du temps : exercices généraux (jamais de gardien-joueur ni de coups de pied arrêtés non voulus)
     notes.filter((n) => n.pts >= 0 && role(n) !== "ech" && role(n) !== "fin").sort(ordre).forEach((n) => prendre(n, "Complément", "exercice général de base du futsal : technique, duels et jeu collectif"));
-    choisis.forEach((c, i) => { c.ordre = i + 1; });
+    choisis.forEach((c, i) => { c.ordre = i + 1; c.variantes = target.variantesDe(c.drill.id); });
     const sans = [];
     if (planBase.PLAN_GK_SYSTEMS && planBase.PLAN_GK_SYSTEMS[p.system] && p.flyingGK === "jamais") sans.push("système " + p.system + " : il suppose le gardien-joueur, que tu as refusé : aucun exercice propre à ce système");
     if (p.defense === "libre") sans.push("hauteur de défense : « pas de consigne » (aucun exercice ciblé)");
     if (p.compact === "libre") sans.push("compacité : « pas de consigne » (aucun exercice ciblé)");
     if (tr.defType === "libre") sans.push("type de défense : « pas de consigne » (aucun exercice ciblé)");
     if (tr.attaque === "libre") sans.push("manière d'attaquer : « pas de consigne » (aucun exercice ciblé)");
-    const resume = "Séance de " + duree + " min pour jouer en " + p.system + (DEF_LABEL[p.defense] ? ", " + DEF_LABEL[p.defense] : "") + (CMP_LABEL[p.compact] ? ", " + CMP_LABEL[p.compact] : "") + (DT_LABEL[tr.defType] ? ", " + DT_LABEL[tr.defType] : "") + (AT_LABEL[tr.attaque] ? ", " + AT_LABEL[tr.attaque] : "") + (p.pressing === "oui" ? ", avec pressing immédiat" : "") + (p.flyingGK !== "jamais" ? ", avec gardien-joueur" : "") + (tr.cpa === "oui" ? ", avec coups de pied arrêtés" : "") + EXTRA.map((e) => (e.lab[tr[e.q]] && (e.q !== "cpaFocus" || tr.cpa === "oui") ? ", " + e.lab[tr[e.q]] : "")).join("") + ".";
+    const resume = "Séance de " + duree + " min pour jouer en " + p.system + (DEF_LABEL[p.defense] ? ", " + DEF_LABEL[p.defense] : "") + (CMP_LABEL[p.compact] ? ", " + CMP_LABEL[p.compact] : "") + (DT_LABEL[tr.defType] ? ", " + DT_LABEL[tr.defType] : "") + (AT_LABEL[tr.attaque] ? ", " + AT_LABEL[tr.attaque] : "") + (p.pressing === "oui" ? ", avec pressing immédiat" : "") + (p.flyingGK !== "jamais" ? ", avec gardien-joueur" : "") + (tr.cpa === "oui" ? ", avec coups de pied arrêtés" : "") + EXTRA.map((e) => (e.lab[tr[e.q]] && (!SEULEMENT_CPA[e.q] || tr.cpa === "oui") ? ", " + e.lab[tr[e.q]] : "")).join("") + ".";
     return { duree, total, resume, blocs: choisis, sansExercice: sans };
   };
 })(typeof module === "object" && module.exports ? module.exports : (window.FutsalKB = window.FutsalKB || {}));

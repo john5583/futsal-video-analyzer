@@ -112,6 +112,14 @@ function makeFrames() {
   must(await win.evaluate(() => window.FutsalKB.DRILLS.length >= 100 && window.FutsalKB.DRILLS.every((d) => { const s = window.FutsalScenes.forDrill(d.id); return s && window.FutsalAnim.validate(s).length === 0; })), "plus de cent exercices, tous animés et valides dans la page");
   must(await win.evaluate(() => window.FutsalKB.DRILLS.filter((d) => window.FutsalKB.SEANCE_TAGS[d.id].cp).length >= 25), "au moins 25 exercices de phases arrêtées dans la page");
 
+  // 10. variantes : liste déroulante dans une séance, l'exercice change quand on choisit une variante
+  await win.evaluate(() => { const p = window.FSPlan.plan(); p.answers.system = "3-1"; p.training.cpa = "oui"; p.training.murType = "escalier"; p.training.insister = "cpa"; document.getElementById("plan-train-dur").value = "90"; document.getElementById("plan-train-go").click(); });
+  must(await waitFor(win, () => !!document.querySelector("#plan-train-res select"), 8000), "une liste de variantes est proposée dans la séance");
+  must(await win.evaluate(() => /mur en escalier/i.test(document.getElementById("plan-train-res").textContent)), "le choix « mur en escalier » donne l'exercice du mur en escalier");
+  const avant = await win.evaluate(() => document.querySelector("#plan-train-res select").closest(".card").querySelector("h3").textContent);
+  await win.evaluate(() => { const sel = document.querySelector("#plan-train-res select"); const o = [...sel.options].find((x) => x.value !== sel.value); sel.value = o.value; sel.dispatchEvent(new Event("change", { bubbles: true })); });
+  must(await win.evaluate((a) => document.querySelector("#plan-train-res select").closest(".card").querySelector("h3").textContent !== a && /variante choisie par toi/.test(document.getElementById("plan-train-res").textContent), avant), "choisir une variante change l'exercice affiché");
+
   must(errors.length === 0, "aucune erreur dans l'interface " + JSON.stringify(errors));
   await app.close();
   fs.rmSync(dir, { recursive: true, force: true });
