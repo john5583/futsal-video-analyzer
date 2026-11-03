@@ -168,13 +168,24 @@
   function drawSeance(out, r, el) {
     out.appendChild(el("p", r.resume, "muted"));
     r.blocs.forEach((b) => {
-      const d = b.drill, card = el("div", null, "card");
-      card.appendChild(el("h3", b.ordre + ". " + b.phase + " — " + d.name + " (" + b.minutes + " min)"));
-      card.appendChild(el("p", "Joueurs : " + d.players + " · Objectif : " + d.goal));
-      card.appendChild(el("p", d.description));
-      const why = el("p"); why.appendChild(el("strong", "Pourquoi : ")); why.appendChild(document.createTextNode(b.pourquoi.join(" ; ") + ".")); card.appendChild(why);
-      const cr = el("p"); cr.appendChild(el("strong", "Critères de réussite : ")); cr.appendChild(document.createTextNode(d.criteria.join(" · "))); card.appendChild(cr);
-      out.appendChild(card);
+      const card = el("div", null, "card"); out.appendChild(card);
+      const draw = (id) => {   // un exercice, ou la variante choisie dans la liste (mur à deux ou en escalier, avec ou sans gardien, sur corner ou sur coup franc…)
+        const d = KB.DRILLS.find((x) => x.id === id) || b.drill, v = (b.variantes || []).find((x) => x.id === id);
+        card.innerHTML = "";
+        card.appendChild(el("h3", b.ordre + ". " + b.phase + " — " + d.name + " (" + (id === b.drill.id ? b.minutes : d.duration) + " min)"));
+        if (b.variantes && b.variantes.length > 1) {
+          const lab = el("label", "Variante : "), sel = el("select");
+          b.variantes.forEach((x) => { const o = el("option", x.label); o.value = x.id; if (x.id === id) o.selected = true; sel.appendChild(o); });
+          sel.addEventListener("change", () => draw(sel.value)); lab.appendChild(sel); card.appendChild(lab);
+        }
+        card.appendChild(el("p", "Joueurs : " + d.players + " · Objectif : " + d.goal));
+        card.appendChild(el("p", d.description));
+        const why = el("p"); why.appendChild(el("strong", "Pourquoi : "));
+        why.appendChild(document.createTextNode(id === b.drill.id ? b.pourquoi.join(" ; ") + "." : "variante choisie par toi (" + (v ? v.label : d.name) + "), à la place de « " + b.drill.name + " » proposé pour ton plan."));
+        card.appendChild(why);
+        const cr = el("p"); cr.appendChild(el("strong", "Critères de réussite : ")); cr.appendChild(document.createTextNode(d.criteria.join(" · "))); card.appendChild(cr);
+      };
+      draw(b.drill.id);
     });
     if (r.sansExercice.length) out.appendChild(el("p", "Sans exercice ciblé : " + r.sansExercice.join(" ; ") + ".", "muted"));
     out.appendChild(el("p", "Les animations de chaque exercice sont dans l'onglet « Corrections animées », rubrique Exercices. Durées et critères : repères d'entraîneur à adapter ; l'efficacité des exercices n'est pas mesurée par le programme.", "muted"));

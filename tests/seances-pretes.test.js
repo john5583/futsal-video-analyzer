@@ -106,3 +106,36 @@ test("séance « coups de pied arrêtés » : plusieurs familles différentes (c
   const long = KB.proposerSeance({ system: "3-1" }, { duree: 90, training: { cpa: "oui", insister: "cpa" }, focus: 6 });
   assert.ok(long.blocs.filter((b) => TAGS[b.drill.id].cp).length >= 4);
 });
+
+test("variantes : chaque famille est cohérente, chaque variante a son animation, une seule variante par famille dans une séance", () => {
+  const SC = require("../src/anim/registry"), E = require("../src/anim/engine"), V = require("../src/knowledge/seance-drills3.js");
+  assert.ok(V.VARIANTES.length >= 8);
+  V.VARIANTES.forEach((f) => {
+    assert.ok(f.length >= 2 && new Set(f).size === f.length);
+    f.forEach((id) => { assert.ok(KB.DRILLS.some((d) => d.id === id), "exercice inconnu dans une famille : " + id); assert.ok(V.LABELS_VARIANTE[id], "nom de variante manquant : " + id); assert.deepStrictEqual(E.validate(SC.forDrill(id)), [], id); });
+  });
+  for (const system of SYSTEMS) for (const duree of [75, 120]) {
+    const r = KB.proposerSeance({ system, flyingGK: "derriere" }, { duree, training: { cpa: "oui", insister: "cpa", geste: "ecran", murType: "escalier", sortiePress: "sans" } });
+    const pris = r.blocs.map((b) => b.drill.id);
+    V.VARIANTES.forEach((f) => assert.ok(pris.filter((id) => f.indexOf(id) >= 0).length <= 1, system + " : deux variantes de la même famille " + f.filter((id) => pris.indexOf(id) >= 0)));
+    r.blocs.forEach((b) => { if (b.variantes.length) { assert.ok(b.variantes.some((v) => v.id === b.drill.id) && b.variantes.length >= 2); } });
+  }
+  assert.deepStrictEqual(KB.variantesDe("inconnu"), []);
+});
+
+test("nouveaux choix : écrans, feintes, sortie sous pressing (avec ou sans gardien), mur en escalier orientent la séance", () => {
+  const dedans = (training, id, plan) => KB.proposerSeance(plan || { system: "3-1" }, { duree: 90, training }).blocs.some((b) => b.drill.id === id);
+  assert.ok(dedans({ cpa: "oui", murType: "escalier", insister: "cpa" }, "coup_franc_mur_escalier"), "mur en escalier");
+  assert.ok(dedans({ cpa: "oui", murType: "deux", insister: "cpa" }, "coup_franc_defense_mur"), "mur de deux");
+  assert.ok(!dedans({ cpa: "non", murType: "escalier" }, "coup_franc_mur_escalier"), "mur en escalier proposé sans vouloir les coups de pied arrêtés");
+  assert.ok(KB.proposerSeance({ system: "3-1" }, { duree: 90, training: { sortiePress: "sans" } }).blocs.some((b) => b.drill.id === "sortie_pression_sans_gardien"), "sortie sans gardien");
+  assert.ok(KB.proposerSeance({ system: "3-1" }, { duree: 90, training: { sortiePress: "gardien" } }).blocs.some((b) => (TAGS[b.drill.id].sp || []).indexOf("gardien") >= 0), "sortie par le gardien");
+  assert.ok(!KB.proposerSeance({ system: "3-1", flyingGK: "jamais" }, { duree: 120, training: { sortiePress: "gj" } }).blocs.some((b) => b.drill.id === "sortie_pression_gj"), "gardien-joueur refusé");
+  assert.ok(KB.proposerSeance({ system: "3-2", flyingGK: "derriere" }, { duree: 90, training: { sortiePress: "gj" } }).blocs.some((b) => b.drill.id === "sortie_pression_gj"), "sortie avec gardien-joueur");
+  assert.ok(KB.proposerSeance({ system: "4-0" }, { duree: 90, training: { geste: "ecran" } }).blocs.some((b) => (TAGS[b.drill.id].ge || []).indexOf("ecran") >= 0), "écrans");
+  assert.ok(KB.proposerSeance({ system: "4-0" }, { duree: 90, training: { geste: "feinte" } }).blocs.some((b) => (TAGS[b.drill.id].ge || []).indexOf("feinte") >= 0), "feintes");
+  ["geste", "sortiePress", "murType"].forEach((qid) => KB.TRAINING_QUESTIONS.find((q) => q.id === qid).options.filter((o) => o.id !== "libre").forEach((o) => {
+    const e = KB.TRAINING_EXTRA.find((x) => x.q === qid);
+    assert.ok(KB.DRILLS.some((d) => (TAGS[d.id][e.k] || []).indexOf(o.id) >= 0), "aucun exercice pour " + qid + " = " + o.id);
+  }));
+});
