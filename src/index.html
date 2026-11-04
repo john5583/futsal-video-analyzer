@@ -302,6 +302,13 @@
       <div class="train-col">
         <h2>Entraînement</h2>
         <p class="muted">Compose ta séance d'après ton plan de jeu (onglet « Mon plan tactique ») et tes choix ci-dessous, ouvre les séances prêtes, ou parcours tous les exercices. Clique sur « Voir l'animation » pour voir un exercice jouer, à droite.</p>
+        <fieldset class="plan-q train-effectif" id="train-effectif">
+          <legend>Combien êtes-vous à l'entraînement aujourd'hui ?</legend>
+          <p class="muted">Question à vérifier avant chaque séance : les exercices et les séances proposés ci-dessous ne retiennent que ce qui est faisable avec vos joueurs.</p>
+          <label>Joueurs présents, gardiens compris <input id="train-eff-total" type="number" min="2" max="24" step="1" value="10" aria-label="Nombre de joueurs présents, gardiens compris"></label>
+          <label>dont gardiens <select id="train-eff-gk" aria-label="Dont gardiens"><option value="0">0</option><option value="1" selected>1</option><option value="2">2</option><option value="3">3</option></select></label>
+          <span id="train-eff-note" class="muted"></span>
+        </fieldset>
         <nav class="train-sub" id="train-sub"><button data-pane="seance" class="active">Ma séance</button><button data-pane="pretes">Séances prêtes</button><button data-pane="exos">Tous les exercices</button></nav>
         <div class="plan-train" id="train-pane-seance">
           <h2>Mes entraînements</h2>
@@ -520,6 +527,7 @@
 <script src="knowledge/drills.js"></script>
 <script src="knowledge/errors.js"></script>
 <script src="knowledge/plan.js"></script>
+<script src="knowledge/seance-effectif.js"></script>
 <script src="knowledge/seance-drills.js"></script>
 <script src="knowledge/seance-drills2.js"></script>
 <script src="knowledge/seance-drills3.js"></script>

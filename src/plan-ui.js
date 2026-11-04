@@ -139,7 +139,23 @@
   /* ---------- affichage ---------- */
   function later() { clearTimeout(timer); timer = setTimeout(renderResult, 250); }
   /* ---------- mes entraînements : séance proposée d'après le plan ---------- */
+  /* Effectif du jour (demandé à chaque séance) : joueurs présents, gardiens compris, et dont gardiens ; gardé dans les choix d'entraînement du projet. */
+  function effectif() { const t = plan().training; if (!t.effectif || !(t.effectif.total >= 1)) t.effectif = { total: 10, gk: 1 }; return t.effectif; }
+  function renderEffectif() {
+    const e = effectif(), tot = $("train-eff-total"), gk = $("train-eff-gk"), note = $("train-eff-note"); if (!tot || !gk) return;
+    tot.value = String(e.total); gk.value = String(Math.min(3, e.gk));
+    const possibles = KB.effectifExercice ? KB.DRILLS.filter((d) => KB.effectifPour(d.id, e).ok).length : KB.DRILLS.length;
+    note.textContent = possibles + " exercice(s) possibles sur " + KB.DRILLS.length + " avec " + e.total + " joueur(s)" + (e.gk > e.total ? " (plus de gardiens que de joueurs : corrige)" : "") + ".";
+  }
+  function onEffectif() {
+    const e = effectif(), tot = Math.max(2, Math.min(24, Math.round(Number($("train-eff-total").value) || 2))), gk = Math.max(0, Math.min(tot, Math.round(Number($("train-eff-gk").value) || 0)));
+    e.total = tot; e.gk = gk; App.changed(); renderEffectif();
+    // les séances déjà affichées sont recalculées tout de suite avec le nouvel effectif
+    if ($("plan-train-res") && $("plan-train-res").children.length) renderSeance();
+    if ($("plan-pretes-res") && $("plan-pretes-res").children.length) renderPretes();
+  }
   function renderTrainQ() {
+    renderEffectif();
     const box = $("plan-train-q"); if (!box || !KB.TRAINING_QUESTIONS) return;
     const tr = plan().training; box.innerHTML = "";
     KB.TRAINING_QUESTIONS.forEach((q) => {
@@ -158,6 +174,7 @@
     });
   }
   function renderSeance() {
+    effectif();
     const out = $("plan-train-res"); if (!out || !KB.proposerSeance) return;
     const el = (tag, txt, cls) => { const e = document.createElement(tag); if (txt != null) e.textContent = txt; if (cls) e.className = cls; return e; };
     const r = KB.proposerSeance(plan().answers, { duree: Number($("plan-train-dur").value) || 75, training: plan().training });
@@ -175,11 +192,13 @@
         card.appendChild(el("h3", b.ordre + ". " + b.phase + " — " + d.name + " (" + (id === b.drill.id ? b.minutes : d.duration) + " min)"));
         if (b.variantes && b.variantes.length > 1) {
           const lab = el("label", "Variante : "), sel = el("select");
-          b.variantes.forEach((x) => { const o = el("option", x.label); o.value = x.id; if (x.id === id) o.selected = true; sel.appendChild(o); });
+          b.variantes.forEach((x) => { const o = el("option", x.ok === false ? x.label + " (trop peu de joueurs)" : x.label); o.value = x.id; if (x.ok === false) o.disabled = true; if (x.id === id) o.selected = true; sel.appendChild(o); });
           sel.addEventListener("change", () => draw(sel.value)); lab.appendChild(sel); card.appendChild(lab);
         }
         const ba = el("button", "▶ Voir l'animation"); ba.className = "btn-anim"; ba.title = "Ouvre l'animation de cet exercice (vue 3D ou de dessus)"; ba.addEventListener("click", () => { if (window.FSTraining) window.FSTraining.open(id); }); card.appendChild(ba);
         card.appendChild(el("p", "Joueurs : " + d.players + " · Objectif : " + d.goal));
+        const ef = KB.effectifPour ? KB.effectifPour(id, plan().training.effectif) : null;
+        if (ef && ef.note) card.appendChild(el("p", "Avec votre effectif : " + ef.note + ".", "muted"));
         card.appendChild(el("p", d.description));
         const why = el("p"); why.appendChild(el("strong", "Pourquoi : "));
         why.appendChild(document.createTextNode(id === b.drill.id ? b.pourquoi.join(" ; ") + "." : "variante choisie par toi (" + (v ? v.label : d.name) + "), à la place de « " + b.drill.name + " » proposé pour ton plan."));
@@ -193,6 +212,7 @@
   }
   /* séances prêtes : quinze séances thématiques de 45 à 120 min, composées avec le plan et les choix de l'entraîneur */
   function renderPretes() {
+    effectif();
     const out = $("plan-pretes-res"); if (!out || !KB.proposerSeancesPretes) return;
     const el = (tag, txt, cls) => { const e = document.createElement(tag); if (txt != null) e.textContent = txt; if (cls) e.className = cls; return e; };
     const liste = KB.proposerSeancesPretes(plan().answers, plan().training, { duree: Number($("plan-pretes-dur").value) || 0 });
@@ -211,6 +231,7 @@
 
   function bind() {
     $("plan-notes").addEventListener("input", () => { plan().notes = $("plan-notes").value; App.changed(); later(); });
+    $("train-eff-total").addEventListener("change", onEffectif); $("train-eff-gk").addEventListener("change", onEffectif);
     $("plan-train-go").addEventListener("click", renderSeance);
     $("plan-pretes-go").addEventListener("click", renderPretes);
     $("plan-pretes-dur").addEventListener("change", renderPretes);
