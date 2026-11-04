@@ -86,6 +86,17 @@ async function waitFor(win, fn, ms, arg) { const end = Date.now() + ms; while (D
   await win.evaluate(() => document.querySelector("#train-list button.item").click());
   must(await waitFor(win, () => /corner/i.test(document.getElementById("train-info").textContent) && window.FSTraining.player().playing, 5000), "cliquer un exercice lance son animation");
 
+  // 5 bis. l'effectif du jour : question posée dans l'onglet, la séance ne propose que ce qui est faisable
+  must(await win.evaluate(() => !!document.getElementById("train-eff-total") && /Combien êtes-vous/.test(document.getElementById("train-effectif").textContent)), "la question « Combien êtes-vous à l'entraînement ? » est posée dans l'onglet");
+  await win.evaluate(() => window.FSTraining.pane("seance"));
+  await win.evaluate(() => { const t = document.getElementById("train-eff-total"); t.value = "5"; t.dispatchEvent(new Event("change", { bubbles: true })); const g = document.getElementById("train-eff-gk"); g.value = "1"; g.dispatchEvent(new Event("change", { bubbles: true })); document.getElementById("plan-train-go").click(); });
+  must(await waitFor(win, () => document.querySelectorAll("#plan-train-res .card").length >= 3 && /Pour 5 joueur/.test(document.getElementById("plan-train-res").textContent), 8000), "séance proposée pour 5 joueurs (le résumé le rappelle)");
+  must(await win.evaluate(() => { const ids = window.FutsalKB.DRILLS.filter((d) => [...document.querySelectorAll("#plan-train-res .card h3")].some((h) => h.textContent.indexOf(d.name) >= 0)).map((d) => d.id); return ids.length >= 3 && ids.every((id) => window.FutsalKB.effectifPour(id, { total: 5, gk: 1 }).ok); }), "tous les exercices affichés sont faisables à 5 joueurs");
+  must(await win.evaluate(() => /exercice\(s\) possibles sur/.test(document.getElementById("train-eff-note").textContent) && /possibles sur/.test(document.getElementById("plan-train-res").textContent)), "le nombre d'exercices possibles est dit");
+  await win.evaluate(() => { const t = document.getElementById("train-eff-total"); t.value = "14"; t.dispatchEvent(new Event("change", { bubbles: true })); });
+  must(await waitFor(win, () => /Pour 14 joueur/.test(document.getElementById("plan-train-res").textContent) && /joueur\(s\) en plus/.test(document.getElementById("plan-train-res").textContent), 8000), "changer l'effectif recalcule la séance affichée (14 joueurs : rotation dite)");
+  must(await win.evaluate(() => window.FSApp.state.project.plan.training.effectif.total === 14), "l'effectif est gardé dans le projet");
+
   // 6. tous les exercices se dessinent en 3D (trois instants, trois caméras), sans erreur
   const r = await win.evaluate(() => {
     const c = document.createElement("canvas"); c.width = 1280; c.height = 800; const ctx = c.getContext("2d"); let n = 0, bad = [];

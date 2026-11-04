@@ -367,3 +367,8 @@ fieldset.plan-q label.plan-opt{display:flex;flex-direction:row;gap:8px;align-ite
 button.btn-anim{margin:4px 0}
 @media (max-width:1100px){.train-layout{grid-template-columns:1fr}.train-stage{position:static}}
 .train-view button.active,#tr-cams button.active{background:var(--accent,#3b82f6);color:#fff}
+
+.train-effectif{border-color:var(--accent,#3b82f6)!important}
+.train-effectif label{display:inline-flex;gap:6px;align-items:center;margin-right:14px}
+.train-effectif input[type=number]{width:70px}
+.train-effectif label{flex-direction:row}
